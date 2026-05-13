@@ -1,5 +1,5 @@
 """Trace exporters."""
 
-from strathon.exporter.otlp import OTLPExporter
+from strathon.exporter.otlp import OTLPSpanExporter
 
-__all__ = ["OTLPExporter"]
+__all__ = ["OTLPSpanExporter"]
