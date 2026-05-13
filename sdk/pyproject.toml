@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "strathon"
+version = "0.1.0"
+description = "Open-source observability and runtime control for AI agents. Framework-agnostic SDK."
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Strathon", email = "strathon.team@gmail.com"}]
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+]
+
+dependencies = [
+    "opentelemetry-api>=1.27.0",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.27.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+openai-agents = ["openai>=1.50.0"]
+claude-agent = ["anthropic>=0.40.0"]
+langchain = ["langchain>=0.3.0"]
+crewai = ["crewai>=0.80.0"]
+autogen = ["autogen-agentchat>=0.4.0"]
+all = [
+    "openai>=1.50.0",
+    "anthropic>=0.40.0",
+    "langchain>=0.3.0",
+    "crewai>=0.80.0",
+    "autogen-agentchat>=0.4.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+    "mypy>=1.10",
+]
+
+[project.urls]
+Homepage = "https://getstrathon.com"
+Repository = "https://github.com/strathon/strathon"
+Documentation = "https://docs.getstrathon.com"
+Issues = "https://github.com/strathon/strathon/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

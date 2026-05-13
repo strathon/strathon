@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: strathon-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: strathon
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-strathon_dev}
+      POSTGRES_DB: strathon
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U strathon -d strathon"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  receiver:
+    build:
+      context: ./receiver
+      dockerfile: Dockerfile
+    container_name: strathon-receiver
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://strathon:${POSTGRES_PASSWORD:-strathon_dev}@postgres:5432/strathon
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "4318:4318"
+
+  # The dashboard service gets added in a future commit (Next.js scaffold).
+  # Once the dashboard exists, it merges with the receiver into a single
+  # supervisord-managed container per the committed architecture.
+
+volumes:
+  postgres_data:
+    name: strathon_postgres_data
