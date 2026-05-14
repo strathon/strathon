@@ -10,11 +10,13 @@ Endpoints:
 - POST /v1/intervention/halt      - Dashboard manually halts a trace or agent
 """
 
+import asyncio
 import json
 import logging
 import os
 from contextlib import asynccontextmanager
 from typing import Any
+from uuid import UUID
 
 import asyncpg
 from fastapi import FastAPI, Header, HTTPException, Request, status
@@ -24,6 +26,9 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
     ExportTraceServiceResponse,
 )
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue
+
+import policies as policy_mod
+from policies import PolicyExpressionError
 
 logger = logging.getLogger("strathon.receiver")
 logging.basicConfig(
@@ -157,6 +162,21 @@ async def ingest_traces(
     span_count = 0
     trace_ids_seen: set[bytes] = set()
 
+    # Pull active policies once for this batch; cheap and gives consistent
+    # evaluation across all spans in a single ingest call.
+    try:
+        active_policies = await policy_mod.list_policies(
+            app.state.pool, project_id, only_enabled=True
+        )
+    except Exception:
+        logger.exception("failed to load policies for ingest; proceeding without policy eval")
+        active_policies = []
+
+    # Collected (policy, trace_id, span_id, outcome) tuples for audit logging
+    # after the main insert transaction commits. Webhooks fire after as well.
+    matches_to_record: list[dict[str, Any]] = []
+    webhooks_to_fire: list[tuple[str, dict[str, Any]]] = []
+
     async with app.state.pool.acquire() as conn:
         async with conn.transaction():
             for resource_spans in req.resource_spans:
@@ -170,6 +190,49 @@ async def ingest_traces(
 
                         span_attrs = attrs_to_dict(span.attributes)
                         merged_attrs = {**resource_attrs, **span_attrs}
+
+                        # Evaluate policies against this span. For log/alert we
+                        # annotate the span attributes and record the match;
+                        # block/steer policies are SDK-side and the SDK has
+                        # already enforced them, but we still surface a record
+                        # of the match here for visibility.
+                        matched_policies = policy_mod.evaluate_for_span(
+                            active_policies, span.name, merged_attrs
+                        )
+                        if matched_policies:
+                            matched_ids = [p["id"] for p in matched_policies]
+                            matched_actions = sorted({p["action"] for p in matched_policies})
+                            merged_attrs["strathon.policy.matched_ids"] = ",".join(matched_ids)
+                            merged_attrs["strathon.policy.matched_actions"] = ",".join(matched_actions)
+                            for p in matched_policies:
+                                outcome = {
+                                    "log": "logged",
+                                    "alert": "alert_queued",
+                                    "block": "block_recorded",
+                                    "steer": "steer_recorded",
+                                }.get(p["action"], "recorded")
+                                matches_to_record.append({
+                                    "policy_id": p["id"],
+                                    "trace_id": trace_id,
+                                    "span_id": span_id,
+                                    "action": p["action"],
+                                    "outcome": outcome,
+                                    "metadata": {
+                                        "span_name": span.name,
+                                        "policy_name": p["name"],
+                                    },
+                                })
+                                if p["action"] == "alert":
+                                    webhook_url = (p.get("action_config") or {}).get("webhook_url")
+                                    if webhook_url:
+                                        webhooks_to_fire.append((webhook_url, {
+                                            "policy_id": p["id"],
+                                            "policy_name": p["name"],
+                                            "span_name": span.name,
+                                            "trace_id": trace_id.hex(),
+                                            "span_id": span_id.hex(),
+                                            "attrs": merged_attrs,
+                                        }))
 
                         # Denormalize common gen_ai.* and strathon.agent.* fields
                         operation_name = span_attrs.get("gen_ai.operation.name")
@@ -255,6 +318,23 @@ async def ingest_traces(
         len(trace_ids_seen),
     )
 
+    # Record policy matches in audit log (best-effort; never blocks ingest)
+    for m in matches_to_record:
+        await policy_mod.record_match(
+            app.state.pool,
+            UUID(m["policy_id"]) if not isinstance(m["policy_id"], UUID) else m["policy_id"],
+            project_id,
+            m["trace_id"],
+            m["span_id"],
+            m["action"],
+            m["outcome"],
+            metadata=m.get("metadata"),
+        )
+
+    # Fire alert webhooks in the background (don't block the response)
+    for webhook_url, payload in webhooks_to_fire:
+        asyncio.create_task(policy_mod.fire_webhook(webhook_url, payload))
+
     # OTLP spec requires returning ExportTraceServiceResponse on success
     resp = ExportTraceServiceResponse()
     return Response(
@@ -264,29 +344,127 @@ async def ingest_traces(
     )
 
 
+# ============================================================
+# Policy management API
+# ============================================================
+# These endpoints power runtime intervention. SDKs poll GET /v1/policies
+# for client-side block/steer enforcement; humans use POST/PATCH/DELETE
+# to manage rules.
+
+def _coerce_project_id(value: str | None) -> UUID:
+    """For v0 we resolve everything to the default project."""
+    if value:
+        try:
+            return UUID(value)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"invalid project_id: {value}",
+            )
+    return app.state.default_project_id
+
+
+@app.get("/v1/policies")
+async def list_policies_endpoint(project_id: str | None = None) -> dict[str, Any]:
+    pid = _coerce_project_id(project_id)
+    policies = await policy_mod.list_policies(app.state.pool, pid)
+    return {"policies": policies}
+
+
+@app.post("/v1/policies", status_code=status.HTTP_201_CREATED)
+async def create_policy_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
+    required = {"name", "match_expression", "action"}
+    missing = required - set(payload.keys())
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"missing required fields: {sorted(missing)}",
+        )
+    pid = _coerce_project_id(payload.get("project_id"))
+    try:
+        policy = await policy_mod.create_policy(
+            app.state.pool,
+            pid,
+            name=payload["name"],
+            description=payload.get("description"),
+            match_expression=payload["match_expression"],
+            action=payload["action"],
+            action_config=payload.get("action_config"),
+            applies_to=payload.get("applies_to"),
+            enabled=payload.get("enabled", True),
+            priority=payload.get("priority", 0),
+        )
+    except PolicyExpressionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"invalid match expression: {exc}",
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    return policy
+
+
+@app.get("/v1/policies/{policy_id}")
+async def get_policy_endpoint(policy_id: str) -> dict[str, Any]:
+    try:
+        pid_uuid = UUID(policy_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid policy_id")
+    policy = await policy_mod.get_policy(
+        app.state.pool, app.state.default_project_id, pid_uuid
+    )
+    if not policy:
+        raise HTTPException(status_code=404, detail="policy not found")
+    return policy
+
+
+@app.patch("/v1/policies/{policy_id}")
+async def update_policy_endpoint(
+    policy_id: str, payload: dict[str, Any]
+) -> dict[str, Any]:
+    try:
+        pid_uuid = UUID(policy_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid policy_id")
+    try:
+        policy = await policy_mod.update_policy(
+            app.state.pool, app.state.default_project_id, pid_uuid, **payload
+        )
+    except PolicyExpressionError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid match expression: {exc}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not policy:
+        raise HTTPException(status_code=404, detail="policy not found")
+    return policy
+
+
+@app.delete("/v1/policies/{policy_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_policy_endpoint(policy_id: str) -> Response:
+    try:
+        pid_uuid = UUID(policy_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid policy_id")
+    deleted = await policy_mod.delete_policy(
+        app.state.pool, app.state.default_project_id, pid_uuid
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="policy not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.post("/v1/intervention/sync")
 async def intervention_sync(payload: dict[str, Any]) -> dict[str, Any]:
-    """
-    SDK polls this to sync intervention state.
-
-    Current: returns empty state (no halts).
-    Planned: query halt_state table for active halts on given agent_id/trace_id.
-    """
-    return {
-        "halts": [],
-        "budgets": [],
-        "synced_at_unix_nano": 0,
-    }
+    """Deprecated stub kept for SDK backward compatibility."""
+    return {"halts": [], "budgets": [], "synced_at_unix_nano": 0}
 
 
 @app.post("/v1/intervention/halt", status_code=status.HTTP_201_CREATED)
 async def intervention_halt(payload: dict[str, Any]) -> dict[str, Any]:
-    """
-    Dashboard or external monitor manually halts a trace or agent.
-
-    Current: logs and returns success.
-    Planned: write to halt_state table with WAL semantics, fan out to SDK pollers.
-    """
+    """Deprecated stub kept for SDK backward compatibility."""
     logger.info("Halt request: %s", payload)
     return {"halted": True}
 

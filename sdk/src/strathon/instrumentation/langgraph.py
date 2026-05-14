@@ -197,7 +197,9 @@ class StrathonLangGraphHandler:
     ignore_agent = False
     ignore_retriever = False
     ignore_chat_model = False
-    raise_error = False
+    # raise_error=True tells LangChain to propagate exceptions thrown from
+    # our callbacks. Critical for StrathonPolicyBlocked to actually block.
+    raise_error = True
     run_inline = False
 
     def __init__(self, client) -> None:
@@ -445,6 +447,61 @@ class StrathonLangGraphHandler:
             attrs["strathon.tool.input"] = _truncate(_safe_str(input_str), 1500)
         if inputs:
             attrs["strathon.tool.args"] = _truncate(_json_or_str(inputs), 1500)
+
+        # Runtime intervention: ask the client's policy enforcer if this tool
+        # call is allowed. block raises (LangChain propagates it as a tool
+        # error); steer raises a special exception the user-level wrapper can
+        # catch (covered in docs). For now we only support hard block here.
+        try:
+            check_attrs = dict(attrs)
+            # Stitch in raw inputs string for matching
+            if input_str:
+                check_attrs["strathon.tool.input_str"] = _safe_str(input_str)
+            decision = self.client.check_policy({
+                "name": f"langgraph.tool.{tool_name}",
+                "attrs": check_attrs,
+            })
+            if decision.is_block:
+                # Annotate the (about-to-be-created) span with policy match info
+                attrs["strathon.policy.blocked"] = True
+                attrs["strathon.policy.id"] = decision.policy_id or ""
+                attrs["strathon.policy.name"] = decision.policy_name or ""
+                attrs["strathon.policy.message"] = decision.message or ""
+                # Open and immediately close a span recording the block
+                self._start_span(
+                    f"langgraph.tool.{tool_name}", run_id, parent_run_id, attrs
+                )
+                self._end_span(run_id, error=decision.message or "policy blocked")
+                # Import here to avoid circular dependency
+                from strathon.policy import StrathonPolicyBlocked
+                raise StrathonPolicyBlocked(
+                    decision.message or "blocked by Strathon policy",
+                    policy_id=decision.policy_id,
+                    policy_name=decision.policy_name,
+                )
+            if decision.is_steer:
+                attrs["strathon.policy.steered"] = True
+                attrs["strathon.policy.id"] = decision.policy_id or ""
+                attrs["strathon.policy.name"] = decision.policy_name or ""
+                attrs["strathon.policy.replacement"] = decision.replacement or ""
+                # Open and immediately close a span recording the steer.
+                # We cannot return a replacement value from on_tool_start, so
+                # for v0 steer mode in LangGraph users should call
+                # client.check_policy() in their tool wrapper. We log the
+                # decision so it's still observable.
+                self._start_span(
+                    f"langgraph.tool.{tool_name}", run_id, parent_run_id, attrs
+                )
+                self._end_span(run_id)
+                return
+        except Exception as exc:
+            # Reraise StrathonPolicyBlocked; swallow other errors so a broken
+            # policy never breaks the underlying app.
+            from strathon.policy import StrathonPolicyBlocked
+            if isinstance(exc, StrathonPolicyBlocked):
+                raise
+            logger.exception("policy check raised; allowing tool to proceed")
+
         self._start_span(f"langgraph.tool.{tool_name}", run_id, parent_run_id, attrs)
 
     def on_tool_end(

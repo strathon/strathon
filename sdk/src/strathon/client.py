@@ -33,6 +33,10 @@ class Client:
         config: Optional Config instance for advanced settings.
         set_global_tracer: If True (default), registers this client's tracer
             provider as the global one when no real provider exists yet.
+        enable_policies: If True (default), pulls runtime intervention policies
+            from the receiver and enforces block/steer rules via check_policy().
+        policy_refresh_interval_sec: How often to refresh policies from the
+            server (default 30s).
     """
 
     def __init__(
@@ -44,6 +48,8 @@ class Client:
         service_name: str = "strathon-agent",
         config: Optional[Config] = None,
         set_global_tracer: bool = True,
+        enable_policies: bool = True,
+        policy_refresh_interval_sec: float = 30.0,
     ):
         if not api_key:
             raise AuthenticationError("api_key is required")
@@ -93,6 +99,28 @@ class Client:
         # Named tracer for instrumentations and manual span emission
         self._tracer = self._tracer_provider.get_tracer("strathon", "0.1.0")
 
+        # Runtime intervention: optional policy enforcer
+        self._policy_enforcer = None
+        if enable_policies:
+            # Import lazily so tests that don't need policies don't pay the cost
+            from strathon.policy.enforcer import PolicyEnforcer
+
+            self._policy_enforcer = PolicyEnforcer(
+                endpoint=self.endpoint,
+                api_key=api_key,
+                project_id=project_id,
+                refresh_interval_sec=policy_refresh_interval_sec,
+            )
+            # start() does a synchronous fetch + spawns background refresh.
+            # We swallow failures so an unreachable receiver doesn't break
+            # the client; check_policy will return ALLOW until policies arrive.
+            try:
+                self._policy_enforcer.start()
+            except Exception:
+                logger.debug(
+                    "Strathon: policy enforcer failed to start; intervention disabled until next refresh"
+                )
+
         logger.debug(
             "Strathon Client initialized: endpoint=%s environment=%s service=%s",
             self.endpoint,
@@ -105,6 +133,32 @@ class Client:
         """OpenTelemetry tracer for emitting spans from instrumentations."""
         return self._tracer
 
+    @property
+    def policy_enforcer(self):
+        """The runtime intervention policy enforcer, or None if disabled."""
+        return self._policy_enforcer
+
+    def check_policy(self, span_context: dict):
+        """Evaluate active policies against a candidate action.
+
+        Args:
+            span_context: A dict with shape ``{"name": str, "attrs": dict}``
+                describing the action that's about to happen. Framework
+                integrations call this from inside their "before tool call"
+                / "before LLM call" hooks.
+
+        Returns:
+            A PolicyDecision. When ``decision.is_allow`` the caller should
+            proceed normally. When ``decision.is_block``, the caller should
+            raise ``StrathonPolicyBlocked(decision.message)``. When
+            ``decision.is_steer``, the caller should return
+            ``decision.replacement`` instead of executing the real action.
+        """
+        if self._policy_enforcer is None:
+            from strathon.policy.types import ALLOW
+            return ALLOW
+        return self._policy_enforcer.check_policy(span_context)
+
     def flush(self, timeout_millis: int = 30000) -> bool:
         """
         Force-flush any pending spans synchronously.
@@ -115,6 +169,11 @@ class Client:
 
     def shutdown(self) -> None:
         """Flush pending traces and shut down the tracer provider."""
+        if self._policy_enforcer is not None:
+            try:
+                self._policy_enforcer.stop()
+            except Exception:
+                logger.debug("Strathon: policy enforcer stop raised")
         self._tracer_provider.shutdown()
 
     def __enter__(self):

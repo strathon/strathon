@@ -26,6 +26,7 @@ def make_client():
         api_key="test-key",
         endpoint="http://localhost:4318",
         set_global_tracer=False,
+        enable_policies=False,
     )
 
 

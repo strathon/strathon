@@ -17,6 +17,7 @@ def make_client(**kwargs):
         api_key="test-key",
         endpoint="http://localhost:4318",
         set_global_tracer=False,
+        enable_policies=False,
     )
     defaults.update(kwargs)
     return Client(**defaults)
@@ -28,7 +29,7 @@ def test_version():
 
 def test_client_requires_api_key():
     with pytest.raises(AuthenticationError):
-        Client(api_key="", set_global_tracer=False)
+        Client(api_key="", set_global_tracer=False, enable_policies=False)
 
 
 def test_client_init():
