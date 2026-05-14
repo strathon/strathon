@@ -322,9 +322,290 @@ def _truncate(s: str, max_len: int) -> str:
     return s[:max_len] + f"... [truncated {len(s) - max_len} chars]"
 
 
+# ============================================================
+# Runtime intervention: policy enforcement via RunHooks injection
+# ============================================================
+# OpenAI Agents SDK's TracingProcessor is informational only — it fires
+# alongside execution and can't stop a tool from running. Blocking requires
+# RunHooks.on_tool_start, which is awaited via asyncio.gather BEFORE the
+# tool's invoke task is created (see agents/run_internal/tool_execution.py
+# line 1722). Raising from on_tool_start propagates through gather and
+# aborts the run before the tool body executes.
+#
+# Auto-instrumentation challenge: RunHooks is normally passed by the user
+# to Runner.run(agent, hooks=...). For zero-code-change instrumentation we
+# wrap Runner.run / run_sync / run_streamed to inject our hooks. If the
+# user already provides hooks, we delegate to theirs after our own.
+#
+# steer mode: not supported on OAI Agents SDK because on_tool_start cannot
+# substitute the tool's output (same constraint as LangGraph). The SDK
+# logs the missed steer; the tool still runs. To get steer on OAI, the
+# user must manually wrap their tool's on_invoke_tool.
+
+_ORIGINAL_RUN = None
+_ORIGINAL_RUN_SYNC = None
+_ORIGINAL_RUN_STREAMED = None
+_PATCHED_CLIENT = None
+
+
+def _build_strathon_run_hooks(client, user_hooks):
+    """Construct a RunHooks subclass bound to this client + delegating to user_hooks.
+
+    Built lazily so the agents import is not required at module load time.
+    """
+    from agents import RunHooks
+
+    class _StrathonRunHooks(RunHooks):
+        async def on_tool_start(self, context, agent, tool):
+            enforcer = getattr(client, "_policy_enforcer", None)
+            if enforcer is None:
+                if user_hooks is not None:
+                    await user_hooks.on_tool_start(context, agent, tool)
+                return
+
+            tool_name = _safe_str(getattr(tool, "name", "tool"))
+
+            # ToolContext.tool_arguments holds the JSON-decoded arguments
+            # the model passed. Fall back to context.tool_call.arguments for
+            # older SDK versions that don't expose tool_arguments directly.
+            args = getattr(context, "tool_arguments", None)
+            if args is None:
+                tc = getattr(context, "tool_call", None)
+                args = getattr(tc, "arguments", None) if tc is not None else None
+
+            attrs: Dict[str, Any] = {
+                "strathon.framework": "agents",
+                "gen_ai.tool.name": tool_name,
+                "strathon.tool.name": tool_name,
+                "strathon.tool.args": _truncate(_safe_json(args), 1500),
+            }
+
+            try:
+                decision = client.check_policy({
+                    "name": f"agents.tool.{tool_name}",
+                    "attrs": attrs,
+                })
+            except Exception:
+                logger.exception("policy check raised in OAI Agents hook; allowing tool")
+                if user_hooks is not None:
+                    await user_hooks.on_tool_start(context, agent, tool)
+                return
+
+            if decision.is_block:
+                _emit_intervention_span_oai(
+                    client,
+                    tool_name=tool_name,
+                    attrs=attrs,
+                    decision_kind="blocked",
+                    decision=decision,
+                    error_message=decision.message or "policy blocked",
+                )
+                from strathon.policy import StrathonPolicyBlocked
+                raise StrathonPolicyBlocked(
+                    decision.message or f"Tool '{tool_name}' blocked by Strathon policy",
+                    policy_id=decision.policy_id,
+                    policy_name=decision.policy_name,
+                )
+
+            if decision.is_steer:
+                # on_tool_start cannot substitute the tool's return value, so
+                # full steer semantics aren't possible without a deeper hook.
+                # Log the matched policy and allow the tool to run; this still
+                # surfaces in observability and gives the user a signal that
+                # they should consider switching to a `block` policy or
+                # wrapping their tool's on_invoke_tool manually.
+                logger.warning(
+                    "Strathon: steer policy %r matched on OAI tool %s but "
+                    "steer is not supported via RunHooks; the tool will run "
+                    "normally. Use a `block` policy or manually wrap the "
+                    "tool's on_invoke_tool to enforce steer on OAI Agents SDK.",
+                    decision.policy_name, tool_name,
+                )
+                _emit_intervention_span_oai(
+                    client,
+                    tool_name=tool_name,
+                    attrs=attrs,
+                    decision_kind="steer_attempted",
+                    decision=decision,
+                    error_message=None,
+                    replacement=decision.replacement,
+                )
+
+            if user_hooks is not None:
+                await user_hooks.on_tool_start(context, agent, tool)
+
+        async def on_tool_end(self, context, agent, tool, result):
+            if user_hooks is not None:
+                await user_hooks.on_tool_end(context, agent, tool, result)
+
+        async def on_agent_start(self, context, agent):
+            if user_hooks is not None:
+                await user_hooks.on_agent_start(context, agent)
+
+        async def on_agent_end(self, context, agent, output):
+            if user_hooks is not None:
+                await user_hooks.on_agent_end(context, agent, output)
+
+        async def on_handoff(self, context, from_agent, to_agent):
+            if user_hooks is not None:
+                await user_hooks.on_handoff(context, from_agent, to_agent)
+
+        async def on_llm_start(self, *args, **kwargs):
+            if user_hooks is not None and hasattr(user_hooks, "on_llm_start"):
+                await user_hooks.on_llm_start(*args, **kwargs)
+
+        async def on_llm_end(self, *args, **kwargs):
+            if user_hooks is not None and hasattr(user_hooks, "on_llm_end"):
+                await user_hooks.on_llm_end(*args, **kwargs)
+
+    return _StrathonRunHooks()
+
+
+def _emit_intervention_span_oai(
+    client,
+    *,
+    tool_name: str,
+    attrs: Dict[str, Any],
+    decision_kind: str,  # 'blocked' | 'steered' | 'steer_attempted'
+    decision,
+    error_message: Optional[str] = None,
+    replacement: Optional[str] = None,
+) -> None:
+    """Open and immediately close a span recording an intervention decision.
+
+    Lets the server-side audit trail (policy_matches table) populate when the
+    span is ingested. Best-effort: any failure here is swallowed.
+    """
+    try:
+        tracer = client.tracer
+    except Exception:
+        return
+
+    span_attrs = dict(attrs)
+    span_attrs[f"strathon.policy.{decision_kind}"] = True
+    if decision.policy_id:
+        span_attrs["strathon.policy.id"] = decision.policy_id
+    if decision.policy_name:
+        span_attrs["strathon.policy.name"] = decision.policy_name
+    if decision.message:
+        span_attrs["strathon.policy.message"] = decision.message
+    if replacement is not None:
+        span_attrs["strathon.policy.replacement"] = _truncate(replacement, 1500)
+
+    try:
+        span = tracer.start_span(
+            name=f"agents.tool.{tool_name}",
+            attributes=span_attrs,
+        )
+        try:
+            if decision_kind == "blocked":
+                span.set_status(Status(StatusCode.ERROR, error_message or "policy blocked"))
+            else:
+                span.set_status(Status(StatusCode.OK))
+        finally:
+            span.end()
+    except Exception:
+        logger.debug("failed to emit intervention span for %s", tool_name, exc_info=True)
+
+
+def _safe_str(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        return str(value)
+    except Exception:
+        return ""
+
+
+def _safe_json(value: Any) -> str:
+    """Render a value as JSON when possible, falling back to str()."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    try:
+        import json
+        return json.dumps(value, default=str)
+    except Exception:
+        try:
+            return str(value)
+        except Exception:
+            return ""
+
+
+def _install_policy_patch(client) -> bool:
+    """Patch Runner.run / run_sync / run_streamed to inject our policy hooks.
+
+    Idempotent: subsequent calls retarget which client check_policy queries.
+    No-op if the client has policies disabled.
+    """
+    global _ORIGINAL_RUN, _ORIGINAL_RUN_SYNC, _ORIGINAL_RUN_STREAMED, _PATCHED_CLIENT
+
+    if getattr(client, "_policy_enforcer", None) is None:
+        return False
+
+    try:
+        from agents import Runner
+    except ImportError:
+        return False
+
+    if _ORIGINAL_RUN is not None:
+        _PATCHED_CLIENT = client
+        return True
+
+    # __func__ unwraps the classmethod descriptor so we can rebuild a classmethod
+    # over our wrapper. Runner.run, .run_sync, .run_streamed are all classmethods.
+    _ORIGINAL_RUN = Runner.__dict__["run"].__func__
+    _ORIGINAL_RUN_SYNC = Runner.__dict__["run_sync"].__func__
+    _ORIGINAL_RUN_STREAMED = Runner.__dict__["run_streamed"].__func__
+    _PATCHED_CLIENT = client
+
+    async def _strathon_run(cls, starting_agent, input, *, hooks=None, **kwargs):
+        merged = _build_strathon_run_hooks(_PATCHED_CLIENT, hooks)
+        return await _ORIGINAL_RUN(cls, starting_agent, input, hooks=merged, **kwargs)
+
+    def _strathon_run_sync(cls, starting_agent, input, *, hooks=None, **kwargs):
+        merged = _build_strathon_run_hooks(_PATCHED_CLIENT, hooks)
+        return _ORIGINAL_RUN_SYNC(cls, starting_agent, input, hooks=merged, **kwargs)
+
+    def _strathon_run_streamed(cls, starting_agent, input, *args, hooks=None, **kwargs):
+        merged = _build_strathon_run_hooks(_PATCHED_CLIENT, hooks)
+        return _ORIGINAL_RUN_STREAMED(cls, starting_agent, input, *args, hooks=merged, **kwargs)
+
+    Runner.run = classmethod(_strathon_run)
+    Runner.run_sync = classmethod(_strathon_run_sync)
+    Runner.run_streamed = classmethod(_strathon_run_streamed)
+
+    logger.info("OpenAI Agents SDK policy enforcement patch installed on Runner.run*")
+    return True
+
+
+def _uninstall_policy_patch() -> None:
+    """Restore the original Runner classmethods. For tests."""
+    global _ORIGINAL_RUN, _ORIGINAL_RUN_SYNC, _ORIGINAL_RUN_STREAMED, _PATCHED_CLIENT
+
+    if _ORIGINAL_RUN is None:
+        return
+    try:
+        from agents import Runner
+        Runner.run = classmethod(_ORIGINAL_RUN)
+        Runner.run_sync = classmethod(_ORIGINAL_RUN_SYNC)
+        Runner.run_streamed = classmethod(_ORIGINAL_RUN_STREAMED)
+    except ImportError:
+        pass
+    _ORIGINAL_RUN = None
+    _ORIGINAL_RUN_SYNC = None
+    _ORIGINAL_RUN_STREAMED = None
+    _PATCHED_CLIENT = None
+
+
 def instrument(client) -> bool:
     """
     Register the Strathon TracingProcessor with the OpenAI Agents SDK.
+
+    Also installs a policy enforcement patch on Runner.run / run_sync /
+    run_streamed that injects RunHooks for block enforcement before each
+    tool call. No-op if the client has policies disabled.
 
     Args:
         client: Strathon Client instance.
@@ -341,5 +622,10 @@ def instrument(client) -> bool:
 
     processor = StrathonAgentsSDKProcessor(client)
     add_trace_processor(processor)
+
+    # Install policy enforcement patch on Runner.run*.
+    # No-op if the client has policies disabled.
+    _install_policy_patch(client)
+
     logger.info("OpenAI Agents SDK instrumentation registered")
     return True

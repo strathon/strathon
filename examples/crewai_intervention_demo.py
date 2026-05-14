@@ -82,9 +82,14 @@ def _delete(url: str) -> None:
 
 def install_demo_policy() -> dict:
     """Create the flagship block policy. Returns the created row."""
+    _demo_policies = {
+        "block_competitor_email_demo",
+        "block_competitor_email_crewai_demo",
+        "block_competitor_email_oai_demo",
+    }
     existing = _get(f"{RECEIVER_URL}/v1/policies").get("policies", [])
     for p in existing:
-        if p["name"] == "block_competitor_email_crewai_demo":
+        if p["name"] in _demo_policies:
             _delete(f"{RECEIVER_URL}/v1/policies/{p['id']}")
 
     return _post(

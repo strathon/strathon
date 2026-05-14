@@ -100,6 +100,24 @@ curl -X POST http://localhost:4318/v1/policies \
   }'
 ```
 
+## Framework support
+
+Strathon's block and steer enforcement is wired into the three main agent
+frameworks. The integration mechanism differs per framework but the user-
+facing API is identical: just call `instrument(client)` once.
+
+| Framework            | Block | Steer | Mechanism                                       |
+|----------------------|-------|-------|-------------------------------------------------|
+| LangGraph (LangChain)| Yes   | Yes   | BaseCallbackHandler.on_tool_start raises        |
+| CrewAI               | Yes   | Yes   | CrewStructuredTool.invoke patch                 |
+| OpenAI Agents SDK    | Yes   | No*   | Runner.run* wraps to inject RunHooks            |
+
+\* Steer on OpenAI Agents SDK is not supported through the default
+auto-instrumentation: `RunHooks.on_tool_start` can abort a tool call but
+cannot substitute the tool's output. To get steer semantics on OAI Agents
+SDK, wrap the tool's `on_invoke_tool` manually and call `client.check_policy`
+there.
+
 ## Enforcing in your agent code
 
 For most framework integrations, just instrument the client. The SDK pulls
