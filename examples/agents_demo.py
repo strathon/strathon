@@ -32,7 +32,7 @@ from strathon.instrumentation.openai_agents import StrathonAgentsSDKProcessor
 
 def main() -> None:
     client = Client(
-        api_key="dev-key",
+        api_key="stra_dev_local_default_project_do_not_use_in_production",
         endpoint="http://localhost:4318",
         service_name="research-workflow-demo",
         environment="dev",

@@ -40,6 +40,8 @@ from strathon.policy import StrathonPolicyBlocked
 
 
 RECEIVER_URL = "http://localhost:4318"
+API_KEY = "stra_dev_local_default_project_do_not_use_in_production"
+AUTH_HEADERS = {"Authorization": f"Bearer {API_KEY}"}
 
 
 # ---- A real LangChain tool. Whether this function body runs is the test. ----
@@ -61,7 +63,7 @@ def _post(url: str, payload: dict) -> dict:
     req = Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **AUTH_HEADERS},
         method="POST",
     )
     with urlopen(req, timeout=5) as resp:
@@ -69,12 +71,13 @@ def _post(url: str, payload: dict) -> dict:
 
 
 def _get(url: str) -> dict:
-    with urlopen(url, timeout=5) as resp:
+    req = Request(url, headers=AUTH_HEADERS, method="GET")
+    with urlopen(req, timeout=5) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
 def _delete(url: str) -> None:
-    req = Request(url, method="DELETE")
+    req = Request(url, headers=AUTH_HEADERS, method="DELETE")
     try:
         with urlopen(req, timeout=5):
             pass
@@ -127,7 +130,7 @@ def main() -> None:
 
     print("\nInitializing Strathon Client (will fetch policies from receiver)...")
     client = Client(
-        api_key="dev-key",
+        api_key="stra_dev_local_default_project_do_not_use_in_production",
         endpoint=RECEIVER_URL,
         service_name="intervention-demo",
         environment="dev",

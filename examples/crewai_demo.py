@@ -72,7 +72,7 @@ def _make_task(name):
 
 def main() -> None:
     client = Client(
-        api_key="dev-key",
+        api_key="stra_dev_local_default_project_do_not_use_in_production",
         endpoint="http://localhost:4318",
         service_name="crewai-research-demo",
         environment="dev",

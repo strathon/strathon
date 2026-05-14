@@ -62,7 +62,7 @@ def _llm_response(prompt_tokens, completion_tokens, model="gpt-4o", text=""):
 
 def main() -> None:
     client = Client(
-        api_key="dev-key",
+        api_key="stra_dev_local_default_project_do_not_use_in_production",
         endpoint="http://localhost:4318",
         service_name="langgraph-research-demo",
         environment="dev",

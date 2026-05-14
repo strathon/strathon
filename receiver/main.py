@@ -29,6 +29,7 @@ from opentelemetry.proto.common.v1.common_pb2 import AnyValue
 
 import policies as policy_mod
 from policies import PolicyExpressionError
+import auth
 
 logger = logging.getLogger("strathon.receiver")
 logging.basicConfig(
@@ -140,11 +141,9 @@ async def ingest_traces(
     each span to the traces and spans tables. Returns OTLP-spec
     ExportTraceServiceResponse (empty body on success).
     """
-    if not authorization:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Authorization header. Expected: Bearer <api_key>",
-        )
+    # Authenticate and resolve which project this batch belongs to
+    auth_ctx = await auth.resolve_api_key(app.state.pool, authorization)
+    project_id = auth_ctx.project_id
 
     body = await request.body()
 
@@ -158,7 +157,6 @@ async def ingest_traces(
             detail=f"Invalid OTLP protobuf: {exc}",
         )
 
-    project_id = app.state.default_project_id
     span_count = 0
     trace_ids_seen: set[bytes] = set()
 
@@ -364,15 +362,28 @@ def _coerce_project_id(value: str | None) -> UUID:
     return app.state.default_project_id
 
 
+async def _require_auth(
+    authorization: str | None = Header(default=None),
+) -> auth.ApiKeyContext:
+    """FastAPI dependency that resolves the Bearer token to a project context."""
+    return await auth.resolve_api_key(app.state.pool, authorization)
+
+
 @app.get("/v1/policies")
-async def list_policies_endpoint(project_id: str | None = None) -> dict[str, Any]:
-    pid = _coerce_project_id(project_id)
-    policies = await policy_mod.list_policies(app.state.pool, pid)
+async def list_policies_endpoint(
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    ctx = await auth.resolve_api_key(app.state.pool, authorization)
+    policies = await policy_mod.list_policies(app.state.pool, ctx.project_id)
     return {"policies": policies}
 
 
 @app.post("/v1/policies", status_code=status.HTTP_201_CREATED)
-async def create_policy_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
+async def create_policy_endpoint(
+    payload: dict[str, Any],
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    ctx = await auth.resolve_api_key(app.state.pool, authorization)
     required = {"name", "match_expression", "action"}
     missing = required - set(payload.keys())
     if missing:
@@ -380,11 +391,10 @@ async def create_policy_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"missing required fields: {sorted(missing)}",
         )
-    pid = _coerce_project_id(payload.get("project_id"))
     try:
         policy = await policy_mod.create_policy(
             app.state.pool,
-            pid,
+            ctx.project_id,
             name=payload["name"],
             description=payload.get("description"),
             match_expression=payload["match_expression"],
@@ -408,14 +418,16 @@ async def create_policy_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.get("/v1/policies/{policy_id}")
-async def get_policy_endpoint(policy_id: str) -> dict[str, Any]:
+async def get_policy_endpoint(
+    policy_id: str,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    ctx = await auth.resolve_api_key(app.state.pool, authorization)
     try:
         pid_uuid = UUID(policy_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid policy_id")
-    policy = await policy_mod.get_policy(
-        app.state.pool, app.state.default_project_id, pid_uuid
-    )
+    policy = await policy_mod.get_policy(app.state.pool, ctx.project_id, pid_uuid)
     if not policy:
         raise HTTPException(status_code=404, detail="policy not found")
     return policy
@@ -423,15 +435,18 @@ async def get_policy_endpoint(policy_id: str) -> dict[str, Any]:
 
 @app.patch("/v1/policies/{policy_id}")
 async def update_policy_endpoint(
-    policy_id: str, payload: dict[str, Any]
+    policy_id: str,
+    payload: dict[str, Any],
+    authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
+    ctx = await auth.resolve_api_key(app.state.pool, authorization)
     try:
         pid_uuid = UUID(policy_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid policy_id")
     try:
         policy = await policy_mod.update_policy(
-            app.state.pool, app.state.default_project_id, pid_uuid, **payload
+            app.state.pool, ctx.project_id, pid_uuid, **payload
         )
     except PolicyExpressionError as exc:
         raise HTTPException(status_code=400, detail=f"invalid match expression: {exc}")
@@ -443,16 +458,58 @@ async def update_policy_endpoint(
 
 
 @app.delete("/v1/policies/{policy_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_policy_endpoint(policy_id: str) -> Response:
+async def delete_policy_endpoint(
+    policy_id: str,
+    authorization: str | None = Header(default=None),
+) -> Response:
+    ctx = await auth.resolve_api_key(app.state.pool, authorization)
     try:
         pid_uuid = UUID(policy_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid policy_id")
-    deleted = await policy_mod.delete_policy(
-        app.state.pool, app.state.default_project_id, pid_uuid
-    )
+    deleted = await policy_mod.delete_policy(app.state.pool, ctx.project_id, pid_uuid)
     if not deleted:
         raise HTTPException(status_code=404, detail="policy not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ============================================================
+# API key management
+# ============================================================
+# These endpoints are UNAUTHENTICATED in v1. Production deployments must
+# put the receiver behind a reverse proxy that restricts access here, or
+# add admin authentication (v2 work).
+
+@app.get("/v1/api_keys")
+async def list_api_keys_endpoint(
+    project_id: str | None = None,
+    include_revoked: bool = False,
+) -> dict[str, Any]:
+    pid = _coerce_project_id(project_id)
+    keys = await auth.list_api_keys(app.state.pool, pid, include_revoked=include_revoked)
+    return {"api_keys": keys}
+
+
+@app.post("/v1/api_keys", status_code=status.HTTP_201_CREATED)
+async def create_api_key_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
+    name = payload.get("name")
+    if not name:
+        raise HTTPException(status_code=400, detail="missing required field: name")
+    pid = _coerce_project_id(payload.get("project_id"))
+    row, raw_key = await auth.create_api_key(app.state.pool, pid, name=name)
+    # The raw key is returned ONCE. Callers must save it; it cannot be retrieved later.
+    return {**row, "key": raw_key}
+
+
+@app.delete("/v1/api_keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_api_key_endpoint(key_id: str) -> Response:
+    try:
+        kid_uuid = UUID(key_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid key_id")
+    revoked = await auth.revoke_api_key(app.state.pool, kid_uuid)
+    if not revoked:
+        raise HTTPException(status_code=404, detail="api key not found or already revoked")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
