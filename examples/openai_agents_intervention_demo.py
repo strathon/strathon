@@ -196,7 +196,7 @@ def main() -> None:
         })
 
     asyncio.run(scenario_2())
-    print(f"  result: sent email to team@mycompany.com")
+    print("  result: sent email to team@mycompany.com")
 
     # ---- Summary ----
     print("\n=== Summary ===")

@@ -194,7 +194,6 @@ def test_double_instrument_does_not_double_patch():
 
 def test_retarget_after_double_instrument_uses_new_client():
     """After two instrument() calls, check_policy should hit the second client."""
-    import strathon.instrumentation.crewai as mod
     from strathon.instrumentation.crewai import instrument
 
     # First client: policy that blocks
@@ -226,7 +225,6 @@ def test_retarget_after_double_instrument_uses_new_client():
 def test_policy_check_exception_does_not_break_tool():
     """If check_policy() itself raises, the tool must still run."""
     from strathon.instrumentation.crewai import instrument
-    import strathon.instrumentation.crewai as mod
 
     client = _make_client_with_policy(_block_competitor_policy())
     instrument(client)

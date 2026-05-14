@@ -2,7 +2,6 @@
 
 import sys
 
-import pytest
 
 sys.path.insert(0, "/home/claude/strathon/receiver")
 

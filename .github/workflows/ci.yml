@@ -1,0 +1,222 @@
+name: CI
+
+# Run on every push to any branch, every PR against main. Manual trigger
+# (workflow_dispatch) available for re-runs without a code change.
+on:
+  push:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel any in-flight runs on the same branch when a new push lands.
+# Saves CI minutes and gives faster feedback on the latest commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Permissions default to read-only at the workflow level. Individual
+# jobs grant additional permissions only when they need them.
+permissions:
+  contents: read
+
+jobs:
+  # ============================================================
+  # SDK unit tests — matrixed across supported Python versions.
+  # No Postgres dependency; the SDK does not touch a DB directly.
+  # ============================================================
+  sdk-tests:
+    name: SDK tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: sdk/pyproject.toml
+
+      - name: Install SDK with all framework extras
+        working-directory: sdk
+        run: |
+          python -m pip install --upgrade pip
+          # Install with all framework extras so every integration test
+          # can actually exercise its framework
+          pip install -e ".[all]" pytest pytest-asyncio
+
+      - name: Run SDK tests
+        working-directory: sdk
+        run: pytest tests/ -v --tb=short
+
+  # ============================================================
+  # Receiver tests — needs Postgres for the retention DB tests.
+  # Python 3.12 only because the receiver requires >= 3.12.
+  # ============================================================
+  receiver-tests:
+    name: Receiver tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: strathon
+          POSTGRES_PASSWORD: strathon_dev
+          POSTGRES_DB: strathon
+        ports:
+          - 5432:5432
+        # pg_isready health-checks the container; the job won't start
+        # this step's container until it reports healthy.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: receiver/pyproject.toml
+
+      - name: Install receiver dependencies
+        working-directory: receiver
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Apply database migrations
+        env:
+          PGPASSWORD: strathon_dev
+        run: |
+          for f in db/migrations/*.sql; do
+            echo "Applying $f"
+            psql -h 127.0.0.1 -U strathon -d strathon -f "$f"
+          done
+
+      - name: Run receiver tests
+        working-directory: receiver
+        env:
+          DATABASE_URL: postgresql://strathon:strathon_dev@127.0.0.1:5432/strathon
+        run: pytest tests/ -v --tb=short
+
+  # ============================================================
+  # Cross-framework parity integration tests — boots a real receiver
+  # subprocess and exercises LangGraph/CrewAI/OAI Agents against it.
+  # ============================================================
+  integration-tests:
+    name: Cross-framework parity
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: strathon
+          POSTGRES_PASSWORD: strathon_dev
+          POSTGRES_DB: strathon
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install all components
+        run: |
+          python -m pip install --upgrade pip
+          # SDK with all framework extras so the parity test can drive
+          # LangGraph, CrewAI, and OpenAI Agents SDK
+          pip install -e "./sdk[all]"
+          # Receiver so the integration conftest can launch it as a subprocess
+          pip install -e "./receiver"
+          # Plus the integration test's direct dependency
+          pip install psycopg pytest pytest-asyncio
+
+      - name: Apply database migrations
+        env:
+          PGPASSWORD: strathon_dev
+        run: |
+          for f in db/migrations/*.sql; do
+            echo "Applying $f"
+            psql -h 127.0.0.1 -U strathon -d strathon -f "$f"
+          done
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgresql://strathon:strathon_dev@127.0.0.1:5432/strathon
+        run: pytest tests/ -v --tb=short
+
+  # ============================================================
+  # Docker build verification — proves the receiver image actually
+  # builds. Catches Dockerfile regressions before they hit users on
+  # quickstart. We don't push the image anywhere yet (no registry
+  # process); that lands with the release pipeline.
+  # ============================================================
+  docker-build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build receiver image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./receiver
+          push: false
+          load: true
+          tags: strathon-receiver:ci
+          # Layer cache stored in the GitHub Actions cache for fast rebuilds
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify image can start
+        run: |
+          # Sanity-check that the entrypoint resolves and python imports work.
+          # We can't actually serve here (no Postgres in this job), so just
+          # confirm the container starts and main.py imports cleanly.
+          docker run --rm --entrypoint python strathon-receiver:ci \
+            -c "import main; print('receiver module imports OK')"
+
+  # ============================================================
+  # Lint — fast, runs in parallel with everything. Catches obvious
+  # style / unused-import issues before review.
+  # ============================================================
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff check
+        run: ruff check .

@@ -23,7 +23,6 @@ import json
 import logging
 import os
 import sys
-import time
 import traceback
 from datetime import datetime, timezone
 

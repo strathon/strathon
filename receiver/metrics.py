@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any
 
 from prometheus_client import (
     CONTENT_TYPE_LATEST,

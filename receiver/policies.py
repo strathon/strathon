@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 from uuid import UUID
@@ -28,10 +29,6 @@ logger = logging.getLogger("strathon.receiver.policies")
 # Receiver-only copy so we don't depend on the SDK package being installed
 # alongside the receiver. Update both when the evaluator changes.
 
-import logging
-import threading
-from typing import Any as _Any, Dict as _Dict, Optional as _Optional
-
 _logger = logging.getLogger("strathon.receiver.policy_eval")
 
 
@@ -39,9 +36,9 @@ class PolicyExpressionError(ValueError):
     """Raised when a CEL expression fails to parse or compile."""
 
 
-_COMPILE_CACHE: _Dict[str, _Any] = {}
+_COMPILE_CACHE: Dict[str, Any] = {}
 _COMPILE_LOCK = threading.Lock()
-_ENV: _Optional[_Any] = None
+_ENV: Optional[Any] = None
 
 
 def _get_env():
@@ -70,7 +67,7 @@ def _compile_cached(expression: str):
     return program
 
 
-def _evaluate(expression: _Optional[str], span_context: _Dict[str, _Any]) -> bool:
+def _evaluate(expression: Optional[str], span_context: Dict[str, Any]) -> bool:
     if not expression:
         return False
     try:
@@ -91,7 +88,7 @@ def _evaluate(expression: _Optional[str], span_context: _Dict[str, _Any]) -> boo
     return bool(result)
 
 
-def _validate(expression: _Any) -> None:
+def _validate(expression: Any) -> None:
     if not isinstance(expression, str):
         raise PolicyExpressionError(
             f"expression must be a string, got {type(expression).__name__}"

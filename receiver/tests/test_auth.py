@@ -9,7 +9,6 @@ import sys
 # Receiver is not packaged; add it to sys.path so we can import directly.
 sys.path.insert(0, "/home/claude/strathon/receiver")
 
-import pytest
 
 from auth import (
     KEY_PREFIX_LEN,

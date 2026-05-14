@@ -6,7 +6,6 @@ import sys
 import threading
 from unittest.mock import patch
 
-import pytest
 
 sys.path.insert(0, "/home/claude/strathon/receiver")
 

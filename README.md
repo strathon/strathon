@@ -1,5 +1,7 @@
 # Strathon
 
+[![CI](https://github.com/strathon/strathon/actions/workflows/ci.yml/badge.svg)](https://github.com/strathon/strathon/actions/workflows/ci.yml)
+
 Open-source agent observability and runtime intervention. Single-Docker self-host. OpenTelemetry-native.
 
 ## What Strathon does
