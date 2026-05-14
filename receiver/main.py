@@ -30,6 +30,7 @@ from opentelemetry.proto.common.v1.common_pb2 import AnyValue
 import policies as policy_mod
 from policies import PolicyExpressionError
 import auth
+import sampling
 
 logger = logging.getLogger("strathon.receiver")
 logging.basicConfig(
@@ -108,6 +109,15 @@ async def lifespan(app: FastAPI):
         )
         app.state.default_project_id = row["id"]
         logger.info("Default project id: %s", app.state.default_project_id)
+
+    # Sampling config (env-driven) + counters for /metrics in C4
+    app.state.sampling_config = sampling.SamplingConfig.from_env()
+    app.state.sampling_counters = sampling.SamplingCounters()
+    logger.info(
+        "Sampling rate: %.3f (expensive LLM threshold: %d tokens)",
+        app.state.sampling_config.sample_rate,
+        app.state.sampling_config.expensive_llm_token_threshold,
+    )
 
     yield
 
@@ -194,6 +204,14 @@ async def ingest_traces(
                         # block/steer policies are SDK-side and the SDK has
                         # already enforced them, but we still surface a record
                         # of the match here for visibility.
+                        #
+                        # We buffer per-span matches/webhooks locally so that
+                        # if the sampling decision drops the span, we don't
+                        # leave dangling audit rows pointing to a span that
+                        # was never persisted.
+                        span_matches: list[dict[str, Any]] = []
+                        span_webhooks: list[tuple[str, dict[str, Any]]] = []
+
                         matched_policies = policy_mod.evaluate_for_span(
                             active_policies, span.name, merged_attrs
                         )
@@ -209,7 +227,7 @@ async def ingest_traces(
                                     "block": "block_recorded",
                                     "steer": "steer_recorded",
                                 }.get(p["action"], "recorded")
-                                matches_to_record.append({
+                                span_matches.append({
                                     "policy_id": p["id"],
                                     "trace_id": trace_id,
                                     "span_id": span_id,
@@ -223,7 +241,7 @@ async def ingest_traces(
                                 if p["action"] == "alert":
                                     webhook_url = (p.get("action_config") or {}).get("webhook_url")
                                     if webhook_url:
-                                        webhooks_to_fire.append((webhook_url, {
+                                        span_webhooks.append((webhook_url, {
                                             "policy_id": p["id"],
                                             "policy_name": p["name"],
                                             "span_name": span.name,
@@ -231,6 +249,26 @@ async def ingest_traces(
                                             "span_id": span_id.hex(),
                                             "attrs": merged_attrs,
                                         }))
+
+                        # ---- Sampling decision ----
+                        # Made AFTER policy evaluation so the always-keep
+                        # rules can see strathon.policy.* annotations.
+                        status_code_name = STATUS_CODE_NAMES.get(span.status.code, "UNSET")
+                        keep, force_kept = sampling.should_keep_span(
+                            trace_id,
+                            merged_attrs,
+                            status_code_name,
+                            app.state.sampling_config,
+                        )
+                        if not keep:
+                            app.state.sampling_counters.record_dropped()
+                            continue
+                        app.state.sampling_counters.record_kept(force_kept=force_kept)
+
+                        # Commit this span's matches/webhooks to the outer
+                        # lists now that we know we're persisting the span.
+                        matches_to_record.extend(span_matches)
+                        webhooks_to_fire.extend(span_webhooks)
 
                         # Denormalize common gen_ai.* and strathon.agent.* fields
                         operation_name = span_attrs.get("gen_ai.operation.name")
