@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
@@ -94,6 +95,58 @@ def attrs_to_dict(attrs) -> dict:
     return {kv.key: any_value_to_python(kv.value) for kv in attrs}
 
 
+# Well-known UUID of the dev key seeded by migration 003. If this row is
+# present and non-revoked, we print a quickstart banner at startup so new
+# users immediately see what key to use and how to rotate it.
+_SEEDED_DEV_KEY_ID = "00000000-0000-0000-0000-000000000010"
+_SEEDED_DEV_KEY_VALUE = "stra_dev_local_default_project_do_not_use_in_production"
+
+
+async def _print_quickstart_banner(pool: asyncpg.Pool) -> None:
+    """Print a one-time-readable banner when the seeded dev key is active.
+
+    Looks up the well-known dev key by id. If present and not revoked, prints
+    the value, the endpoint, and the rotation reminder. Silent in production
+    deployments where the dev key has been revoked.
+    """
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT revoked_at FROM api_keys WHERE id = $1",
+                UUID(_SEEDED_DEV_KEY_ID),
+            )
+    except Exception:
+        logger.debug("quickstart banner: failed to check for dev key", exc_info=True)
+        return
+
+    if row is None or row["revoked_at"] is not None:
+        return  # Production deployment; nothing to surface
+
+    banner = (
+        "\n"
+        "============================================================\n"
+        "  Strathon receiver ready\n"
+        "============================================================\n"
+        "  Endpoint:   http://localhost:4318\n"
+        "  Dev API key (rotate before production!):\n"
+        f"      {_SEEDED_DEV_KEY_VALUE}\n"
+        "\n"
+        "  Quick test:\n"
+        '      curl -H "Authorization: Bearer ' f'{_SEEDED_DEV_KEY_VALUE}" \\\n'
+        "           http://localhost:4318/v1/policies\n"
+        "\n"
+        "  Run a demo:\n"
+        "      python examples/intervention_demo.py\n"
+        "\n"
+        "  To rotate this key, see docs/api_keys.md\n"
+        "============================================================\n"
+    )
+    # Use a fresh stderr write rather than logger.info so the banner reads
+    # the same regardless of LOG_FORMAT=json or text.
+    sys.stderr.write(banner)
+    sys.stderr.flush()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Set up asyncpg connection pool and ensure the default project row exists."""
@@ -139,6 +192,11 @@ async def lifespan(app: FastAPI):
         ),
         name="strathon.retention",
     )
+
+    # Quickstart banner: when the dev key seeded by migration 003 is still
+    # active, surface it loudly. New users see "here's your key, here's the
+    # endpoint, here's how to rotate" the moment the container starts.
+    await _print_quickstart_banner(app.state.pool)
 
     yield
 

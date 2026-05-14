@@ -29,9 +29,20 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql+asyncpg://strathon:${POSTGRES_PASSWORD:-strathon_dev}@postgres:5432/strathon
-      LOG_LEVEL: ${LOG_LEVEL:-info}
+      STRATHON_LOG_LEVEL: ${STRATHON_LOG_LEVEL:-INFO}
+      STRATHON_LOG_FORMAT: ${STRATHON_LOG_FORMAT:-text}
+      STRATHON_SAMPLING_RATE: ${STRATHON_SAMPLING_RATE:-1.0}
+      STRATHON_RETENTION_ENABLED: ${STRATHON_RETENTION_ENABLED:-true}
+      STRATHON_RETENTION_INTERVAL_SECONDS: ${STRATHON_RETENTION_INTERVAL_SECONDS:-3600}
+      STRATHON_RETENTION_BATCH_SIZE: ${STRATHON_RETENTION_BATCH_SIZE:-5000}
     ports:
       - "4318:4318"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4318/health', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   # The dashboard service gets added in a future commit (Next.js scaffold).
   # Once the dashboard exists, it merges with the receiver into a single

@@ -18,13 +18,53 @@ Differentiators:
 
 ## Quick start
 
+Requires Docker.
+
 ```bash
 git clone https://github.com/strathon/strathon.git
 cd strathon
-docker-compose up
+docker compose up
 ```
 
-Dashboard at `http://localhost:3000`. OTLP receiver at `http://localhost:4318/v1/traces`.
+On first run, the migrations create the schema and seed a development API
+key. The receiver prints a banner at startup with the key value and a
+quick-test command:
+
+```
+============================================================
+  Strathon receiver ready
+============================================================
+  Endpoint:   http://localhost:4318
+  Dev API key (rotate before production!):
+      stra_dev_local_default_project_do_not_use_in_production
+
+  Quick test:
+      curl -H "Authorization: Bearer stra_dev_..." \
+           http://localhost:4318/v1/policies
+
+  Run a demo:
+      python examples/intervention_demo.py
+
+  To rotate this key, see docs/api_keys.md
+============================================================
+```
+
+Run one of the framework intervention demos against it:
+
+```bash
+pip install strathon langchain cel-python      # or crewai / openai-agents
+python examples/intervention_demo.py
+```
+
+The demo installs a CEL policy, attempts to send an email to a competitor
+address, and the receiver blocks it before the tool body runs.
+
+### Configuration
+
+Copy `.env.example` to `.env` and edit if you need to override defaults
+(Postgres password, log level, log format, sampling rate, retention). All
+env vars are documented in the example file. The dashboard isn't shipped
+yet — it lands in a future release.
 
 ## Architecture
 

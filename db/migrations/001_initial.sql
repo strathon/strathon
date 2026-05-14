@@ -76,8 +76,14 @@ CREATE TABLE sessions (
     user_agent TEXT
 );
 
-CREATE INDEX idx_sessions_user ON sessions(user_id) WHERE expires_at > NOW();
-CREATE INDEX idx_sessions_token ON sessions(token_hash) WHERE expires_at > NOW();
+-- Note: we deliberately don't add a partial index `WHERE expires_at > NOW()`.
+-- Postgres rejects non-IMMUTABLE functions in index predicates, and a
+-- relative-time filter like NOW() can't be IMMUTABLE by definition. Queries
+-- filter on expires_at themselves; Postgres uses the user_id / token_hash
+-- index then applies the time filter. Sessions tables stay small enough
+-- that indexing the few expired rows costs nothing.
+CREATE INDEX idx_sessions_user ON sessions(user_id);
+CREATE INDEX idx_sessions_token ON sessions(token_hash);
 
 -- ============================================================
 -- TRACE DATA
