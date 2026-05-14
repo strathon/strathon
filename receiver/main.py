@@ -31,12 +31,15 @@ import policies as policy_mod
 from policies import PolicyExpressionError
 import auth
 import sampling
+import retention
+import metrics as metrics_mod
+import logging_config
+
+# Set up logging FIRST so any subsequent module-level logger.info()s use our format
+_active_log_format = logging_config.configure_logging()
 
 logger = logging.getLogger("strathon.receiver")
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "info").upper(),
-    format="%(asctime)s %(name)s %(levelname)s %(message)s",
-)
+logger.info("Logging configured: format=%s", _active_log_format)
 
 
 # Accept the SQLAlchemy-style URL from env but strip the driver suffix for asyncpg
@@ -119,9 +122,40 @@ async def lifespan(app: FastAPI):
         app.state.sampling_config.expensive_llm_token_threshold,
     )
 
+    # Prometheus metrics container — exposed at /metrics
+    app.state.metrics = metrics_mod.StrathonMetrics()
+    app.state.metrics.sampling_rate.set(app.state.sampling_config.sample_rate)
+
+    # Retention background task
+    app.state.retention_config = retention.RetentionConfig.from_env()
+    app.state.retention_shutdown = asyncio.Event()
+    retention_counters = metrics_mod.RetentionCounters(app.state.metrics)
+    app.state.retention_task = asyncio.create_task(
+        retention.retention_loop(
+            app.state.pool,
+            app.state.retention_config,
+            app.state.retention_shutdown,
+            metrics_counters=retention_counters,
+        ),
+        name="strathon.retention",
+    )
+
     yield
 
     logger.info("Strathon receiver shutting down")
+
+    # Stop the retention loop cleanly
+    app.state.retention_shutdown.set()
+    try:
+        await asyncio.wait_for(app.state.retention_task, timeout=10)
+    except asyncio.TimeoutError:
+        logger.warning("retention task did not stop in 10s; cancelling")
+        app.state.retention_task.cancel()
+        try:
+            await app.state.retention_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
     await app.state.pool.close()
 
 
@@ -138,6 +172,40 @@ async def health() -> dict[str, str]:
     return {"status": "ok", "service": "strathon-receiver", "version": "0.0.1"}
 
 
+@app.get("/metrics")
+async def metrics_endpoint() -> Response:
+    """Prometheus exposition endpoint.
+
+    Unauthenticated by design — Prometheus scrapers commonly run without
+    credentials. If you don't want it public, restrict via network ACL or
+    reverse proxy.
+    """
+    # Mirror the latest SamplingCounters snapshot into the Prom counters
+    snapshot = app.state.sampling_counters.snapshot()
+    metrics_mod.sync_sampling_counters(app.state.metrics, snapshot)
+    # Keep the sampling_rate gauge accurate in case it could ever change
+    app.state.metrics.sampling_rate.set(app.state.sampling_config.sample_rate)
+
+    body, content_type = metrics_mod.render_metrics(app.state.metrics)
+    return Response(content=body, media_type=content_type)
+
+
+async def _authenticated(authorization: str | None) -> auth.ApiKeyContext:
+    """Resolve an API key and record success / failure on the metrics counters.
+
+    Wraps ``auth.resolve_api_key`` so every protected endpoint contributes to
+    the auth_successes / auth_failures Prometheus counters. The auth module
+    itself stays metrics-free (no circular import on app.state.metrics).
+    """
+    try:
+        ctx = await auth.resolve_api_key(app.state.pool, authorization)
+    except HTTPException:
+        app.state.metrics.auth_failures.inc()
+        raise
+    app.state.metrics.auth_successes.inc()
+    return ctx
+
+
 @app.post("/v1/traces", status_code=status.HTTP_200_OK)
 async def ingest_traces(
     request: Request,
@@ -152,7 +220,7 @@ async def ingest_traces(
     ExportTraceServiceResponse (empty body on success).
     """
     # Authenticate and resolve which project this batch belongs to
-    auth_ctx = await auth.resolve_api_key(app.state.pool, authorization)
+    auth_ctx = await _authenticated(authorization)
     project_id = auth_ctx.project_id
 
     body = await request.body()
@@ -352,6 +420,11 @@ async def ingest_traces(
         "Ingested %d spans across %d traces",
         span_count,
         len(trace_ids_seen),
+        extra={
+            "spans_ingested": span_count,
+            "traces_seen": len(trace_ids_seen),
+            "project_id": str(project_id),
+        },
     )
 
     # Record policy matches in audit log (best-effort; never blocks ingest)
@@ -366,6 +439,7 @@ async def ingest_traces(
             m["outcome"],
             metadata=m.get("metadata"),
         )
+        app.state.metrics.policy_matches.labels(action=m["action"]).inc()
 
     # Fire alert webhooks in the background (don't block the response)
     for webhook_url, payload in webhooks_to_fire:
@@ -404,14 +478,14 @@ async def _require_auth(
     authorization: str | None = Header(default=None),
 ) -> auth.ApiKeyContext:
     """FastAPI dependency that resolves the Bearer token to a project context."""
-    return await auth.resolve_api_key(app.state.pool, authorization)
+    return await _authenticated(authorization)
 
 
 @app.get("/v1/policies")
 async def list_policies_endpoint(
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    ctx = await auth.resolve_api_key(app.state.pool, authorization)
+    ctx = await _authenticated(authorization)
     policies = await policy_mod.list_policies(app.state.pool, ctx.project_id)
     return {"policies": policies}
 
@@ -421,7 +495,7 @@ async def create_policy_endpoint(
     payload: dict[str, Any],
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    ctx = await auth.resolve_api_key(app.state.pool, authorization)
+    ctx = await _authenticated(authorization)
     required = {"name", "match_expression", "action"}
     missing = required - set(payload.keys())
     if missing:
@@ -460,7 +534,7 @@ async def get_policy_endpoint(
     policy_id: str,
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    ctx = await auth.resolve_api_key(app.state.pool, authorization)
+    ctx = await _authenticated(authorization)
     try:
         pid_uuid = UUID(policy_id)
     except ValueError:
@@ -477,7 +551,7 @@ async def update_policy_endpoint(
     payload: dict[str, Any],
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    ctx = await auth.resolve_api_key(app.state.pool, authorization)
+    ctx = await _authenticated(authorization)
     try:
         pid_uuid = UUID(policy_id)
     except ValueError:
@@ -500,7 +574,7 @@ async def delete_policy_endpoint(
     policy_id: str,
     authorization: str | None = Header(default=None),
 ) -> Response:
-    ctx = await auth.resolve_api_key(app.state.pool, authorization)
+    ctx = await _authenticated(authorization)
     try:
         pid_uuid = UUID(policy_id)
     except ValueError:
