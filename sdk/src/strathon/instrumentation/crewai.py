@@ -447,6 +447,185 @@ class StrathonCrewAIListener:
 # Module-level singleton to keep listener alive past instrument() return
 _REGISTERED_LISTENER = None
 
+# Policy enforcement: we patch CrewStructuredTool.invoke at instrument() time so
+# that every CrewAI tool execution goes through client.check_policy() first.
+# The event listener can't be used for blocking because the CrewAI event bus
+# dispatches handlers in a thread pool, returns a Future without waiting on it,
+# and catches handler exceptions internally — none of which can stop the
+# tool from running.
+#
+# CrewStructuredTool.invoke() is the single documented entry point every tool
+# call goes through; patching it once is far less risky than the 4-method
+# monkey-patch we considered (and rejected) for observability. The original
+# observability instrumentation continues via the event listener.
+_ORIGINAL_INVOKE = None
+_PATCHED_CLIENT = None
+
+
+def _emit_intervention_span(
+    client,
+    *,
+    tool_name: str,
+    attrs: Dict[str, Any],
+    decision_kind: str,  # 'blocked' or 'steered'
+    decision,
+    error_message: Optional[str] = None,
+    replacement: Optional[str] = None,
+) -> None:
+    """Open and immediately close a span recording a block or steer decision.
+
+    This propagates the audit trail to the receiver: when the span is later
+    ingested, the receiver re-evaluates policies and writes a row to the
+    policy_matches table. Without this, the SDK would block silently and the
+    server would have no record.
+
+    Best-effort: any failure here is swallowed so observability bugs never
+    break the user's tool.
+    """
+    try:
+        tracer = client.tracer
+    except Exception:
+        return
+
+    span_attrs = dict(attrs)
+    span_attrs[f"strathon.policy.{decision_kind}"] = True
+    if decision.policy_id:
+        span_attrs["strathon.policy.id"] = decision.policy_id
+    if decision.policy_name:
+        span_attrs["strathon.policy.name"] = decision.policy_name
+    if decision.message:
+        span_attrs["strathon.policy.message"] = decision.message
+    if replacement is not None:
+        span_attrs["strathon.policy.replacement"] = _truncate(replacement, 1500)
+
+    try:
+        span = tracer.start_span(
+            name=f"crewai.tool.{tool_name}",
+            attributes=span_attrs,
+        )
+        try:
+            if decision_kind == "blocked":
+                span.set_status(Status(StatusCode.ERROR, error_message or "policy blocked"))
+            else:
+                span.set_status(Status(StatusCode.OK))
+        finally:
+            span.end()
+    except Exception:
+        logger.debug("failed to emit intervention span for %s", tool_name, exc_info=True)
+
+
+def _install_policy_patch(client) -> bool:
+    """Patch CrewStructuredTool.invoke so policy enforcement runs before each tool.
+
+    Idempotent: subsequent calls only update which client check_policy goes to.
+    No-op if the client has no policy enforcer.
+
+    Returns True if a patch is in place (whether newly applied or already there).
+    """
+    global _ORIGINAL_INVOKE, _PATCHED_CLIENT
+
+    # If policies are disabled on this client, nothing to do.
+    if getattr(client, "_policy_enforcer", None) is None:
+        return False
+
+    try:
+        from crewai.tools.structured_tool import CrewStructuredTool
+    except ImportError:
+        return False
+
+    # Already patched: just retarget which client check_policy queries.
+    if _ORIGINAL_INVOKE is not None:
+        _PATCHED_CLIENT = client
+        return True
+
+    _ORIGINAL_INVOKE = CrewStructuredTool.invoke
+    _PATCHED_CLIENT = client
+
+    def _policy_aware_invoke(self, input, config=None, **kwargs):
+        # Re-resolve client every call so retarget works without rewriting the patch
+        current_client = _PATCHED_CLIENT
+        if current_client is None or getattr(current_client, "_policy_enforcer", None) is None:
+            return _ORIGINAL_INVOKE(self, input, config, **kwargs)
+
+        # Build a span context the policy engine can match against.
+        # Mirror the attribute shape of the observability spans for this tool.
+        tool_name = _safe_str(getattr(self, "name", "tool"))
+        attrs: Dict[str, Any] = {
+            "strathon.framework": "crewai",
+            "gen_ai.tool.name": tool_name,
+            "strathon.tool.name": tool_name,
+            "strathon.tool.args": _truncate(_json_or_str(input), 1500),
+        }
+
+        try:
+            decision = current_client.check_policy({
+                "name": f"crewai.tool.{tool_name}",
+                "attrs": attrs,
+            })
+        except Exception:
+            # Policy lookup failures must NEVER break the user's tool.
+            logger.exception("policy check raised in CrewAI invoke patch; allowing tool")
+            return _ORIGINAL_INVOKE(self, input, config, **kwargs)
+
+        if decision.is_block:
+            # Record a span for the block so the audit trail propagates to the
+            # receiver (which will populate policy_matches when it ingests).
+            _emit_intervention_span(
+                current_client,
+                tool_name=tool_name,
+                attrs=attrs,
+                decision_kind="blocked",
+                decision=decision,
+                error_message=decision.message or "policy blocked",
+            )
+            from strathon.policy import StrathonPolicyBlocked
+            raise StrathonPolicyBlocked(
+                decision.message or f"Tool '{tool_name}' blocked by Strathon policy",
+                policy_id=decision.policy_id,
+                policy_name=decision.policy_name,
+            )
+
+        if decision.is_steer:
+            # The agent receives our replacement string as if it were the
+            # tool's real output, then self-corrects on its next turn.
+            replacement = decision.replacement or (
+                f"[Strathon: tool '{tool_name}' redirected by policy"
+                + (f" '{decision.policy_name}'" if decision.policy_name else "")
+                + "]"
+            )
+            _emit_intervention_span(
+                current_client,
+                tool_name=tool_name,
+                attrs=attrs,
+                decision_kind="steered",
+                decision=decision,
+                error_message=None,
+                replacement=replacement,
+            )
+            return replacement
+
+        # is_allow: run the original tool body
+        return _ORIGINAL_INVOKE(self, input, config, **kwargs)
+
+    CrewStructuredTool.invoke = _policy_aware_invoke
+    logger.info("CrewAI policy enforcement patch installed on CrewStructuredTool.invoke")
+    return True
+
+
+def _uninstall_policy_patch() -> None:
+    """Restore the original CrewStructuredTool.invoke. For tests and cleanup."""
+    global _ORIGINAL_INVOKE, _PATCHED_CLIENT
+
+    if _ORIGINAL_INVOKE is None:
+        return
+    try:
+        from crewai.tools.structured_tool import CrewStructuredTool
+        CrewStructuredTool.invoke = _ORIGINAL_INVOKE
+    except ImportError:
+        pass
+    _ORIGINAL_INVOKE = None
+    _PATCHED_CLIENT = None
+
 
 def instrument(client) -> bool:
     """
@@ -472,6 +651,8 @@ def instrument(client) -> bool:
         # double-registering handlers on the bus.
         _REGISTERED_LISTENER._tracer = client.tracer
         _REGISTERED_LISTENER.client = client
+        # Update which client the policy patch routes through.
+        _install_policy_patch(client)
         logger.info("CrewAI instrumentation updated to use new client")
         return True
 
@@ -483,5 +664,10 @@ def instrument(client) -> bool:
             BaseEventListener.__init__(self)  # triggers setup_listeners via the bus
 
     _REGISTERED_LISTENER = _BoundListener(client)
+
+    # Install policy enforcement patch on CrewStructuredTool.invoke.
+    # No-op if the client has policies disabled.
+    _install_policy_patch(client)
+
     logger.info("CrewAI instrumentation registered")
     return True

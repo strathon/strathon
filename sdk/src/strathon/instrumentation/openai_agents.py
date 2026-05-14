@@ -214,7 +214,8 @@ class StrathonAgentsSDKProcessor:
                 attrs["gen_ai.tool.name"] = str(name)
             tool_input = getattr(data, "input", None)
             if tool_input is not None:
-                attrs["strathon.tool.input"] = _truncate(str(tool_input), 2000)
+                # Canonical attribute across all frameworks
+                attrs["strathon.tool.args"] = _truncate(str(tool_input), 2000)
 
         # Agent-to-agent handoff
         elif type_name == "HandoffSpanData":

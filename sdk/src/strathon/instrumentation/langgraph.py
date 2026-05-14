@@ -439,27 +439,31 @@ class StrathonLangGraphHandler:
         **kwargs: Any,
     ) -> None:
         tool_name = _tool_name_from_serialized(serialized)
+        # Canonical attribute across all frameworks: strathon.tool.args holds
+        # the tool's input as a JSON string (or raw string fallback). Policies
+        # match on this name regardless of framework.
+        if inputs:
+            tool_args = _truncate(_json_or_str(inputs), 1500)
+        elif input_str:
+            tool_args = _truncate(_safe_str(input_str), 1500)
+        else:
+            tool_args = ""
+
         attrs: Dict[str, Any] = {
+            "strathon.framework": "langgraph",
             "gen_ai.tool.name": tool_name,
             "strathon.tool.name": tool_name,
+            "strathon.tool.args": tool_args,
         }
-        if input_str:
-            attrs["strathon.tool.input"] = _truncate(_safe_str(input_str), 1500)
-        if inputs:
-            attrs["strathon.tool.args"] = _truncate(_json_or_str(inputs), 1500)
 
         # Runtime intervention: ask the client's policy enforcer if this tool
         # call is allowed. block raises (LangChain propagates it as a tool
         # error); steer raises a special exception the user-level wrapper can
         # catch (covered in docs). For now we only support hard block here.
         try:
-            check_attrs = dict(attrs)
-            # Stitch in raw inputs string for matching
-            if input_str:
-                check_attrs["strathon.tool.input_str"] = _safe_str(input_str)
             decision = self.client.check_policy({
                 "name": f"langgraph.tool.{tool_name}",
-                "attrs": check_attrs,
+                "attrs": attrs,
             })
             if decision.is_block:
                 # Annotate the (about-to-be-created) span with policy match info

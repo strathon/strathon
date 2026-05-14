@@ -25,7 +25,7 @@ Expressions are evaluated against a span context:
     "name":  "langgraph.tool.send_email",
     "attrs": {
         "gen_ai.tool.name": "send_email",
-        "strathon.tool.input": '{"to": "rival@competitor.com", ...}',
+        "strathon.tool.args": '{"to": "rival@competitor.com", ...}',
         "gen_ai.usage.total_tokens": 5000,
         # ... all OTel attrs available
     },
@@ -36,8 +36,40 @@ In CEL you access attrs with map indexing because the keys contain dots:
 
 ```
 attrs["gen_ai.tool.name"] == "send_email" &&
-attrs["strathon.tool.input"].contains("@competitor.com")
+attrs["strathon.tool.args"].contains("@competitor.com")
 ```
+
+### Standard attributes set by Strathon instrumentations
+
+These attributes are set consistently across all three framework integrations
+(LangGraph, CrewAI, OpenAI Agents SDK), so policies written against them are
+portable:
+
+| Attribute                       | Description                                  |
+|---------------------------------|----------------------------------------------|
+| `strathon.framework`            | One of `langgraph`, `crewai`, `agents`       |
+| `strathon.tool.name`            | The tool's name (also mirrored to `gen_ai.tool.name`) |
+| `strathon.tool.args`            | The tool's input arguments, as a JSON string |
+| `gen_ai.tool.name`              | Standard OTel attribute, same as `strathon.tool.name` |
+| `gen_ai.request.model`          | The model name (on LLM spans)                |
+| `gen_ai.usage.total_tokens`     | Token count (on LLM spans)                   |
+
+### Writing safe policy expressions
+
+CEL raises an error when you index a map with a key that doesn't exist. To
+write policies that work safely across span types where some attributes may
+be missing, guard accesses with `has()`:
+
+```
+has(attrs["gen_ai.tool.name"]) &&
+attrs["gen_ai.tool.name"] == "send_email" &&
+attrs["strathon.tool.args"].contains("@competitor.com")
+```
+
+In practice, when a policy errors out the SDK treats it as a non-match (the
+action is allowed), so missing-key errors fail safe — but they generate log
+noise and reduce policy effectiveness. Use `has()` for any attribute that
+isn't guaranteed to exist on every span.
 
 ## Actions
 
@@ -61,7 +93,7 @@ curl -X POST http://localhost:4318/v1/policies \
   -d '{
     "name": "block_competitor_email",
     "description": "Prevent agents from emailing competitor addresses",
-    "match_expression": "attrs[\"gen_ai.tool.name\"] == \"send_email\" && attrs[\"strathon.tool.input\"].contains(\"@competitor.com\")",
+    "match_expression": "attrs[\"gen_ai.tool.name\"] == \"send_email\" && attrs[\"strathon.tool.args\"].contains(\"@competitor.com\")",
     "action": "block",
     "action_config": {"message": "Cannot email a competitor address."},
     "priority": 100

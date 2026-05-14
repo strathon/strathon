@@ -1,39 +1,35 @@
-"""Runtime intervention demo: Strathon blocks a real LangChain tool call.
+"""CrewAI runtime intervention demo: Strathon blocks a real Crew tool call.
 
-This is the killer-feature demo. Three things happen:
+This is the CrewAI counterpart to examples/intervention_demo.py. Three things
+happen:
 
-1. We register a CEL policy with the receiver that says "block any send_email
-   tool call where the body contains @competitor.com".
+1. A CEL policy is registered with the receiver: "block any send_email tool
+   call where the input contains @competitor.com".
 
 2. The SDK pulls policies from the receiver in the background.
 
-3. We invoke a real LangChain tool through a LangGraph-style callback handler.
-   When the agent tries to email a competitor address, Strathon raises
-   StrathonPolicyBlocked *before* the tool's underlying function runs.
-   When the agent emails an internal address, the tool runs normally.
+3. A real CrewAI tool (built from BaseTool, wrapped to CrewStructuredTool) is
+   invoked twice. The first invocation targets a competitor address and is
+   blocked before the tool body runs. The second invocation targets an internal
+   address and runs normally.
 
-This is exactly the workflow:
-
-    - LangChain on_tool_start fires
-    - Strathon's handler calls client.check_policy(tool_attrs)
-    - PolicyEnforcer evaluates the CEL expression against the candidate args
-    - If matched, returns PolicyDecision(action='block', ...)
-    - Handler raises StrathonPolicyBlocked, LangChain propagates the exception,
-      tool body never executes.
+The block point for CrewAI is `CrewStructuredTool.invoke`, patched by
+strathon.instrumentation.crewai.instrument() at install time. The patch
+calls client.check_policy() before delegating to the original method.
 
 Prerequisites:
-    pip install strathon langchain-core cel-python
-    Receiver running at http://localhost:4318 with the policies migration applied.
+    pip install strathon crewai cel-python
+    Receiver running at http://localhost:4318 with migrations applied.
 
 Run:
-    python intervention_demo.py
+    python crewai_intervention_demo.py
 """
 
 import json
 import time
 from urllib.request import Request, urlopen
 
-from langchain_core.tools import tool
+from crewai.tools import BaseTool
 
 from strathon import Client
 from strathon.policy import StrathonPolicyBlocked
@@ -42,19 +38,21 @@ from strathon.policy import StrathonPolicyBlocked
 RECEIVER_URL = "http://localhost:4318"
 
 
-# ---- A real LangChain tool. Whether this function body runs is the test. ----
+# ---- A real CrewAI tool. Whether _run executes is the test. ----
 
 _emails_actually_sent: list[dict] = []
 
 
-@tool
-def send_email(to: str, subject: str, body: str) -> str:
-    """Send an email to the given recipient. Returns a confirmation string."""
-    _emails_actually_sent.append({"to": to, "subject": subject, "body": body})
-    return f"sent email to {to}"
+class SendEmailTool(BaseTool):
+    name: str = "send_email"
+    description: str = "Send an email to the given recipient."
+
+    def _run(self, to: str = "", subject: str = "", body: str = "") -> str:
+        _emails_actually_sent.append({"to": to, "subject": subject, "body": body})
+        return f"sent email to {to}"
 
 
-# ---- Policy management helpers (talk to the receiver via REST) ----
+# ---- REST helpers ----
 
 
 def _post(url: str, payload: dict) -> dict:
@@ -84,18 +82,16 @@ def _delete(url: str) -> None:
 
 def install_demo_policy() -> dict:
     """Create the flagship block policy. Returns the created row."""
-    # Remove any policy with the same name from prior runs so this demo is
-    # reproducible. We do it the easy way: list, find by name, delete.
     existing = _get(f"{RECEIVER_URL}/v1/policies").get("policies", [])
     for p in existing:
-        if p["name"] == "block_competitor_email_demo":
+        if p["name"] == "block_competitor_email_crewai_demo":
             _delete(f"{RECEIVER_URL}/v1/policies/{p['id']}")
 
     return _post(
         f"{RECEIVER_URL}/v1/policies",
         {
-            "name": "block_competitor_email_demo",
-            "description": "Demo policy: prevent agents from emailing @competitor.com",
+            "name": "block_competitor_email_crewai_demo",
+            "description": "Demo policy: prevent CrewAI tools from emailing @competitor.com",
             "match_expression": (
                 'attrs["gen_ai.tool.name"] == "send_email" && '
                 'attrs["strathon.tool.args"].contains("@competitor.com")'
@@ -109,9 +105,6 @@ def install_demo_policy() -> dict:
     )
 
 
-# ---- The demo itself ----
-
-
 def main() -> None:
     print("Installing demo block policy via REST...")
     policy = install_demo_policy()
@@ -122,10 +115,9 @@ def main() -> None:
     client = Client(
         api_key="dev-key",
         endpoint=RECEIVER_URL,
-        service_name="intervention-demo",
+        service_name="crewai-intervention-demo",
         environment="dev",
     )
-    # Give the enforcer a tick to ensure the policy is loaded
     time.sleep(0.5)
 
     enforcer = client.policy_enforcer
@@ -133,41 +125,32 @@ def main() -> None:
         raise SystemExit("policies disabled on client; cannot run demo")
     print(f"  -> {len(enforcer.policies)} policies loaded into SDK enforcer")
 
-    from strathon.instrumentation.langgraph import instrument
+    from strathon.instrumentation.crewai import instrument
+    import strathon.instrumentation.crewai as mod
+    # Make demo reproducible across re-runs in the same process
+    mod._uninstall_policy_patch()
+    mod._REGISTERED_LISTENER = None
 
-    # Reset module singleton so demo is reproducible across runs in the same proc
-    import strathon.instrumentation.langgraph as mod
-    mod._REGISTERED_HANDLER = None
+    instrument(client)
+    print("  -> CrewAI instrumentation installed (event listener + policy patch)")
 
-    handler = instrument(client)
-    if handler is None:
-        raise SystemExit("langchain_core not installed")
+    # Build a real CrewAI tool. CrewAI's tool execution path goes through
+    # CrewStructuredTool.invoke, which is what we patch.
+    structured = SendEmailTool().to_structured_tool()
 
-    # ---- Scenario 1: agent tries to email a competitor. Must be blocked. ----
+    # ---- Scenario 1: tool call targeting competitor address. Must be blocked. ----
     print("\n--- Scenario 1: send_email to sales@competitor.com (should block) ---")
     try:
-        send_email.invoke(
-            {
-                "to": "sales@competitor.com",
-                "subject": "Hi",
-                "body": "wanted to chat",
-            },
-            config={"callbacks": [handler]},
-        )
+        structured.invoke({"to": "sales@competitor.com", "subject": "Hi", "body": "wanted to chat"})
         print("  UNEXPECTED: tool ran without being blocked")
     except StrathonPolicyBlocked as exc:
         print(f"  BLOCKED by policy '{exc.policy_name}'")
         print(f"  message: {exc.message}")
 
-    # ---- Scenario 2: innocuous internal email. Should run normally. ----
+    # ---- Scenario 2: tool call to an internal address. Should run normally. ----
     print("\n--- Scenario 2: send_email to team@mycompany.com (should run) ---")
-    result = send_email.invoke(
-        {
-            "to": "team@mycompany.com",
-            "subject": "Weekly update",
-            "body": "Things are going well.",
-        },
-        config={"callbacks": [handler]},
+    result = structured.invoke(
+        {"to": "team@mycompany.com", "subject": "Weekly update", "body": "All good."}
     )
     print(f"  result: {result}")
 
@@ -178,7 +161,7 @@ def main() -> None:
         print(f"    -> {e['to']} | {e['subject']}")
     print(
         "  (Expected: 1 email to team@mycompany.com. "
-        "The competitor email was blocked before send_email's body ran.)"
+        "The competitor email was blocked before SendEmailTool._run ran.)"
     )
 
     print("\nFlushing spans to receiver...")
