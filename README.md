@@ -88,4 +88,12 @@ v0 in active development. Target launch: end of June 2026.
 
 ## License
 
-MIT. See `LICENSE`.
+Strathon ships under two open-source licenses, by component:
+
+- **SDK** (`sdk/`) — Apache License 2.0. Explicit patent grant for users
+  who embed it in their code.
+- **Receiver** (`receiver/`) — MIT License. Maximum permissiveness for
+  self-hosting.
+
+See `LICENSING.md` for the rationale and `sdk/LICENSE` / `receiver/LICENSE`
+for the full texts.

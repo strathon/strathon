@@ -3,7 +3,8 @@ name = "strathon-receiver"
 version = "0.0.1"
 description = "Strathon OTLP receiver and intervention API"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Kavyansh Shakya" }]
 
 dependencies = [

@@ -1,21 +1,18 @@
-MIT License
+Strathon is a multi-component project with components under different
+open-source licenses. The summary:
+
+  sdk/        Apache License 2.0   (see sdk/LICENSE)
+  receiver/   MIT License          (see receiver/LICENSE)
+  examples/   MIT License          (same terms as receiver)
+  docs/       MIT License
+  tests/      MIT License
+  db/         MIT License
+
+See LICENSING.md for the rationale behind the split.
+
+When in doubt about a specific file, the license that applies is the one
+of the LICENSE file in the nearest enclosing directory; if none, the
+component's LICENSE applies; if neither, the MIT terms in receiver/LICENSE
+apply.
 
 Copyright (c) 2026 Kavyansh Shakya
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.

@@ -48,4 +48,4 @@ v0.1.0 in active development. Target stable release: June 2026.
 
 ## License
 
-MIT
+Apache License 2.0. See `LICENSE`.
