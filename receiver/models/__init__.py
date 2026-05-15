@@ -17,6 +17,7 @@ from .identity import ProjectMember, User
 from .intervention import Budget, HaltState, InterventionLog
 from .policies import Policy, PolicyMatch
 from .traces import Span, SpanEvent, SpanLink, Trace
+from .webhooks import WebhookDelivery, WebhookSigningKey
 
 __all__ = [
     # Base
@@ -45,4 +46,7 @@ __all__ = [
     # Git
     "GitHubIntegration",
     "GitCommit",
+    # Webhooks
+    "WebhookDelivery",
+    "WebhookSigningKey",
 ]

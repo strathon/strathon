@@ -24,7 +24,6 @@ from staying close to the data.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 from uuid import UUID
@@ -43,6 +42,7 @@ import policies as policy_mod
 import repositories.policies as policies_repo
 import repositories.traces as traces_repo
 import sampling
+import webhooks.dispatch as webhooks_dispatch
 from database import get_db_session
 
 from ._deps import require_scope
@@ -148,7 +148,9 @@ async def ingest_traces(
     # Collected (policy, trace_id, span_id, outcome) tuples for audit logging
     # after the main insert transaction commits. Webhooks fire after as well.
     matches_to_record: list[dict[str, Any]] = []
-    webhooks_to_fire: list[tuple[str, dict[str, Any]]] = []
+    # (url, payload, policy_id) — policy_id needed so the durable
+    # webhook_deliveries row can foreign-key to the policy that triggered it.
+    webhooks_to_fire: list[tuple[str, dict[str, Any], str]] = []
 
     # The FastAPI session is already the transaction. Everything written
     # via `session` here commits atomically when get_db_session's success
@@ -176,7 +178,7 @@ async def ingest_traces(
                 # leave dangling audit rows pointing to a span that
                 # was never persisted.
                 span_matches: list[dict[str, Any]] = []
-                span_webhooks: list[tuple[str, dict[str, Any]]] = []
+                span_webhooks: list[tuple[str, dict[str, Any], str]] = []
 
                 matched_policies = policy_mod.evaluate_for_span(
                     active_policies, span.name, merged_attrs
@@ -214,7 +216,7 @@ async def ingest_traces(
                                     "trace_id": trace_id.hex(),
                                     "span_id": span_id.hex(),
                                     "attrs": merged_attrs,
-                                }))
+                                }, p["id"]))
 
                 # ---- Sampling decision ----
                 # Made AFTER policy evaluation so the always-keep
@@ -326,9 +328,36 @@ async def ingest_traces(
         )
         state.metrics.policy_matches.labels(action=m["action"]).inc()
 
-    # Fire alert webhooks in the background (don't block the response)
-    for webhook_url, payload in webhooks_to_fire:
-        asyncio.create_task(policy_mod.fire_webhook(webhook_url, payload))
+    # Alert webhook delivery (commit C1: durable + retried + signed).
+    #
+    # For each matched alert policy, insert a webhook_deliveries row
+    # inside this request's transaction. The row is the durable record
+    # of "we owe this consumer one delivery." enqueue_delivery() also
+    # registers a SQLAlchemy after_commit hook that dispatches the
+    # Dramatiq message once the transaction is durable, so a rolled-back
+    # ingest produces no phantom send. If Redis is unreachable at
+    # dispatch time, the row stays `pending` and a sweeper task reclaims
+    # it later.
+    for webhook_url, payload, policy_id in webhooks_to_fire:
+        try:
+            from uuid import UUID as _UUID
+            policy_uuid = (
+                policy_id if isinstance(policy_id, _UUID) else _UUID(policy_id)
+            )
+            await webhooks_dispatch.enqueue_delivery(
+                session,
+                project_id=project_id,
+                policy_id=policy_uuid,
+                url=webhook_url,
+                payload=payload,
+            )
+        except Exception:
+            logger.exception(
+                "failed to enqueue webhook delivery for policy %s; "
+                "alert will not fire", policy_id,
+            )
+            # Don't fail ingest just because one webhook row didn't
+            # insert; other matches are still recorded.
 
     # OTLP spec requires returning ExportTraceServiceResponse on success
     resp = ExportTraceServiceResponse()

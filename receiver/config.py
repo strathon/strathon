@@ -81,6 +81,51 @@ class Settings(BaseSettings):
         default=5000, alias="STRATHON_RETENTION_BATCH_SIZE", ge=1
     )
 
+    # ---- Webhook delivery (alert action) ----
+    #
+    # The receiver fires webhooks for matched `alert`-action policies. The
+    # delivery layer uses Dramatiq + Redis to retry with exponential
+    # backoff, with the durable state mirrored in webhook_deliveries.
+    #
+    # If webhook_redis_url is left empty, Dramatiq's StubBroker is used:
+    # actor invocations run inline on the calling thread. That keeps
+    # local development and CI free of a Redis dependency — at the cost
+    # of putting webhook send latency on the OTLP ingest hot path. Set
+    # this URL in any production deployment.
+
+    webhook_redis_url: str = Field(
+        default="", alias="STRATHON_WEBHOOK_REDIS_URL",
+        description=(
+            "Redis connection URL for the Dramatiq webhook broker, e.g.\n"
+            "  redis://localhost:6379/0\n"
+            "When empty, the in-process StubBroker is used (dev/CI only)."
+        ),
+    )
+    webhook_max_attempts: int = Field(
+        default=8, alias="STRATHON_WEBHOOK_MAX_ATTEMPTS", ge=1, le=20,
+        description=(
+            "Maximum delivery attempts per webhook before dead-lettering. "
+            "With min_backoff=1s and max_backoff=6h, 8 attempts covers ~24h "
+            "of retry window — matching the recommended 1-3 day total window "
+            "from Standard Webhooks operational guidance."
+        ),
+    )
+    webhook_min_backoff_ms: int = Field(
+        default=1_000, alias="STRATHON_WEBHOOK_MIN_BACKOFF_MS", ge=100,
+    )
+    webhook_max_backoff_ms: int = Field(
+        default=6 * 60 * 60 * 1000,   # 6 hours
+        alias="STRATHON_WEBHOOK_MAX_BACKOFF_MS", ge=1_000,
+    )
+    webhook_request_timeout_sec: float = Field(
+        default=10.0, alias="STRATHON_WEBHOOK_REQUEST_TIMEOUT_SEC", gt=0,
+        description=(
+            "Per-attempt HTTP timeout. GitHub recommends ~10s windows for "
+            "webhook ACKs; we match that. Operators with slow consumers "
+            "can extend, but increase max_attempts proportionally."
+        ),
+    )
+
     # ---- Derived properties ----
 
     @field_validator("database_url")

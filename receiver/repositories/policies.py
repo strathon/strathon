@@ -2,8 +2,8 @@
 
 Session-aware replacements for the raw-asyncpg CRUD functions previously
 in receiver/policies.py. The CEL evaluator now lives in policies_eval.py
-and the ingest-side matcher (evaluate_for_span, fire_webhook) stays in
-policies.py.
+and the ingest-side matcher (evaluate_for_span) stays in policies.py.
+Webhook delivery moved to the webhooks/ package in commit C1.
 
 Update semantics:
     The `updated_at` column is set explicitly by update_policy. The

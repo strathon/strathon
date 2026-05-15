@@ -25,6 +25,13 @@ dependencies = [
     "authlib>=1.4.0",
     "cel-python>=0.4.0",
     "prometheus-client>=0.21.0",
+    # Webhook delivery infrastructure (commit C: reliable alert webhooks).
+    # dramatiq is the queue layer; redis is its broker. standardwebhooks is
+    # the spec library for HMAC-SHA256 signing per the Standard Webhooks
+    # specification (https://github.com/standard-webhooks/standard-webhooks)
+    # adopted by OpenAI, Anthropic, Google Gemini, Svix, Kong, Supabase.
+    "dramatiq[redis]>=1.17.0",
+    "standardwebhooks>=1.0.0",
 ]
 
 [project.optional-dependencies]

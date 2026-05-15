@@ -15,11 +15,8 @@ keep working without churn.
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 from typing import Any, Dict, List
-from urllib.parse import urlparse
 
 # Re-export so back-compat imports from main.py and elsewhere keep working
 from policies_eval import PolicyExpressionError  # noqa: F401
@@ -112,61 +109,14 @@ def evaluate_for_span(
     return matched
 
 
-# ---- Webhook firing -----------------------------------------------------
-
-
-async def fire_webhook(
-    url: str, payload: Dict[str, Any], timeout_sec: float = 5.0
-) -> bool:
-    """Fire-and-(mostly)-forget webhook POST.
-
-    Returns True on 2xx, False otherwise. Uses stdlib urllib in a thread
-    executor so we don't block the event loop and don't add another
-    dependency for what's a tiny POST request.
-    """
-    if not url:
-        return False
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        logger.warning("webhook url has unsupported scheme: %s", parsed.scheme)
-        return False
-
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _post_webhook, url, payload, timeout_sec)
-
-
-def _post_webhook(url: str, payload: Dict[str, Any], timeout_sec: float) -> bool:
-    """Synchronous helper run inside a thread executor."""
-    import urllib.error
-    import urllib.request
-
-    body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=body,
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": "Strathon-Receiver/0.1",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
-            return 200 <= resp.status < 300
-    except urllib.error.HTTPError as exc:
-        logger.warning("webhook %s returned %s", url, exc.code)
-        return False
-    except (urllib.error.URLError, TimeoutError) as exc:
-        logger.warning("webhook %s failed: %s", url, exc)
-        return False
-    except Exception:
-        logger.exception("webhook %s raised unexpectedly", url)
-        return False
+# Webhook firing has moved to the webhooks/ package (commit C1).
+# fire_webhook here was fire-and-forget with no retries, signing, or
+# durability — see webhooks.dispatch.enqueue_delivery for the
+# reliable replacement.
 
 
 __all__ = [
     "PolicyExpressionError",
     "VALID_ACTIONS",
     "evaluate_for_span",
-    "fire_webhook",
 ]
