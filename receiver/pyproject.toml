@@ -10,6 +10,12 @@ authors = [{ name = "Kavyansh Shakya" }]
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
+    # psycopg3 is the canonical driver going forward — used by both
+    # Alembic (sync) and the new SQLAlchemy 2.0 async engine.
+    "psycopg[binary]>=3.2.0",
+    # asyncpg is transitional: main.py, auth.py, policies.py, and retention.py
+    # still use it directly. They migrate to AsyncSession over stages 2-5 of
+    # the ORM refactor, after which asyncpg can be removed.
     "asyncpg>=0.30.0",
     "sqlalchemy[asyncio]>=2.0.36",
     "alembic>=1.14.0",

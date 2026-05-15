@@ -22,10 +22,11 @@ docker compose up
 
 On first start:
 
-1. Postgres pulls and initializes
-2. The migrations in `db/migrations/` run automatically against the empty
-   database (`docker-entrypoint-initdb.d` mount)
-3. The receiver builds and starts
+1. Postgres pulls and initializes (empty database)
+2. The receiver builds and starts
+3. The receiver runs `alembic upgrade head` in its startup lifespan,
+   creating the schema and seeding the dev API key. Idempotent on every
+   subsequent start.
 4. The receiver detects the seeded dev API key and prints a quickstart
    banner with the key value, endpoint, and rotation hint
 
@@ -75,6 +76,7 @@ defaults; the compose file picks it up automatically.
 | `POSTGRES_PASSWORD`                   | `strathon_dev`   | Postgres password.                     |
 | `STRATHON_LOG_LEVEL`                  | `INFO`           | Receiver log verbosity.                |
 | `STRATHON_LOG_FORMAT`                 | `text`           | `text` or `json` (one record per line).|
+| `STRATHON_AUTO_MIGRATE`               | `true`           | Run `alembic upgrade head` at startup. |
 | `STRATHON_SAMPLING_RATE`              | `1.0`            | 0.0-1.0. See docs/sampling.md.         |
 | `STRATHON_RETENTION_ENABLED`          | `true`           | Background trace cleanup.              |
 | `STRATHON_RETENTION_INTERVAL_SECONDS` | `3600`           | Seconds between retention sweeps.      |
@@ -110,21 +112,42 @@ make reset     # wipe volume + restart fresh
 
 ## Migrations & schema changes
 
-The migrations in `db/migrations/` are mounted into Postgres's
-`docker-entrypoint-initdb.d`. **They only run on first boot** — when the
-data directory is empty. If you've started Strathon before and then add a
-new migration file, you need either:
+Strathon uses [Alembic](https://alembic.sqlalchemy.org/) for schema
+management. Migrations live in `receiver/alembic/versions/` and run
+automatically when the receiver starts (idempotent — already-applied
+migrations are a no-op).
 
-- `docker compose down -v` to wipe the volume and re-initialize (loses
-  all data), or
-- Apply the new migration manually:
-  ```bash
-  docker compose exec -T postgres psql -U strathon -d strathon \
-      < db/migrations/00X_new.sql
-  ```
+When you add a new migration file and restart the receiver, the new
+revision applies automatically. No manual psql commands, no wiping the
+volume, no first-boot footgun.
 
-This is a well-known Postgres-on-Docker pattern. A proper migration tool
-(Alembic) lands in a future release.
+To create a new revision:
+
+```bash
+cd receiver
+DATABASE_URL=postgresql://... alembic revision -m "Add foo column"
+# Edit the generated file in alembic/versions/
+```
+
+To inspect the current state:
+
+```bash
+cd receiver
+DATABASE_URL=postgresql://... alembic current
+DATABASE_URL=postgresql://... alembic history
+```
+
+To disable the receiver's auto-migrate behavior (e.g. if you run
+migrations as a separate deploy step), set `STRATHON_AUTO_MIGRATE=false`
+in your environment. The receiver will then assume migrations have
+already been applied and start normally.
+
+To apply migrations manually (with auto-migrate off, or for ops runbook
+use):
+
+```bash
+docker compose exec receiver alembic upgrade head
+```
 
 ## Production deployment
 

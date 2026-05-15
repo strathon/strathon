@@ -147,9 +147,99 @@ async def _print_quickstart_banner(pool: asyncpg.Pool) -> None:
     sys.stderr.flush()
 
 
+async def _run_migrations() -> None:
+    """Run `alembic upgrade head` synchronously, offloaded to a thread.
+
+    Idempotent — if the database is already at head, this is a no-op
+    that costs a few hundred ms. Controllable via STRATHON_AUTO_MIGRATE
+    (default true). Set to false if you run migrations as a separate
+    deploy step (e.g. a Kubernetes initContainer or a release pipeline
+    step), which is the recommended pattern for multi-replica deployments
+    where you don't want every replica racing on the upgrade lock.
+
+    Self-healing for pre-Alembic deployments: if the database was
+    provisioned by the old raw-SQL migrations (tables exist, but
+    alembic_version table is empty or missing), we stamp it to head
+    instead of trying to re-run 001. This is a one-time fixup that
+    runs automatically on the first restart after upgrading to the
+    Alembic-managed schema. Subsequent starts see alembic_version
+    populated and run the normal idempotent upgrade.
+    """
+    auto = os.getenv("STRATHON_AUTO_MIGRATE", "true").lower()
+    if auto in ("false", "0", "no", "off"):
+        logger.info("Auto-migrate disabled (STRATHON_AUTO_MIGRATE=false); "
+                    "skipping alembic upgrade")
+        return
+
+    def _migrate_sync() -> None:
+        # Imported lazily so the receiver still imports cleanly if alembic
+        # ever needs to be optional (e.g. for tests that bypass migrations)
+        from alembic import command as alembic_command
+        from alembic.config import Config as AlembicConfig
+        from sqlalchemy import create_engine, inspect, text as sql_text
+
+        # alembic.ini sits next to main.py in receiver/. We resolve relative
+        # to this file so the receiver works regardless of cwd.
+        ini_path = os.path.join(os.path.dirname(__file__), "alembic.ini")
+        if not os.path.exists(ini_path):
+            raise RuntimeError(
+                f"alembic.ini not found at {ini_path}. "
+                "If you're running migrations separately, set "
+                "STRATHON_AUTO_MIGRATE=false to skip this step."
+            )
+
+        cfg = AlembicConfig(ini_path)
+
+        # Detect "pre-Alembic" databases that need stamping rather than
+        # upgrading. Signal: known table (projects) exists, but no
+        # alembic_version row. If we tried to upgrade in that state,
+        # 001 would fail with `relation "projects" already exists`.
+        # We use a sync engine since this is the sync Alembic context.
+        from config import settings as receiver_settings
+        sync_engine = create_engine(receiver_settings.sync_database_url, pool_pre_ping=True)
+        try:
+            with sync_engine.connect() as conn:
+                inspector = inspect(conn)
+                tables = set(inspector.get_table_names())
+                has_pre_alembic_schema = "projects" in tables
+                has_alembic_version = "alembic_version" in tables
+
+                version_row_count = 0
+                if has_alembic_version:
+                    version_row_count = conn.execute(
+                        sql_text("SELECT COUNT(*) FROM alembic_version")
+                    ).scalar_one()
+
+                needs_stamp = has_pre_alembic_schema and version_row_count == 0
+        finally:
+            sync_engine.dispose()
+
+        if needs_stamp:
+            logger.warning(
+                "Detected pre-Alembic database (existing tables, no alembic_version "
+                "row). Stamping to head — one-time fixup for the raw-SQL to Alembic "
+                "migration. No schema changes applied."
+            )
+            alembic_command.stamp(cfg, "head")
+            logger.info("Database stamped at head")
+            return
+
+        # Normal path: empty DB or already-stamped DB. Upgrade is a no-op
+        # in the latter case.
+        alembic_command.upgrade(cfg, "head")
+
+    logger.info("Running database migrations (alembic upgrade head)...")
+    await asyncio.to_thread(_migrate_sync)
+    logger.info("Database migrations complete")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Set up asyncpg connection pool and ensure the default project row exists."""
+    # Run migrations FIRST, before connecting the asyncpg pool. The pool
+    # would otherwise try to use tables that don't exist yet on first boot.
+    await _run_migrations()
+
     logger.info("Strathon receiver starting; connecting to Postgres")
     app.state.pool = await asyncpg.create_pool(ASYNCPG_URL, min_size=2, max_size=10)
 
