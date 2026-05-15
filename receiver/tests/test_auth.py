@@ -4,13 +4,15 @@ Pure helpers only — DB-touching code is exercised end-to-end through the
 demos and the existing curl-based integration test runs.
 """
 
+import os
 import sys
 
 # Receiver is not packaged; add it to sys.path so we can import directly.
-sys.path.insert(0, "/home/claude/strathon/receiver")
+_RECEIVER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _RECEIVER_DIR)
 
 
-from auth import (
+from auth import (  # noqa: E402  -- sys.path manipulation above
     KEY_PREFIX_LEN,
     KEY_SCHEME,
     _extract_bearer_token,

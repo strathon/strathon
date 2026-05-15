@@ -1,11 +1,12 @@
 """Unit tests for the metrics module."""
 
+import os
 import sys
 
+_RECEIVER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _RECEIVER_DIR)
 
-sys.path.insert(0, "/home/claude/strathon/receiver")
-
-from metrics import (
+from metrics import (  # noqa: E402  -- sys.path manipulation above
     RetentionCounters,
     StrathonMetrics,
     render_metrics,

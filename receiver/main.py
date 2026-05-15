@@ -11,7 +11,6 @@ Endpoints:
 """
 
 import asyncio
-import json
 import logging
 import os
 import sys
@@ -19,14 +18,14 @@ from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
 
-import asyncpg
-from fastapi import FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse, Response
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
     ExportTraceServiceRequest,
     ExportTraceServiceResponse,
 )
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import policies as policy_mod
 from policies import PolicyExpressionError
@@ -35,6 +34,10 @@ import sampling
 import retention
 import metrics as metrics_mod
 import logging_config
+from database import get_db_session
+import repositories.auth as auth_repo
+import repositories.policies as policies_repo
+import repositories.traces as traces_repo
 
 # Set up logging FIRST so any subsequent module-level logger.info()s use our format
 _active_log_format = logging_config.configure_logging()
@@ -42,13 +45,6 @@ _active_log_format = logging_config.configure_logging()
 logger = logging.getLogger("strathon.receiver")
 logger.info("Logging configured: format=%s", _active_log_format)
 
-
-# Accept the SQLAlchemy-style URL from env but strip the driver suffix for asyncpg
-_RAW_DB_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://strathon:strathon_dev@localhost:5432/strathon",
-)
-ASYNCPG_URL = _RAW_DB_URL.replace("postgresql+asyncpg://", "postgresql://")
 
 # Default project for v0; will be replaced by per-API-key resolution
 DEFAULT_PROJECT_SLUG = "default"
@@ -102,24 +98,24 @@ _SEEDED_DEV_KEY_ID = "00000000-0000-0000-0000-000000000010"
 _SEEDED_DEV_KEY_VALUE = "stra_dev_local_default_project_do_not_use_in_production"
 
 
-async def _print_quickstart_banner(pool: asyncpg.Pool) -> None:
+async def _print_quickstart_banner() -> None:
     """Print a one-time-readable banner when the seeded dev key is active.
 
     Looks up the well-known dev key by id. If present and not revoked, prints
     the value, the endpoint, and the rotation reminder. Silent in production
     deployments where the dev key has been revoked.
     """
+    from database import async_session_maker
+    from repositories.traces import is_dev_key_active
+
     try:
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT revoked_at FROM api_keys WHERE id = $1",
-                UUID(_SEEDED_DEV_KEY_ID),
-            )
+        async with async_session_maker() as session:
+            active = await is_dev_key_active(session, UUID(_SEEDED_DEV_KEY_ID))
     except Exception:
         logger.debug("quickstart banner: failed to check for dev key", exc_info=True)
         return
 
-    if row is None or row["revoked_at"] is not None:
+    if not active:
         return  # Production deployment; nothing to surface
 
     banner = (
@@ -235,26 +231,26 @@ async def _run_migrations() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Set up asyncpg connection pool and ensure the default project row exists."""
-    # Run migrations FIRST, before connecting the asyncpg pool. The pool
-    # would otherwise try to use tables that don't exist yet on first boot.
+    """Start up the receiver: migrations, default project, retention task."""
+    # Run migrations FIRST. Background ingest paths assume the schema is
+    # current; nothing in this lifespan should run before the DB is ready.
     await _run_migrations()
 
-    logger.info("Strathon receiver starting; connecting to Postgres")
-    app.state.pool = await asyncpg.create_pool(ASYNCPG_URL, min_size=2, max_size=10)
+    logger.info("Strathon receiver starting")
 
-    async with app.state.pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO projects (name, slug)
-            VALUES ('Default', $1)
-            ON CONFLICT (slug) DO UPDATE SET updated_at = NOW()
-            RETURNING id
-            """,
-            DEFAULT_PROJECT_SLUG,
+    # Ensure the default project (and its settings row) exists so a fresh
+    # deployment has somewhere to send traces before any user creates
+    # a real project. Uses its own short-lived session that commits
+    # explicitly — we don't yet have a request-scoped session here.
+    from database import async_session_maker
+    from repositories.traces import ensure_default_project
+
+    async with async_session_maker() as session:
+        app.state.default_project_id = await ensure_default_project(
+            session, DEFAULT_PROJECT_SLUG
         )
-        app.state.default_project_id = row["id"]
-        logger.info("Default project id: %s", app.state.default_project_id)
+        await session.commit()
+    logger.info("Default project id: %s", app.state.default_project_id)
 
     # Sampling config (env-driven) + counters for /metrics in C4
     app.state.sampling_config = sampling.SamplingConfig.from_env()
@@ -275,7 +271,6 @@ async def lifespan(app: FastAPI):
     retention_counters = metrics_mod.RetentionCounters(app.state.metrics)
     app.state.retention_task = asyncio.create_task(
         retention.retention_loop(
-            app.state.pool,
             app.state.retention_config,
             app.state.retention_shutdown,
             metrics_counters=retention_counters,
@@ -286,7 +281,7 @@ async def lifespan(app: FastAPI):
     # Quickstart banner: when the dev key seeded by migration 003 is still
     # active, surface it loudly. New users see "here's your key, here's the
     # endpoint, here's how to rotate" the moment the container starts.
-    await _print_quickstart_banner(app.state.pool)
+    await _print_quickstart_banner()
 
     yield
 
@@ -304,7 +299,9 @@ async def lifespan(app: FastAPI):
         except (asyncio.CancelledError, Exception):
             pass
 
-    await app.state.pool.close()
+    # Close the SQLAlchemy engine pool.
+    from database import dispose_engine
+    await dispose_engine()
 
 
 app = FastAPI(
@@ -338,7 +335,10 @@ async def metrics_endpoint() -> Response:
     return Response(content=body, media_type=content_type)
 
 
-async def _authenticated(authorization: str | None) -> auth.ApiKeyContext:
+async def _authenticated(
+    session: AsyncSession,
+    authorization: str | None,
+) -> auth.ApiKeyContext:
     """Resolve an API key and record success / failure on the metrics counters.
 
     Wraps ``auth.resolve_api_key`` so every protected endpoint contributes to
@@ -346,7 +346,7 @@ async def _authenticated(authorization: str | None) -> auth.ApiKeyContext:
     itself stays metrics-free (no circular import on app.state.metrics).
     """
     try:
-        ctx = await auth.resolve_api_key(app.state.pool, authorization)
+        ctx = await auth.resolve_api_key(session, authorization)
     except HTTPException:
         app.state.metrics.auth_failures.inc()
         raise
@@ -359,6 +359,7 @@ async def ingest_traces(
     request: Request,
     authorization: str | None = Header(default=None),
     content_type: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_db_session),
 ) -> Response:
     """
     OTLP/HTTP trace ingestion endpoint.
@@ -368,7 +369,7 @@ async def ingest_traces(
     ExportTraceServiceResponse (empty body on success).
     """
     # Authenticate and resolve which project this batch belongs to
-    auth_ctx = await _authenticated(authorization)
+    auth_ctx = await _authenticated(session, authorization)
     project_id = auth_ctx.project_id
 
     body = await request.body()
@@ -387,11 +388,17 @@ async def ingest_traces(
     trace_ids_seen: set[bytes] = set()
 
     # Pull active policies once for this batch; cheap and gives consistent
-    # evaluation across all spans in a single ingest call.
+    # evaluation across all spans in a single ingest call. The policy
+    # repository returns Pydantic models — convert to dicts so the legacy
+    # evaluate_for_span call sites (which accept the raw shape) keep working.
     try:
-        active_policies = await policy_mod.list_policies(
-            app.state.pool, project_id, only_enabled=True
+        policy_models = await policies_repo.list_policies(
+            session, project_id, only_enabled=True
         )
+        active_policies = [
+            {**p.model_dump(mode="python"), "id": str(p.id)}
+            for p in policy_models
+        ]
     except Exception:
         logger.exception("failed to load policies for ingest; proceeding without policy eval")
         active_policies = []
@@ -401,168 +408,156 @@ async def ingest_traces(
     matches_to_record: list[dict[str, Any]] = []
     webhooks_to_fire: list[tuple[str, dict[str, Any]]] = []
 
-    async with app.state.pool.acquire() as conn:
-        async with conn.transaction():
-            for resource_spans in req.resource_spans:
-                resource_attrs = attrs_to_dict(resource_spans.resource.attributes)
+    # The FastAPI session is already the transaction. Everything written
+    # via `session` here commits atomically when get_db_session's success
+    # path fires, or rolls back together on any raised exception.
+    for resource_spans in req.resource_spans:
+        resource_attrs = attrs_to_dict(resource_spans.resource.attributes)
 
-                for scope_spans in resource_spans.scope_spans:
-                    for span in scope_spans.spans:
-                        trace_id = span.trace_id
-                        span_id = span.span_id
-                        parent_span_id = span.parent_span_id if span.parent_span_id else None
+        for scope_spans in resource_spans.scope_spans:
+            for span in scope_spans.spans:
+                trace_id = span.trace_id
+                span_id = span.span_id
+                parent_span_id = span.parent_span_id if span.parent_span_id else None
 
-                        span_attrs = attrs_to_dict(span.attributes)
-                        merged_attrs = {**resource_attrs, **span_attrs}
+                span_attrs = attrs_to_dict(span.attributes)
+                merged_attrs = {**resource_attrs, **span_attrs}
 
-                        # Evaluate policies against this span. For log/alert we
-                        # annotate the span attributes and record the match;
-                        # block/steer policies are SDK-side and the SDK has
-                        # already enforced them, but we still surface a record
-                        # of the match here for visibility.
-                        #
-                        # We buffer per-span matches/webhooks locally so that
-                        # if the sampling decision drops the span, we don't
-                        # leave dangling audit rows pointing to a span that
-                        # was never persisted.
-                        span_matches: list[dict[str, Any]] = []
-                        span_webhooks: list[tuple[str, dict[str, Any]]] = []
+                # Evaluate policies against this span. For log/alert we
+                # annotate the span attributes and record the match;
+                # block/steer policies are SDK-side and the SDK has
+                # already enforced them, but we still surface a record
+                # of the match here for visibility.
+                #
+                # We buffer per-span matches/webhooks locally so that
+                # if the sampling decision drops the span, we don't
+                # leave dangling audit rows pointing to a span that
+                # was never persisted.
+                span_matches: list[dict[str, Any]] = []
+                span_webhooks: list[tuple[str, dict[str, Any]]] = []
 
-                        matched_policies = policy_mod.evaluate_for_span(
-                            active_policies, span.name, merged_attrs
-                        )
-                        if matched_policies:
-                            matched_ids = [p["id"] for p in matched_policies]
-                            matched_actions = sorted({p["action"] for p in matched_policies})
-                            merged_attrs["strathon.policy.matched_ids"] = ",".join(matched_ids)
-                            merged_attrs["strathon.policy.matched_actions"] = ",".join(matched_actions)
-                            for p in matched_policies:
-                                outcome = {
-                                    "log": "logged",
-                                    "alert": "alert_queued",
-                                    "block": "block_recorded",
-                                    "steer": "steer_recorded",
-                                }.get(p["action"], "recorded")
-                                span_matches.append({
+                matched_policies = policy_mod.evaluate_for_span(
+                    active_policies, span.name, merged_attrs
+                )
+                if matched_policies:
+                    matched_ids = [p["id"] for p in matched_policies]
+                    matched_actions = sorted({p["action"] for p in matched_policies})
+                    merged_attrs["strathon.policy.matched_ids"] = ",".join(matched_ids)
+                    merged_attrs["strathon.policy.matched_actions"] = ",".join(matched_actions)
+                    for p in matched_policies:
+                        outcome = {
+                            "log": "logged",
+                            "alert": "alert_queued",
+                            "block": "block_recorded",
+                            "steer": "steer_recorded",
+                        }.get(p["action"], "recorded")
+                        span_matches.append({
+                            "policy_id": p["id"],
+                            "trace_id": trace_id,
+                            "span_id": span_id,
+                            "action": p["action"],
+                            "outcome": outcome,
+                            "metadata": {
+                                "span_name": span.name,
+                                "policy_name": p["name"],
+                            },
+                        })
+                        if p["action"] == "alert":
+                            webhook_url = (p.get("action_config") or {}).get("webhook_url")
+                            if webhook_url:
+                                span_webhooks.append((webhook_url, {
                                     "policy_id": p["id"],
-                                    "trace_id": trace_id,
-                                    "span_id": span_id,
-                                    "action": p["action"],
-                                    "outcome": outcome,
-                                    "metadata": {
-                                        "span_name": span.name,
-                                        "policy_name": p["name"],
-                                    },
-                                })
-                                if p["action"] == "alert":
-                                    webhook_url = (p.get("action_config") or {}).get("webhook_url")
-                                    if webhook_url:
-                                        span_webhooks.append((webhook_url, {
-                                            "policy_id": p["id"],
-                                            "policy_name": p["name"],
-                                            "span_name": span.name,
-                                            "trace_id": trace_id.hex(),
-                                            "span_id": span_id.hex(),
-                                            "attrs": merged_attrs,
-                                        }))
+                                    "policy_name": p["name"],
+                                    "span_name": span.name,
+                                    "trace_id": trace_id.hex(),
+                                    "span_id": span_id.hex(),
+                                    "attrs": merged_attrs,
+                                }))
 
-                        # ---- Sampling decision ----
-                        # Made AFTER policy evaluation so the always-keep
-                        # rules can see strathon.policy.* annotations.
-                        status_code_name = STATUS_CODE_NAMES.get(span.status.code, "UNSET")
-                        keep, force_kept = sampling.should_keep_span(
-                            trace_id,
-                            merged_attrs,
-                            status_code_name,
-                            app.state.sampling_config,
-                        )
-                        if not keep:
-                            app.state.sampling_counters.record_dropped()
-                            continue
-                        app.state.sampling_counters.record_kept(force_kept=force_kept)
+                # ---- Sampling decision ----
+                # Made AFTER policy evaluation so the always-keep
+                # rules can see strathon.policy.* annotations.
+                status_code_name = STATUS_CODE_NAMES.get(span.status.code, "UNSET")
+                keep, force_kept = sampling.should_keep_span(
+                    trace_id,
+                    merged_attrs,
+                    status_code_name,
+                    app.state.sampling_config,
+                )
+                if not keep:
+                    app.state.sampling_counters.record_dropped()
+                    continue
+                app.state.sampling_counters.record_kept(force_kept=force_kept)
 
-                        # Commit this span's matches/webhooks to the outer
-                        # lists now that we know we're persisting the span.
-                        matches_to_record.extend(span_matches)
-                        webhooks_to_fire.extend(span_webhooks)
+                # Commit this span's matches/webhooks to the outer
+                # lists now that we know we're persisting the span.
+                matches_to_record.extend(span_matches)
+                webhooks_to_fire.extend(span_webhooks)
 
-                        # Denormalize common gen_ai.* and strathon.agent.* fields
-                        operation_name = span_attrs.get("gen_ai.operation.name")
-                        provider_name = (
-                            span_attrs.get("gen_ai.provider.name")
-                            or span_attrs.get("gen_ai.system")
-                        )
-                        request_model = span_attrs.get("gen_ai.request.model")
-                        response_model = span_attrs.get("gen_ai.response.model")
-                        agent_name = (
-                            span_attrs.get("gen_ai.agent.name")
-                            or span_attrs.get("strathon.agent.name")
-                        )
-                        agent_id = (
-                            span_attrs.get("gen_ai.agent.id")
-                            or span_attrs.get("strathon.agent.id")
-                        )
-                        tool_name = span_attrs.get("gen_ai.tool.name")
-                        workflow_name = span_attrs.get("gen_ai.workflow.name")
-                        conversation_id = span_attrs.get("gen_ai.conversation.id")
+                # Denormalize common gen_ai.* and strathon.agent.* fields
+                operation_name = span_attrs.get("gen_ai.operation.name")
+                provider_name = (
+                    span_attrs.get("gen_ai.provider.name")
+                    or span_attrs.get("gen_ai.system")
+                )
+                request_model = span_attrs.get("gen_ai.request.model")
+                response_model = span_attrs.get("gen_ai.response.model")
+                agent_name = (
+                    span_attrs.get("gen_ai.agent.name")
+                    or span_attrs.get("strathon.agent.name")
+                )
+                agent_id = (
+                    span_attrs.get("gen_ai.agent.id")
+                    or span_attrs.get("strathon.agent.id")
+                )
+                tool_name = span_attrs.get("gen_ai.tool.name")
+                workflow_name = span_attrs.get("gen_ai.workflow.name")
+                conversation_id = span_attrs.get("gen_ai.conversation.id")
 
-                        input_tokens = span_attrs.get("gen_ai.usage.input_tokens")
-                        output_tokens = span_attrs.get("gen_ai.usage.output_tokens")
+                input_tokens = span_attrs.get("gen_ai.usage.input_tokens")
+                output_tokens = span_attrs.get("gen_ai.usage.output_tokens")
 
-                        # Upsert trace row before inserting the span (FK requirement)
-                        if trace_id not in trace_ids_seen:
-                            await conn.execute(
-                                """
-                                INSERT INTO traces (id, project_id, start_time_unix_nano, agent_name)
-                                VALUES ($1, $2, $3, $4)
-                                ON CONFLICT (id) DO NOTHING
-                                """,
-                                trace_id,
-                                project_id,
-                                span.start_time_unix_nano,
-                                agent_name,
-                            )
-                            trace_ids_seen.add(trace_id)
+                # Upsert trace row before inserting the span (FK requirement).
+                # Idempotent at the trace level — only the first span in a
+                # trace actually inserts.
+                if trace_id not in trace_ids_seen:
+                    await traces_repo.upsert_trace(
+                        session,
+                        trace_id=trace_id,
+                        project_id=project_id,
+                        start_time_unix_nano=span.start_time_unix_nano,
+                        agent_name=agent_name,
+                    )
+                    trace_ids_seen.add(trace_id)
 
-                        await conn.execute(
-                            """
-                            INSERT INTO spans (
-                                trace_id, span_id, parent_span_id, project_id,
-                                name, kind, start_time_unix_nano, end_time_unix_nano,
-                                status_code, status_message,
-                                operation_name, provider_name, request_model, response_model,
-                                agent_name, agent_id, tool_name, workflow_name, conversation_id,
-                                input_tokens, output_tokens,
-                                attributes
-                            )
-                            VALUES (
-                                $1, $2, $3, $4,
-                                $5, $6, $7, $8,
-                                $9, $10,
-                                $11, $12, $13, $14,
-                                $15, $16, $17, $18, $19,
-                                $20, $21,
-                                $22::jsonb
-                            )
-                            ON CONFLICT (trace_id, span_id) DO UPDATE SET
-                                end_time_unix_nano = EXCLUDED.end_time_unix_nano,
-                                status_code = EXCLUDED.status_code,
-                                status_message = EXCLUDED.status_message,
-                                attributes = spans.attributes || EXCLUDED.attributes
-                            """,
-                            trace_id, span_id, parent_span_id, project_id,
-                            span.name,
-                            SPAN_KIND_NAMES.get(span.kind, "UNSPECIFIED"),
-                            span.start_time_unix_nano,
-                            span.end_time_unix_nano if span.end_time_unix_nano else None,
-                            STATUS_CODE_NAMES.get(span.status.code, "UNSET"),
-                            span.status.message or None,
-                            operation_name, provider_name, request_model, response_model,
-                            agent_name, agent_id, tool_name, workflow_name, conversation_id,
-                            input_tokens, output_tokens,
-                            json.dumps(merged_attrs),
-                        )
-                        span_count += 1
+                await traces_repo.upsert_span(
+                    session,
+                    trace_id=trace_id,
+                    span_id=span_id,
+                    parent_span_id=parent_span_id,
+                    project_id=project_id,
+                    name=span.name,
+                    kind=SPAN_KIND_NAMES.get(span.kind, "UNSPECIFIED"),
+                    start_time_unix_nano=span.start_time_unix_nano,
+                    end_time_unix_nano=(
+                        span.end_time_unix_nano if span.end_time_unix_nano else None
+                    ),
+                    status_code=STATUS_CODE_NAMES.get(span.status.code, "UNSET"),
+                    status_message=span.status.message or None,
+                    operation_name=operation_name,
+                    provider_name=provider_name,
+                    request_model=request_model,
+                    response_model=response_model,
+                    agent_name=agent_name,
+                    agent_id=agent_id,
+                    tool_name=tool_name,
+                    workflow_name=workflow_name,
+                    conversation_id=conversation_id,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    attributes=merged_attrs,
+                )
+                span_count += 1
 
     logger.info(
         "Ingested %d spans across %d traces",
@@ -577,8 +572,8 @@ async def ingest_traces(
 
     # Record policy matches in audit log (best-effort; never blocks ingest)
     for m in matches_to_record:
-        await policy_mod.record_match(
-            app.state.pool,
+        await policies_repo.record_match(
+            session,
             UUID(m["policy_id"]) if not isinstance(m["policy_id"], UUID) else m["policy_id"],
             project_id,
             m["trace_id"],
@@ -624,26 +619,29 @@ def _coerce_project_id(value: str | None) -> UUID:
 
 async def _require_auth(
     authorization: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_db_session),
 ) -> auth.ApiKeyContext:
     """FastAPI dependency that resolves the Bearer token to a project context."""
-    return await _authenticated(authorization)
+    return await _authenticated(session, authorization)
 
 
 @app.get("/v1/policies")
 async def list_policies_endpoint(
     authorization: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    ctx = await _authenticated(authorization)
-    policies = await policy_mod.list_policies(app.state.pool, ctx.project_id)
-    return {"policies": policies}
+    ctx = await _authenticated(session, authorization)
+    policies = await policies_repo.list_policies(session, ctx.project_id)
+    return {"policies": [p.model_dump(mode="json") for p in policies]}
 
 
 @app.post("/v1/policies", status_code=status.HTTP_201_CREATED)
 async def create_policy_endpoint(
     payload: dict[str, Any],
     authorization: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    ctx = await _authenticated(authorization)
+    ctx = await _authenticated(session, authorization)
     required = {"name", "match_expression", "action"}
     missing = required - set(payload.keys())
     if missing:
@@ -652,8 +650,8 @@ async def create_policy_endpoint(
             detail=f"missing required fields: {sorted(missing)}",
         )
     try:
-        policy = await policy_mod.create_policy(
-            app.state.pool,
+        policy = await policies_repo.create_policy(
+            session,
             ctx.project_id,
             name=payload["name"],
             description=payload.get("description"),
@@ -674,23 +672,24 @@ async def create_policy_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
-    return policy
+    return policy.model_dump(mode="json")
 
 
 @app.get("/v1/policies/{policy_id}")
 async def get_policy_endpoint(
     policy_id: str,
     authorization: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    ctx = await _authenticated(authorization)
+    ctx = await _authenticated(session, authorization)
     try:
         pid_uuid = UUID(policy_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid policy_id")
-    policy = await policy_mod.get_policy(app.state.pool, ctx.project_id, pid_uuid)
+    policy = await policies_repo.get_policy(session, ctx.project_id, pid_uuid)
     if not policy:
         raise HTTPException(status_code=404, detail="policy not found")
-    return policy
+    return policy.model_dump(mode="json")
 
 
 @app.patch("/v1/policies/{policy_id}")
@@ -698,15 +697,16 @@ async def update_policy_endpoint(
     policy_id: str,
     payload: dict[str, Any],
     authorization: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    ctx = await _authenticated(authorization)
+    ctx = await _authenticated(session, authorization)
     try:
         pid_uuid = UUID(policy_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid policy_id")
     try:
-        policy = await policy_mod.update_policy(
-            app.state.pool, ctx.project_id, pid_uuid, **payload
+        policy = await policies_repo.update_policy(
+            session, ctx.project_id, pid_uuid, **payload
         )
     except PolicyExpressionError as exc:
         raise HTTPException(status_code=400, detail=f"invalid match expression: {exc}")
@@ -714,20 +714,21 @@ async def update_policy_endpoint(
         raise HTTPException(status_code=400, detail=str(exc))
     if not policy:
         raise HTTPException(status_code=404, detail="policy not found")
-    return policy
+    return policy.model_dump(mode="json")
 
 
 @app.delete("/v1/policies/{policy_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_policy_endpoint(
     policy_id: str,
     authorization: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_db_session),
 ) -> Response:
-    ctx = await _authenticated(authorization)
+    ctx = await _authenticated(session, authorization)
     try:
         pid_uuid = UUID(policy_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid policy_id")
-    deleted = await policy_mod.delete_policy(app.state.pool, ctx.project_id, pid_uuid)
+    deleted = await policies_repo.delete_policy(session, ctx.project_id, pid_uuid)
     if not deleted:
         raise HTTPException(status_code=404, detail="policy not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -744,30 +745,42 @@ async def delete_policy_endpoint(
 async def list_api_keys_endpoint(
     project_id: str | None = None,
     include_revoked: bool = False,
+    session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     pid = _coerce_project_id(project_id)
-    keys = await auth.list_api_keys(app.state.pool, pid, include_revoked=include_revoked)
-    return {"api_keys": keys}
+    keys = await auth_repo.list_api_keys(session, pid, include_revoked=include_revoked)
+    # mode="json" coerces UUIDs to strings and datetimes to ISO strings,
+    # preserving the response shape the previous asyncpg-based serializer
+    # produced.
+    return {"api_keys": [k.model_dump(mode="json") for k in keys]}
 
 
 @app.post("/v1/api_keys", status_code=status.HTTP_201_CREATED)
-async def create_api_key_endpoint(payload: dict[str, Any]) -> dict[str, Any]:
+async def create_api_key_endpoint(
+    payload: dict[str, Any],
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
     name = payload.get("name")
     if not name:
         raise HTTPException(status_code=400, detail="missing required field: name")
     pid = _coerce_project_id(payload.get("project_id"))
-    row, raw_key = await auth.create_api_key(app.state.pool, pid, name=name)
+    response = await auth_repo.create_api_key(session, pid, name=name)
     # The raw key is returned ONCE. Callers must save it; it cannot be retrieved later.
-    return {**row, "key": raw_key}
+    # Response shape matches the previous asyncpg-based endpoint: api_key fields
+    # flattened at the top level, plus "key" for the raw secret.
+    return {**response.api_key.model_dump(mode="json"), "key": response.raw_key}
 
 
 @app.delete("/v1/api_keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def revoke_api_key_endpoint(key_id: str) -> Response:
+async def revoke_api_key_endpoint(
+    key_id: str,
+    session: AsyncSession = Depends(get_db_session),
+) -> Response:
     try:
         kid_uuid = UUID(key_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid key_id")
-    revoked = await auth.revoke_api_key(app.state.pool, kid_uuid)
+    revoked = await auth_repo.revoke_api_key(session, kid_uuid)
     if not revoked:
         raise HTTPException(status_code=404, detail="api key not found or already revoked")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

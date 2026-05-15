@@ -4,6 +4,11 @@ Deletes traces (and via FK cascade, their spans / span_events / span_links /
 policy_matches) older than each project's configured
 ``project_settings.trace_retention_days``.
 
+After stage 4 of the ORM refactor:
+- DB work lives in receiver/repositories/retention.py (uses AsyncSession)
+- This module owns the loop + config + env-parsing
+- The loop constructs its own session per sweep via async_session_maker
+
 ### Design
 
 - Single background task loop owned by the FastAPI lifespan
@@ -15,7 +20,7 @@ policy_matches) older than each project's configured
 - Counts deletions for /metrics exposure
 - Disabled with ``STRATHON_RETENTION_ENABLED=false``
 
-### Why not a server-side cron / pg_cron extension
+### Why not server-side cron / pg_cron extension
 
 We want zero-extra-infrastructure deploys for v1. A single `uvicorn` process
 running this background task covers the 95% case (single-receiver
@@ -36,22 +41,27 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import time
 from dataclasses import dataclass
 
-import asyncpg
+# Re-export for back-compat with tests / external callers
+from repositories.retention import NS_PER_DAY, cleanup_once  # noqa: F401
 
 logger = logging.getLogger("strathon.receiver.retention")
 
 
 DEFAULT_INTERVAL_SECONDS = 3600  # 1 hour
 DEFAULT_BATCH_SIZE = 5000  # max traces deleted per project per pass
-NS_PER_DAY = 86_400 * 1_000_000_000
 
 
 @dataclass(frozen=True)
 class RetentionConfig:
-    """Effective retention configuration for the receiver."""
+    """Effective retention configuration for the receiver.
+
+    Resolved from environment variables via ``from_env()``. Kept as a
+    frozen dataclass rather than reading from settings on every loop
+    iteration so the loop's behavior is fixed at startup time — operators
+    changing env vars during runtime would expect a restart to apply.
+    """
 
     enabled: bool
     interval_seconds: int
@@ -59,6 +69,30 @@ class RetentionConfig:
 
     @classmethod
     def from_env(cls) -> "RetentionConfig":
+        """Build config from environment.
+
+        Reads via the typed `config.settings` singleton when possible,
+        falling back to os.getenv for env vars that the Settings object
+        doesn't model yet. The env-driven validation in Settings already
+        enforces the same `interval >= 60` floor and `batch_size >= 1`
+        rule that this function previously enforced, so we just trust it.
+        """
+        # Import here so module import isn't coupled to settings init —
+        # tests that don't have DATABASE_URL set would otherwise crash
+        # on `import retention`.
+        try:
+            from config import settings
+            return cls(
+                enabled=settings.retention_enabled,
+                interval_seconds=settings.retention_interval_seconds,
+                batch_size=settings.retention_batch_size,
+            )
+        except Exception:
+            # Fall through to legacy parsing — keeps `from_env()` working
+            # in test contexts that set env vars directly without going
+            # through the Settings singleton.
+            pass
+
         enabled = (os.getenv("STRATHON_RETENTION_ENABLED", "true").lower()
                    not in ("false", "0", "no", "off"))
 
@@ -87,74 +121,7 @@ class RetentionConfig:
         return cls(enabled=enabled, interval_seconds=interval, batch_size=batch)
 
 
-async def cleanup_once(
-    pool: asyncpg.Pool, batch_size: int = DEFAULT_BATCH_SIZE
-) -> dict[str, int]:
-    """Run a single retention sweep across all projects.
-
-    Returns a dict of metrics for the sweep:
-        - projects_scanned: how many project_settings rows we evaluated
-        - traces_deleted: total traces removed (spans cascade-delete from these)
-    """
-    now_ns = time.time_ns()
-
-    async with pool.acquire() as conn:
-        # Pull active retention windows for every project that has settings.
-        settings_rows = await conn.fetch(
-            """
-            SELECT ps.project_id, ps.trace_retention_days
-            FROM project_settings ps
-            JOIN projects p ON p.id = ps.project_id
-            WHERE p.deleted_at IS NULL
-              AND ps.trace_retention_days > 0
-            """
-        )
-
-        total_deleted = 0
-        for row in settings_rows:
-            project_id = row["project_id"]
-            retention_days = row["trace_retention_days"]
-            cutoff_ns = now_ns - retention_days * NS_PER_DAY
-
-            # Capped delete: use a CTE so we never delete more than batch_size
-            # rows in a single transaction. Long-running deletes can hold row
-            # locks that block ingest INSERTs on the same traces. If a project
-            # has > batch_size eligible rows, the next sweep will catch them.
-            result = await conn.execute(
-                """
-                WITH expired AS (
-                    SELECT id FROM traces
-                    WHERE project_id = $1
-                      AND start_time_unix_nano < $2
-                    LIMIT $3
-                )
-                DELETE FROM traces
-                WHERE id IN (SELECT id FROM expired)
-                """,
-                project_id, cutoff_ns, batch_size,
-            )
-            # asyncpg returns 'DELETE n'
-            try:
-                deleted = int(result.split(" ", 1)[1])
-            except (IndexError, ValueError):
-                deleted = 0
-
-            if deleted > 0:
-                logger.info(
-                    "retention: deleted %d expired traces for project %s "
-                    "(retention=%d days, cutoff=%d ns)",
-                    deleted, project_id, retention_days, cutoff_ns,
-                )
-            total_deleted += deleted
-
-    return {
-        "projects_scanned": len(settings_rows),
-        "traces_deleted": total_deleted,
-    }
-
-
 async def retention_loop(
-    pool: asyncpg.Pool,
     config: RetentionConfig,
     shutdown_event: asyncio.Event,
     metrics_counters=None,
@@ -164,6 +131,11 @@ async def retention_loop(
     ``metrics_counters`` is an optional ``RetentionCounters``-shaped object
     (see receiver/metrics.py) that gets incremented after each sweep.
     Passed in rather than imported to avoid circular dependencies.
+
+    Each sweep opens its own AsyncSession via async_session_maker, runs
+    cleanup_once against it, and commits. If a sweep fails the session is
+    rolled back automatically by the context manager; the next interval
+    starts a fresh session.
     """
     if not config.enabled:
         logger.info("Retention loop disabled (STRATHON_RETENTION_ENABLED=false)")
@@ -184,7 +156,7 @@ async def retention_loop(
 
     while not shutdown_event.is_set():
         try:
-            result = await cleanup_once(pool, batch_size=config.batch_size)
+            result = await _run_sweep(config.batch_size)
             if metrics_counters is not None:
                 metrics_counters.record_sweep(
                     projects_scanned=result["projects_scanned"],
@@ -212,6 +184,22 @@ async def retention_loop(
             continue  # interval elapsed, run another sweep
 
     logger.info("Retention loop exited")
+
+
+async def _run_sweep(batch_size: int) -> dict[str, int]:
+    """Open a session, run one cleanup pass, commit, return the result.
+
+    Separated from retention_loop so tests can exercise this path with a
+    real DB without driving the timing of the outer loop.
+    """
+    # Imported here so the module-level import graph stays clean — the
+    # retention_loop config-disabled path mustn't pull in the DB engine.
+    from database import async_session_maker
+
+    async with async_session_maker() as session:
+        result = await cleanup_once(session, batch_size=batch_size)
+        await session.commit()
+        return result
 
 
 __all__ = [

@@ -63,7 +63,7 @@ async_session_maker: async_sessionmaker[AsyncSession] = async_sessionmaker(
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency. One session per request, auto-rollback on error.
+    """FastAPI dependency. One session per request — one transaction per request.
 
     Usage in endpoints:
 
@@ -71,9 +71,18 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         async def foo(session: AsyncSession = Depends(get_db_session)):
             ...
 
-    The session is open for the duration of the request and closed in the
-    finally clause. Exceptions trigger a rollback before re-raising so the
-    next request doesn't inherit a poisoned session.
+    Transaction model:
+        success path → commit
+        exception   → rollback, then re-raise
+
+    Repository functions never call session.commit() themselves; that's the
+    endpoint boundary's responsibility. This is the standard FastAPI pattern
+    and means a single endpoint can compose multiple repository calls into
+    one atomic operation without coordinating commits.
+
+    Background tasks (not under FastAPI's Depends) construct their own
+    session via `async with async_session_maker() as session:` and commit
+    explicitly inside that block.
     """
     async with async_session_maker() as session:
         try:
@@ -81,6 +90,8 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+        else:
+            await session.commit()
 
 
 async def dispose_engine() -> None:

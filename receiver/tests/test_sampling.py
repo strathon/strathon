@@ -6,10 +6,10 @@ import sys
 import threading
 from unittest.mock import patch
 
+_RECEIVER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _RECEIVER_DIR)
 
-sys.path.insert(0, "/home/claude/strathon/receiver")
-
-from sampling import (
+from sampling import (  # noqa: E402  -- sys.path manipulation above
     EXPENSIVE_LLM_TOKEN_THRESHOLD,
     SamplingConfig,
     SamplingCounters,
