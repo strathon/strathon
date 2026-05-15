@@ -38,13 +38,14 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import auth as auth_mod
 import policies as policy_mod
 import repositories.policies as policies_repo
 import repositories.traces as traces_repo
 import sampling
 from database import get_db_session
 
-from ._deps import _authenticated
+from ._deps import require_scope
 
 
 logger = logging.getLogger("strathon.receiver.traces")
@@ -97,8 +98,10 @@ def attrs_to_dict(attrs) -> dict:
 @router.post("/v1/traces", status_code=status.HTTP_200_OK)
 async def ingest_traces(
     request: Request,
-    authorization: str | None = Header(default=None),
     content_type: str | None = Header(default=None),  # noqa: ARG001 - kept for OTLP clients that include it
+    auth_ctx: auth_mod.ApiKeyContext = Depends(
+        require_scope(auth_mod.SCOPE_TRACES_WRITE)
+    ),
     session: AsyncSession = Depends(get_db_session),
 ) -> Response:
     """
@@ -109,9 +112,6 @@ async def ingest_traces(
     OTLP-spec ExportTraceServiceResponse (empty body on success).
     """
     state = request.app.state
-
-    # Authenticate and resolve which project this batch belongs to
-    auth_ctx = await _authenticated(request, session, authorization)
     project_id = auth_ctx.project_id
 
     body = await request.body()

@@ -7,25 +7,34 @@ Key format:
 Storage:
     key_prefix: first 12 chars of the raw key (indexed for fast lookup)
     key_hash:   SHA-256 hex of the full raw key (constant-time compared)
+    scopes:     TEXT[] of capability names; '*' means all (wildcard)
 
 Lookup flow:
     1. Extract Bearer token from Authorization header
     2. prefix = token[:12]
     3. SELECT ... FROM api_keys WHERE key_prefix = $1 AND revoked_at IS NULL
     4. For each match, hmac.compare_digest(sha256(token), key_hash)
-    5. On match: update last_used_at, return project_id
+    5. On match: update last_used_at, return ApiKeyContext including scopes
+    6. The endpoint's require_scope dependency then checks the scope it
+       declared is present in the key's scopes (or '*' is)
 
 SHA-256 is the right choice for API keys (high-entropy secrets); bcrypt /
 argon2 are for low-entropy passwords where slow hashing matters. With 256
 bits of entropy in the key itself, a fast hash + indexed prefix lookup is
 both secure and fast.
 
-The /v1/api_keys CRUD endpoints are currently UNAUTHENTICATED in v1.
-Production deployments MUST put the receiver behind a reverse proxy that
-restricts access to those routes, OR add admin authentication (v2 work).
+Scopes:
+    The KNOWN_SCOPES set below is the source of truth for what scopes
+    exist. Adding a new scope = add an entry there and update the
+    endpoints that should accept it. No DB migration needed; scopes is a
+    flat TEXT[].
+
+    Scope strings follow the resource:action convention used by Stripe,
+    PostHog, and Sentry. Wildcard '*' is the only special value.
 
 DB code lives in receiver/repositories/auth.py. This module owns:
   - Pure helpers (key generation, hashing, header parsing)
+  - Scope constants and the SCOPE_WILDCARD value
   - The public authentication entry point `resolve_api_key` that endpoints
     call. That function takes an AsyncSession; the repository layer below
     does the actual SQL.
@@ -35,7 +44,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 from uuid import UUID
 
@@ -48,6 +57,56 @@ KEY_SCHEME = "stra_"
 RAW_KEY_RANDOM_BYTES = 32  # secrets.token_urlsafe(32) -> 43 base64url chars
 
 
+# ---- Scopes -------------------------------------------------------------
+#
+# resource:action naming convention, matching the pattern operators
+# already know from cloud IAM (s3:GetObject, ec2:RunInstances). Adding a
+# new endpoint that needs a new scope: add the scope name here, then
+# declare it on the endpoint via require_scope("..."). No migration
+# required — scopes is a flat TEXT[] backfilled at user-key-creation time.
+
+SCOPE_WILDCARD = "*"
+
+SCOPE_TRACES_WRITE = "traces:write"
+SCOPE_POLICIES_READ = "policies:read"
+SCOPE_POLICIES_WRITE = "policies:write"
+SCOPE_API_KEYS_READ = "api_keys:read"
+SCOPE_API_KEYS_WRITE = "api_keys:write"
+
+KNOWN_SCOPES: frozenset[str] = frozenset({
+    SCOPE_WILDCARD,
+    SCOPE_TRACES_WRITE,
+    SCOPE_POLICIES_READ,
+    SCOPE_POLICIES_WRITE,
+    SCOPE_API_KEYS_READ,
+    SCOPE_API_KEYS_WRITE,
+})
+
+# Default scopes for a new SDK-style key. Enough to ingest traces and to
+# poll policies for SDK-side block/steer enforcement, nothing more.
+DEFAULT_SDK_SCOPES: tuple[str, ...] = (SCOPE_TRACES_WRITE, SCOPE_POLICIES_READ)
+
+
+def validate_scopes(scopes: list[str]) -> None:
+    """Raise ValueError if any scope is unknown. Empty list is rejected.
+
+    Called by the api_keys create endpoint before persisting.
+    """
+    if not scopes:
+        raise ValueError("scopes must be a non-empty list")
+    unknown = [s for s in scopes if s not in KNOWN_SCOPES]
+    if unknown:
+        raise ValueError(
+            f"unknown scope(s): {sorted(unknown)}. "
+            f"Known scopes: {sorted(KNOWN_SCOPES)}"
+        )
+
+
+def key_has_scope(key_scopes: tuple[str, ...], required: str) -> bool:
+    """Wildcard-aware scope check. Used by require_scope dependency."""
+    return SCOPE_WILDCARD in key_scopes or required in key_scopes
+
+
 @dataclass(frozen=True)
 class ApiKeyContext:
     """The resolved identity for an authenticated request."""
@@ -55,6 +114,7 @@ class ApiKeyContext:
     key_id: UUID
     project_id: UUID
     key_prefix: str
+    scopes: tuple[str, ...] = field(default_factory=tuple)
 
 
 # ---- Pure helpers (no DB) ------------------------------------------------
@@ -126,13 +186,24 @@ async def resolve_api_key(
         key_id=key.id,
         project_id=key.project_id,
         key_prefix=key.key_prefix,
+        scopes=tuple(key.scopes or ()),
     )
 
 
 __all__ = [
     "ApiKeyContext",
+    "DEFAULT_SDK_SCOPES",
     "KEY_PREFIX_LEN",
     "KEY_SCHEME",
+    "KNOWN_SCOPES",
+    "SCOPE_API_KEYS_READ",
+    "SCOPE_API_KEYS_WRITE",
+    "SCOPE_POLICIES_READ",
+    "SCOPE_POLICIES_WRITE",
+    "SCOPE_TRACES_WRITE",
+    "SCOPE_WILDCARD",
     "generate_api_key",
+    "key_has_scope",
     "resolve_api_key",
+    "validate_scopes",
 ]

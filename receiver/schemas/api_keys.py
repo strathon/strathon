@@ -10,9 +10,17 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ApiKeyCreate(BaseModel):
-    """POST /v1/api_keys request body."""
+    """POST /v1/api_keys request body.
+
+    scopes: optional list of capability scope strings. When omitted, the
+    server applies the SDK-friendly default ('traces:write', 'policies:read').
+    See receiver/auth.py:KNOWN_SCOPES for the full list. The wildcard
+    '*' grants every scope and is intended for administrative keys
+    (one-time bootstrap, CI, etc.).
+    """
 
     name: str = Field(min_length=1, max_length=200)
+    scopes: Optional[list[str]] = None
 
 
 class ApiKeyRead(BaseModel):
@@ -29,6 +37,7 @@ class ApiKeyRead(BaseModel):
     project_id: UUID
     name: str
     key_prefix: str
+    scopes: list[str] = Field(default_factory=list)
     created_at: datetime
     last_used_at: Optional[datetime] = None
     revoked_at: Optional[datetime] = None

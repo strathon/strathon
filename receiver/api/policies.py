@@ -4,6 +4,12 @@ Five endpoints — list, create, get, update, delete — that power the
 intervention layer. SDKs poll `GET /v1/policies` for client-side block
 and steer enforcement; humans use the write endpoints to manage rules.
 
+Scope-protected:
+  - GET   /v1/policies(/{id})   requires policies:read
+  - POST  /v1/policies          requires policies:write
+  - PATCH /v1/policies/{id}     requires policies:write
+  - DELETE /v1/policies/{id}    requires policies:write
+
 CEL expression and action enum validation happens inside the repository
 layer (repositories/policies.py). PolicyExpressionError from the CEL
 compiler is translated to 400 here; ValueError (e.g. unknown action)
@@ -24,7 +30,7 @@ import repositories.policies as policies_repo
 from database import get_db_session
 from policies import PolicyExpressionError
 
-from ._deps import require_auth
+from ._deps import require_scope
 
 
 router = APIRouter(prefix="/v1/policies", tags=["policies"])
@@ -32,7 +38,7 @@ router = APIRouter(prefix="/v1/policies", tags=["policies"])
 
 @router.get("")
 async def list_policies_endpoint(
-    ctx: auth_mod.ApiKeyContext = Depends(require_auth),
+    ctx: auth_mod.ApiKeyContext = Depends(require_scope(auth_mod.SCOPE_POLICIES_READ)),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     policies = await policies_repo.list_policies(session, ctx.project_id)
@@ -42,7 +48,7 @@ async def list_policies_endpoint(
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_policy_endpoint(
     payload: dict[str, Any],
-    ctx: auth_mod.ApiKeyContext = Depends(require_auth),
+    ctx: auth_mod.ApiKeyContext = Depends(require_scope(auth_mod.SCOPE_POLICIES_WRITE)),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     required = {"name", "match_expression", "action"}
@@ -81,7 +87,7 @@ async def create_policy_endpoint(
 @router.get("/{policy_id}")
 async def get_policy_endpoint(
     policy_id: str,
-    ctx: auth_mod.ApiKeyContext = Depends(require_auth),
+    ctx: auth_mod.ApiKeyContext = Depends(require_scope(auth_mod.SCOPE_POLICIES_READ)),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     try:
@@ -98,7 +104,7 @@ async def get_policy_endpoint(
 async def update_policy_endpoint(
     policy_id: str,
     payload: dict[str, Any],
-    ctx: auth_mod.ApiKeyContext = Depends(require_auth),
+    ctx: auth_mod.ApiKeyContext = Depends(require_scope(auth_mod.SCOPE_POLICIES_WRITE)),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     try:
@@ -121,7 +127,7 @@ async def update_policy_endpoint(
 @router.delete("/{policy_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_policy_endpoint(
     policy_id: str,
-    ctx: auth_mod.ApiKeyContext = Depends(require_auth),
+    ctx: auth_mod.ApiKeyContext = Depends(require_scope(auth_mod.SCOPE_POLICIES_WRITE)),
     session: AsyncSession = Depends(get_db_session),
 ) -> Response:
     try:

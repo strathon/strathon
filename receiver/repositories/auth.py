@@ -105,6 +105,7 @@ async def create_api_key(
     session: AsyncSession,
     project_id: UUID,
     name: str,
+    scopes: Optional[list[str]] = None,
 ) -> ApiKeyCreateResponse:
     """Create an API key. Returns the raw key ONCE — never recoverable after.
 
@@ -112,15 +113,26 @@ async def create_api_key(
     only its prefix and SHA-256 hash get persisted. The caller (endpoint)
     must surface raw_key in the HTTP response and instruct the user to
     store it somewhere safe.
+
+    scopes:
+        Optional list of scope strings (see receiver/auth.py:KNOWN_SCOPES).
+        Caller is responsible for validating against KNOWN_SCOPES BEFORE
+        calling — the repository trusts the input and lets the DB CHECK
+        constraint catch only the "non-empty" case. When omitted, falls
+        through to the model's server-side default of the SDK scopes.
     """
     raw, prefix, key_hash = generate_api_key()
 
-    api_key = ApiKey(
+    kwargs: dict = dict(
         project_id=project_id,
         name=name,
         key_hash=key_hash,
         key_prefix=prefix,
     )
+    if scopes is not None:
+        kwargs["scopes"] = scopes
+
+    api_key = ApiKey(**kwargs)
     session.add(api_key)
     # flush() forces the INSERT now so id/created_at populate from server
     # defaults before we hand back the schema. We don't commit — that's

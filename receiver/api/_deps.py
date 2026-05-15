@@ -17,6 +17,17 @@ Why `request: Request` instead of module-level globals:
     by the lifespan). Routers grab them via `request.app.state.X` so we
     don't have to thread the app object around or rely on import-time
     state that doesn't exist yet during module loading.
+
+Authentication vs authorization:
+    `require_auth` resolves the Bearer token and returns the
+    ApiKeyContext. Authentication only — no capability check. Endpoints
+    that don't care about scopes (or scope-check internally) use this.
+
+    `require_scope("scope:name")` is the recommended form. It calls
+    require_auth AND checks that the resolved key has the named scope.
+    Returns HTTP 403 (not 401) when the key is valid but unscoped — the
+    distinction matters because a 401 tells the caller their token is
+    bad, while a 403 tells them their token is fine but lacks permission.
 """
 
 from __future__ import annotations
@@ -58,11 +69,50 @@ async def require_auth(
 ) -> auth.ApiKeyContext:
     """FastAPI dependency that resolves the Bearer token to a project context.
 
-    Endpoints that need the ApiKeyContext as a parameter can write
-        ctx: auth.ApiKeyContext = Depends(require_auth)
-    and skip the manual `_authenticated(...)` plumbing.
+    Authentication only. Use `require_scope(...)` for endpoints that need
+    a specific capability.
     """
     return await _authenticated(request, session, authorization)
+
+
+def require_scope(scope: str):
+    """Build a FastAPI dependency that requires a specific capability scope.
+
+    Usage:
+        @router.post("/v1/policies")
+        async def create_policy(
+            ctx: ApiKeyContext = Depends(require_scope("policies:write")),
+            ...
+        ):
+            ...
+
+    Behavior:
+      - Resolves the Bearer token (same as require_auth)
+      - Looks at ctx.scopes; allows if '*' in scopes or `scope` in scopes
+      - Otherwise raises HTTP 403
+
+    Why a factory: FastAPI dependencies are functions, not parameterized
+    classes. Returning a closure that captures `scope` lets each endpoint
+    declare its required capability statically while sharing one body of
+    auth + scope-check logic.
+
+    Why 403 not 401: the credential is valid; the capability is not.
+    A 401 would mislead the caller into rotating a token that's fine.
+    """
+    async def _checker(
+        request: Request,
+        authorization: str | None = Header(default=None),
+        session: AsyncSession = Depends(get_db_session),
+    ) -> auth.ApiKeyContext:
+        ctx = await _authenticated(request, session, authorization)
+        if not auth.key_has_scope(ctx.scopes, scope):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"missing required scope: {scope}",
+            )
+        return ctx
+
+    return _checker
 
 
 def coerce_project_id(request: Request, value: str | None) -> UUID:

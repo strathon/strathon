@@ -23,7 +23,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin
@@ -102,6 +102,16 @@ class ApiKey(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     key_hash: Mapped[str] = mapped_column(Text, nullable=False)
     key_prefix: Mapped[str] = mapped_column(Text, nullable=False)
+    # Capability scopes. '*' is the wildcard granting full access. The full
+    # set of valid scope strings lives in receiver/auth.py:KNOWN_SCOPES.
+    # Defaulted server-side so the schema is the source of truth: every
+    # row has at least the SDK-friendly defaults even if the application
+    # forgets to set them explicitly.
+    scopes: Mapped[list[str]] = mapped_column(
+        ARRAY(Text),
+        nullable=False,
+        server_default=text("ARRAY['traces:write', 'policies:read']::text[]"),
+    )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
     )
@@ -121,6 +131,10 @@ class ApiKey(Base):
             "idx_api_keys_prefix",
             "key_prefix",
             postgresql_where=text("revoked_at IS NULL"),
+        ),
+        CheckConstraint(
+            "cardinality(scopes) > 0",
+            name="api_keys_scopes_not_empty",
         ),
     )
 
