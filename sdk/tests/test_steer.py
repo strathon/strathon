@@ -29,11 +29,40 @@ class _FakeEnforcer:
     pass
 
 
+class _RecordingSpan:
+    """A no-op span that records what we set on it for test assertions."""
+
+    def __init__(self, name: str, attributes: dict) -> None:
+        self.name = name
+        self.attributes = dict(attributes or {})
+        self.status = None
+        self.ended = False
+
+    def set_status(self, status) -> None:
+        self.status = status
+
+    def end(self) -> None:
+        self.ended = True
+
+
+class _RecordingTracer:
+    """Captures every span the dispatcher emits so tests can assert audit."""
+
+    def __init__(self) -> None:
+        self.spans: list[_RecordingSpan] = []
+
+    def start_span(self, name: str, attributes: dict | None = None) -> _RecordingSpan:
+        span = _RecordingSpan(name, attributes or {})
+        self.spans.append(span)
+        return span
+
+
 class _FakeClient:
     """Minimal stand-in for strathon.Client.
 
     enforce_steer reads ``_policy_enforcer`` (must be non-None for the
-    patch to fire) and calls ``check_policy``. Nothing else.
+    patch to fire) and calls ``check_policy``. The dispatcher additionally
+    reads ``tracer`` to emit intervention spans on block/steer.
     """
 
     def __init__(self, decision: PolicyDecision, *, raise_on_check: bool = False) -> None:
@@ -42,6 +71,7 @@ class _FakeClient:
         self._raise = raise_on_check
         self.call_count = 0
         self.last_span = None
+        self.tracer = _RecordingTracer()
 
     def check_policy(self, span):
         self.call_count += 1
@@ -326,3 +356,77 @@ def test_async_allow_runs_real_body_via_ainvoke():
         return await tool.ainvoke({"text": "abc"})
 
     assert asyncio.run(run()) == "cba"
+
+
+# ---- Intervention span emission (audit trail to the receiver) ---------
+#
+# When a tool body is short-circuited (block raises before the body, steer
+# returns the replacement before the body), the framework's normal tool
+# span is never opened. Without an explicit intervention span, the
+# receiver would have no record that a block/steer decision was made.
+#
+# The dispatcher emits a synthetic span for these decisions so the
+# receiver's policy_matches table stays consistent regardless of which
+# framework triggered the decision. These tests lock in that contract.
+
+
+def test_block_emits_intervention_span_with_policy_attrs():
+    tool = _make_tool()
+    client = _FakeClient(
+        PolicyDecision(
+            action="block",
+            policy_id="pol_42",
+            policy_name="no_reverse",
+            message="reverse is forbidden",
+        ),
+    )
+    enforce_steer(tool, client)
+
+    with pytest.raises(StrathonPolicyBlocked):
+        tool.invoke({"text": "hi"})
+
+    assert len(client.tracer.spans) == 1
+    span = client.tracer.spans[0]
+    assert span.name == "tool.reverse"
+    assert span.attributes["strathon.policy.blocked"] is True
+    assert span.attributes["strathon.policy.id"] == "pol_42"
+    assert span.attributes["strathon.policy.name"] == "no_reverse"
+    assert span.attributes["strathon.policy.message"] == "reverse is forbidden"
+    # Span was ended cleanly (otherwise the OTel SDK would never export it)
+    assert span.ended is True
+
+
+def test_steer_emits_intervention_span_with_replacement():
+    tool = _make_tool()
+    client = _FakeClient(
+        PolicyDecision(
+            action="steer",
+            replacement="[REDACTED]",
+            policy_id="pol_99",
+            policy_name="redact",
+        ),
+    )
+    enforce_steer(tool, client)
+
+    result = tool.invoke({"text": "secret"})
+    assert result == "[REDACTED]"
+
+    assert len(client.tracer.spans) == 1
+    span = client.tracer.spans[0]
+    assert span.name == "tool.reverse"
+    assert span.attributes["strathon.policy.steered"] is True
+    assert span.attributes["strathon.policy.id"] == "pol_99"
+    assert span.attributes["strathon.policy.replacement"] == "[REDACTED]"
+    assert span.ended is True
+
+
+def test_allow_does_not_emit_an_intervention_span():
+    """No intervention happened, so no audit span — the framework's own
+    tool span is the record of an allowed call."""
+    tool = _make_tool()
+    client = _FakeClient(PolicyDecision(action="allow"))
+    enforce_steer(tool, client)
+
+    tool.invoke({"text": "abc"})
+
+    assert client.tracer.spans == []
