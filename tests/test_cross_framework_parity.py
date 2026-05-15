@@ -349,3 +349,97 @@ def test_parity_policy_can_be_fetched_via_rest(receiver, parity_policy):
     policies = _get(f"{receiver}/v1/policies").get("policies", [])
     names = [p["name"] for p in policies]
     assert PARITY_POLICY_NAME in names
+
+
+# ---- applies_to: live end-to-end through the receiver ------------------
+#
+# Verifies the dot-segment-path match semantic in production-shape: a
+# policy with applies_to filters out spans whose name doesn't align on
+# segment boundaries. Two spans go in (one matching, one not), one
+# policy_matches row comes out.
+
+
+def test_applies_to_filters_at_ingest(receiver, db_conn):
+    """A policy with applies_to=['langgraph.tool'] must record exactly one
+    policy_matches row when given two spans — one whose name starts with
+    'langgraph.tool', one whose name doesn't.
+    """
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+    policy_name = "applies_to_segment_filter_test"
+
+    # Clean up any prior run before installing
+    existing = _get(f"{receiver}/v1/policies").get("policies", [])
+    for p in existing:
+        if p["name"] == policy_name:
+            _delete(f"{receiver}/v1/policies/{p['id']}")
+
+    policy = _post(
+        f"{receiver}/v1/policies",
+        {
+            "name": policy_name,
+            "description": "Verify applies_to dot-segment-path filtering",
+            "match_expression": "true",  # match any attrs; applies_to does the scoping
+            "action": "alert",
+            "action_config": {"webhook_url": "http://127.0.0.1:1/never"},
+            "applies_to": ["langgraph.tool"],
+        },
+    )
+
+    try:
+        # Send one span matching the filter and one that doesn't. We
+        # build our own provider + processor and use it directly rather
+        # than touching the global TracerProvider — other tests in the
+        # session may have already installed one, and the warning we'd
+        # get for overriding it actually swallows the span export.
+        provider = TracerProvider()
+        exporter = OTLPSpanExporter(
+            endpoint=f"{receiver}/v1/traces", headers=_auth_headers(),
+        )
+        processor = BatchSpanProcessor(exporter)
+        provider.add_span_processor(processor)
+        tracer = provider.get_tracer("applies_to_test")
+
+        with tracer.start_as_current_span("langgraph.tool.send_email") as s:
+            s.set_attribute("gen_ai.tool.name", "send_email")
+        with tracer.start_as_current_span("langgraph.llm.chat") as s:
+            s.set_attribute("gen_ai.system", "openai")
+
+        # Flush via the processor we own (provider.shutdown() works too,
+        # but is symmetric only when we own the provider; force_flush is
+        # the explicit path).
+        processor.force_flush(timeout_millis=5000)
+        processor.shutdown()
+
+        # Give the receiver a moment to ingest + evaluate
+        deadline = time.time() + 10
+        rows: list = []
+        while time.time() < deadline:
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT s.name
+                    FROM policy_matches m
+                    JOIN spans s ON s.span_id = m.span_id
+                    WHERE m.policy_id = %s
+                    ORDER BY m.matched_at
+                    """,
+                    (policy["id"],),
+                )
+                rows = cur.fetchall()
+            if rows:
+                break
+            time.sleep(0.5)
+
+        # Exactly one row, and it must be the tool span.
+        assert len(rows) == 1, (
+            f"expected exactly 1 policy_matches row under applies_to=['langgraph.tool'], "
+            f"got {len(rows)}: {rows}"
+        )
+        assert rows[0][0] == "langgraph.tool.send_email", (
+            f"unexpected matching span name: {rows[0][0]!r}"
+        )
+    finally:
+        _delete(f"{receiver}/v1/policies/{policy['id']}")

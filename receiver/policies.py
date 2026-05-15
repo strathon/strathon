@@ -42,10 +42,43 @@ def _build_span_context(span_name: str, attrs: Dict[str, Any]) -> Dict[str, Any]
 
 
 def _span_matches_applies_to(span_name: str, applies_to: List[str]) -> bool:
-    """Empty applies_to means 'any span'; otherwise substring-match against name."""
+    """Empty applies_to means 'every span'; otherwise dot-segment-path match.
+
+    Each token in applies_to is matched against the span name as a whole
+    sequence of dot-separated segments. ``"tool"`` matches
+    ``"langgraph.tool.send_email"`` (because ``tool`` is one of the
+    segments) but does NOT match ``"pool.X"`` (no segment equals
+    ``"tool"``). Multi-segment tokens are also supported:
+    ``"langgraph.tool"`` matches ``"langgraph.tool.send_email"`` as a
+    prefix-aligned multi-segment path.
+
+    The SDK enforcer (``sdk/src/strathon/policy/enforcer.py``) carries
+    the same logic so server-side ingest filtering and SDK-side
+    pre-call filtering agree by construction.
+    """
     if not applies_to:
         return True
-    return any(token in span_name for token in applies_to)
+    if not span_name:
+        return False
+    return any(_segment_path_match(span_name, token) for token in applies_to)
+
+
+def _segment_path_match(name: str, token: str) -> bool:
+    """True iff ``token`` aligns with whole dot-separated segments of ``name``.
+
+    Mirror of the SDK helper of the same name. Kept duplicated rather
+    than imported across the SDK/receiver boundary so the receiver has
+    no compile-time dependency on the SDK package.
+    """
+    if not token:
+        return False
+    if name == token:
+        return True
+    return (
+        name.startswith(token + ".")
+        or name.endswith("." + token)
+        or ("." + token + ".") in name
+    )
 
 
 def evaluate_for_span(

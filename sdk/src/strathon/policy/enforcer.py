@@ -223,10 +223,46 @@ def _span_matches_applies_to(
 ) -> bool:
     """Check whether a span's name matches the policy's applies_to filter.
 
-    applies_to is a list of substrings; empty list means "applies to all".
-    Example: ["tool", "llm"] matches any span whose name contains "tool" or "llm".
+    Empty applies_to means "match every span". Otherwise each token in
+    the list is treated as a dot-segment-path: the token matches the
+    name if and only if the token aligns with one or more whole
+    dot-separated segments of the name. The OR of all tokens is the
+    overall match.
+
+    Examples (name -> tokens that match):
+        "langgraph.tool.send_email"  -> "tool", "langgraph",
+                                        "send_email", "langgraph.tool",
+                                        "tool.send_email",
+                                        "langgraph.tool.send_email"
+        "langgraph.tool.send_email"  -/->  "send", "ool", "tool.send"
+
+    The rule rejects raw substring matches like "tool" against "pool"
+    or against the middle of an unrelated segment. This matches the
+    pattern operators already know from cloud IAM resource paths,
+    Kubernetes label selectors, and DNS suffix matching.
     """
     if not applies_to:
         return True
     name = span_context.get("name") or ""
-    return any(token in name for token in applies_to)
+    if not name:
+        return False
+    return any(_segment_path_match(name, token) for token in applies_to)
+
+
+def _segment_path_match(name: str, token: str) -> bool:
+    """True iff ``token`` aligns with whole dot-separated segments of ``name``.
+
+    Implemented as four cases that together cover every legal alignment
+    of a token within a dot-segmented path. The dot-padding trick on the
+    interior case turns "segment X exists at any position" into a single
+    substring search.
+    """
+    if not token:
+        return False
+    if name == token:
+        return True
+    return (
+        name.startswith(token + ".")
+        or name.endswith("." + token)
+        or ("." + token + ".") in name
+    )

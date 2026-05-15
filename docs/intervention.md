@@ -85,10 +85,39 @@ A policy has one of four actions:
 `block` and `steer` actually prevent the action — these are SDK-side because
 by the time a span reaches the server, the action has already happened.
 
+## Scoping with `applies_to`
+
+By default a policy is evaluated against every span. To scope a policy to
+specific spans, set `applies_to` to a list of dot-segment-path tokens:
+
+```json
+{
+  "name": "redact_pii_from_tool_calls",
+  "match_expression": "attrs[\"strathon.tool.args\"].contains(\"@\")",
+  "action": "steer",
+  "applies_to": ["langgraph.tool", "crewai.tool"]
+}
+```
+
+A token matches a span name if and only if it aligns with one or more
+whole dot-separated segments of the name. So `"tool"` matches
+`"langgraph.tool.send_email"` because `tool` is one of the segments,
+but does **not** match `"langgraph.pool.X"` — the substring `tool`
+appearing inside `pool` is not a segment-aligned match. Multi-segment
+tokens work too: `"langgraph.tool"` matches LangGraph tool spans but
+not CrewAI tool spans.
+
+The list is OR'd: a span matches the filter if any token aligns.
+Empty list (the default) means "every span." The same rule runs on
+both the server (at ingest time, gating `policy_matches` rows) and
+in the SDK (gating in-process block/steer enforcement) so the two
+layers always agree on which spans a policy applies to.
+
 ## Creating a policy
 
 ```bash
 curl -X POST http://localhost:4318/v1/policies \
+  -H "Authorization: Bearer $STRATHON_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "block_competitor_email",
@@ -96,27 +125,29 @@ curl -X POST http://localhost:4318/v1/policies \
     "match_expression": "attrs[\"gen_ai.tool.name\"] == \"send_email\" && attrs[\"strathon.tool.args\"].contains(\"@competitor.com\")",
     "action": "block",
     "action_config": {"message": "Cannot email a competitor address."},
+    "applies_to": ["langgraph.tool", "crewai.tool", "agents.tool"],
     "priority": 100
   }'
 ```
 
 ## Framework support
 
-Strathon's block and steer enforcement is wired into the three main agent
-frameworks. The integration mechanism differs per framework but the user-
-facing API is identical: just call `instrument(client)` once.
+Strathon enforces policies at the tool-call boundary on every supported
+framework. Block enforcement is zero-code-change: `instrument(client)` is
+all the user does. Steer enforcement requires one extra line per tool
+(or per agent) — replacing a tool's return value is a bigger contract
+change than refusing to call, so we ask the user to opt in explicitly.
 
-| Framework            | Block | Steer | Mechanism                                       |
-|----------------------|-------|-------|-------------------------------------------------|
-| LangGraph (LangChain)| Yes   | Yes   | BaseCallbackHandler.on_tool_start raises        |
-| CrewAI               | Yes   | Yes   | CrewStructuredTool.invoke patch                 |
-| OpenAI Agents SDK    | Yes   | No*   | Runner.run* wraps to inject RunHooks            |
+| Framework            | Block (auto)        | Steer (opt-in) | Steer opt-in call                                       |
+|----------------------|---------------------|----------------|---------------------------------------------------------|
+| LangGraph (LangChain)| `instrument(client)`| Per-tool       | `from strathon.policy import enforce_steer; enforce_steer(tool, client)` |
+| CrewAI               | `instrument(client)`| Per-tool       | `enforce_steer(tool, client)` (same helper)             |
+| OpenAI Agents SDK    | `instrument(client)`| Per-agent      | `from strathon.instrumentation.openai_agents import attach_strathon_guardrails; attach_strathon_guardrails(agent, client)` |
 
-\* Steer on OpenAI Agents SDK is not supported through the default
-auto-instrumentation: `RunHooks.on_tool_start` can abort a tool call but
-cannot substitute the tool's output. To get steer semantics on OAI Agents
-SDK, wrap the tool's `on_invoke_tool` manually and call `client.check_policy`
-there.
+CrewAI's `instrument(client)` already enforces *both* block and steer
+globally (its class patch sits at the right boundary for both), so the
+per-tool `enforce_steer` call on CrewAI is optional — it's there for
+parity with LangGraph and for users who want explicit per-tool control.
 
 ## Enforcing in your agent code
 
