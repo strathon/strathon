@@ -5,6 +5,10 @@ from strathon.policy.expression import (
     evaluate,
     validate,
 )
+from strathon.policy.steer import (
+    disable_steer,
+    enforce_steer,
+)
 from strathon.policy.types import (
     ALLOW,
     Policy,
@@ -18,6 +22,8 @@ __all__ = [
     "PolicyDecision",
     "PolicyExpressionError",
     "StrathonPolicyBlocked",
+    "disable_steer",
+    "enforce_steer",
     "evaluate",
     "validate",
 ]

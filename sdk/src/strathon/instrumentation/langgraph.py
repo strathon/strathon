@@ -484,15 +484,23 @@ class StrathonLangGraphHandler:
                     policy_name=decision.policy_name,
                 )
             if decision.is_steer:
+                # The on_tool_start callback cannot substitute a tool's
+                # return value, so the callback path can only observe
+                # the steer match — the tool still runs. For real steer
+                # enforcement that returns the replacement string in
+                # place of the tool body, the user opts each tool in:
+                #
+                #   from strathon.policy import enforce_steer
+                #   enforce_steer(my_tool, client)
+                #
+                # enforce_steer patches the tool's invoke method
+                # directly so the replacement is returned and the body
+                # never runs. We still record the match here so the
+                # missed-steer case is visible in observability.
                 attrs["strathon.policy.steered"] = True
                 attrs["strathon.policy.id"] = decision.policy_id or ""
                 attrs["strathon.policy.name"] = decision.policy_name or ""
                 attrs["strathon.policy.replacement"] = decision.replacement or ""
-                # Open and immediately close a span recording the steer.
-                # We cannot return a replacement value from on_tool_start, so
-                # for v0 steer mode in LangGraph users should call
-                # client.check_policy() in their tool wrapper. We log the
-                # decision so it's still observable.
                 self._start_span(
                     f"langgraph.tool.{tool_name}", run_id, parent_run_id, attrs
                 )

@@ -129,9 +129,13 @@ def test_hook_allows_when_policy_does_not_match():
 # ---- Hook: steer is not supported on OAI; logs but does not raise ----
 
 
-def test_hook_steer_does_not_raise_and_logs_warning(caplog):
-    """Steer policies on OAI Agents SDK can't substitute output from
-    on_tool_start; the SDK warns the user and lets the tool run."""
+def test_hook_steer_via_runhooks_does_not_raise_and_logs_warning(caplog):
+    """The RunHooks path cannot substitute tool output, so on a steer
+    match it logs a warning telling the user to attach the guardrail
+    helper, then lets the tool proceed.
+
+    Real steer enforcement on OpenAI Agents SDK lives in
+    attach_strathon_guardrails (covered in test_openai_agents_steer.py)."""
     from strathon.instrumentation.openai_agents import _build_strathon_run_hooks
     import logging
 
@@ -147,8 +151,8 @@ def test_hook_steer_does_not_raise_and_logs_warning(caplog):
     with caplog.at_level(logging.WARNING, logger="strathon.instrumentation.openai_agents"):
         asyncio.run(go())
 
-    # Did not raise; warning logged
-    assert any("steer is not supported" in r.message for r in caplog.records)
+    # Did not raise; warning logged that points the user at the guardrail path.
+    assert any("attach_strathon_guardrails" in r.message for r in caplog.records)
 
 
 # ---- Hook: policy exception doesn't break the tool ----

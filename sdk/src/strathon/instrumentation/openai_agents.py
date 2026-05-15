@@ -337,10 +337,18 @@ def _truncate(s: str, max_len: int) -> str:
 # wrap Runner.run / run_sync / run_streamed to inject our hooks. If the
 # user already provides hooks, we delegate to theirs after our own.
 #
-# steer mode: not supported on OAI Agents SDK because on_tool_start cannot
-# substitute the tool's output (same constraint as LangGraph). The SDK
-# logs the missed steer; the tool still runs. To get steer on OAI, the
-# user must manually wrap their tool's on_invoke_tool.
+# steer mode via RunHooks: not supported. RunHooks.on_tool_start can
+# observe a tool call and raise, but cannot substitute the tool's output
+# with a replacement string. For full steer semantics on OpenAI Agents
+# SDK, use the Tool Guardrails path at the bottom of this module:
+#
+#   from strathon.instrumentation.openai_agents import attach_strathon_guardrails
+#   attach_strathon_guardrails(agent, client)
+#
+# That path uses agents.tool_guardrails.ToolGuardrailFunctionOutput.reject_content
+# which the runtime substitutes for the tool's output without running the
+# body. The block path below still raises StrathonPolicyBlocked from
+# on_tool_start as before; the two paths coexist.
 
 _ORIGINAL_RUN = None
 _ORIGINAL_RUN_SYNC = None
@@ -416,9 +424,12 @@ def _build_strathon_run_hooks(client, user_hooks):
                 # wrapping their tool's on_invoke_tool manually.
                 logger.warning(
                     "Strathon: steer policy %r matched on OAI tool %s but "
-                    "steer is not supported via RunHooks; the tool will run "
-                    "normally. Use a `block` policy or manually wrap the "
-                    "tool's on_invoke_tool to enforce steer on OAI Agents SDK.",
+                    "steer cannot be enforced through RunHooks. Attach the "
+                    "Strathon guardrail to enable steer: "
+                    "from strathon.instrumentation.openai_agents import "
+                    "attach_strathon_guardrails; "
+                    "attach_strathon_guardrails(agent, client). The tool "
+                    "will run normally for this call.",
                     decision.policy_name, tool_name,
                 )
                 _emit_intervention_span_oai(
@@ -629,3 +640,171 @@ def instrument(client) -> bool:
 
     logger.info("OpenAI Agents SDK instrumentation registered")
     return True
+
+
+# ===========================================================================
+# Steer enforcement via Tool Guardrails (added in scopes-parity work)
+# ===========================================================================
+#
+# Earlier OAI Agents integrations couldn't enforce steer because the only
+# hook available was RunHooks.on_tool_start, which can observe and raise
+# but cannot substitute the tool's output. The Tool Guardrails API
+# (agents.tool_guardrails, available since openai-agents 0.7.x) closes
+# that gap: an input guardrail's RejectContentBehavior returns a message
+# that the runtime substitutes in place of the tool's natural output,
+# without the tool body running. That's exactly the steer semantic.
+#
+# We expose two entry points:
+#
+#   strathon_tool_guardrail(client) -> ToolInputGuardrail
+#       Returns a guardrail instance for users who want fine-grained
+#       per-tool attachment.
+#
+#   attach_strathon_guardrails(agent, client) -> int
+#       Convenience: walks agent.tools, attaches the guardrail to every
+#       FunctionTool. Returns the number of tools updated. Idempotent —
+#       a tool already carrying our guardrail is skipped.
+#
+# Block is still enforced via the existing RunHooks path in
+# _install_policy_patch (zero-code-change for users who call instrument).
+# Users who want steer call one of the two functions below.
+
+
+def _build_strathon_guardrail_function(client):
+    """Construct the async guardrail callback closed over a Strathon client.
+
+    Returns a callable suitable for ToolInputGuardrail(guardrail_function=...).
+    """
+    from agents.tool_guardrails import ToolGuardrailFunctionOutput
+
+    async def _guardrail(data) -> ToolGuardrailFunctionOutput:
+        # data: ToolInputGuardrailData. We need the tool name and the
+        # raw arguments string the model produced.
+        tool_context = getattr(data, "context", None)
+        tool_call = getattr(tool_context, "tool_call", None) if tool_context else None
+        tool_name = _safe_str(getattr(tool_call, "name", "tool")) if tool_call else "tool"
+        raw_args = getattr(tool_call, "arguments", None) if tool_call else None
+
+        enforcer = getattr(client, "_policy_enforcer", None)
+        if enforcer is None:
+            return ToolGuardrailFunctionOutput.allow()
+
+        attrs = {
+            "strathon.framework": "agents",
+            "gen_ai.tool.name": tool_name,
+            "strathon.tool.name": tool_name,
+            "strathon.tool.args": _truncate(_safe_str(raw_args), 1500),
+        }
+
+        try:
+            decision = client.check_policy({
+                "name": f"agents.tool.{tool_name}",
+                "attrs": attrs,
+            })
+        except Exception:
+            # Policy lookup failures must NEVER break the user's tool.
+            logger.exception("Strathon guardrail policy check raised; allowing")
+            return ToolGuardrailFunctionOutput.allow()
+
+        if decision.is_block:
+            # raise_exception halts the run; user-level except handlers
+            # see ToolGuardrailTripwireTriggered. Strathon's block
+            # semantic is "halt this tool call" so this matches.
+            return ToolGuardrailFunctionOutput.raise_exception(
+                output_info={
+                    "policy_id": decision.policy_id,
+                    "policy_name": decision.policy_name,
+                    "message": decision.message,
+                },
+            )
+
+        if decision.is_steer:
+            # reject_content substitutes the message for the tool's
+            # output without running the body. Exactly the steer
+            # semantic.
+            replacement = decision.replacement or (
+                f"[Strathon: tool '{tool_name}' redirected by policy"
+                + (f" '{decision.policy_name}'" if decision.policy_name else "")
+                + "]"
+            )
+            return ToolGuardrailFunctionOutput.reject_content(
+                message=replacement,
+                output_info={
+                    "policy_id": decision.policy_id,
+                    "policy_name": decision.policy_name,
+                },
+            )
+
+        return ToolGuardrailFunctionOutput.allow()
+
+    return _guardrail
+
+
+def strathon_tool_guardrail(client):
+    """Build a ToolInputGuardrail enforcing Strathon block + steer policies.
+
+    Attach to a FunctionTool via:
+
+        from agents import function_tool
+        from strathon.instrumentation.openai_agents import strathon_tool_guardrail
+
+        @function_tool
+        def send_email(to: str, body: str) -> str:
+            ...
+
+        send_email.tool_input_guardrails = [strathon_tool_guardrail(client)]
+
+    For attaching to every tool on an agent in one call, use
+    ``attach_strathon_guardrails(agent, client)`` instead.
+    """
+    try:
+        from agents.tool_guardrails import ToolInputGuardrail
+    except ImportError as exc:  # pragma: no cover - openai-agents not installed
+        raise RuntimeError(
+            "openai-agents is not installed; pip install 'strathon[openai-agents]' "
+            "to use Strathon's tool guardrails."
+        ) from exc
+
+    return ToolInputGuardrail(
+        guardrail_function=_build_strathon_guardrail_function(client),
+        name="strathon_policy",
+    )
+
+
+def attach_strathon_guardrails(agent, client) -> int:
+    """Attach a Strathon guardrail to every FunctionTool on ``agent``.
+
+    Mutates ``agent.tools[*].tool_input_guardrails`` in place. Skips
+    non-FunctionTool entries (hosted tools, HostedMCPTool, etc., which
+    don't run through the guardrail pipeline) and skips any FunctionTool
+    that already has a Strathon guardrail attached. Idempotent.
+
+    Returns the number of tools updated.
+    """
+    try:
+        from agents.tool import FunctionTool
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError(
+            "openai-agents is not installed; pip install 'strathon[openai-agents]' "
+            "to attach Strathon guardrails."
+        ) from exc
+
+    guardrail = strathon_tool_guardrail(client)
+    updated = 0
+    tools = list(getattr(agent, "tools", None) or [])
+    for tool in tools:
+        if not isinstance(tool, FunctionTool):
+            continue
+        existing = list(tool.tool_input_guardrails or [])
+        if any(getattr(g, "name", None) == "strathon_policy" for g in existing):
+            # Already attached; idempotent skip
+            continue
+        existing.append(guardrail)
+        tool.tool_input_guardrails = existing
+        updated += 1
+
+    logger.info(
+        "Strathon guardrails attached to %d function tool(s) on agent %r",
+        updated, getattr(agent, "name", "<unnamed>"),
+    )
+    return updated
