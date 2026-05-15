@@ -120,6 +120,46 @@ class Settings(BaseSettings):
         return url
 
 
-# Singleton, loaded once at import. Tests can override by passing
-# overrides=Settings(database_url=...) where needed.
-settings = Settings()
+# Lazy singleton via FastAPI's recommended @lru_cache(get_settings) pattern.
+#
+# We previously did `settings = Settings()` at module load. That made every
+# `import config` (transitively, `import database`, `import main`) fail when
+# DATABASE_URL wasn't set — including in CI's Docker smoke check, IDE
+# indexing, docs generation, anything that imports the app graph without
+# wanting to actually run it. The failure was technically correct (URL is
+# required at runtime) but applied at the wrong layer of the lifecycle.
+#
+# The fix per FastAPI's official guidance
+# (https://fastapi.tiangolo.com/advanced/settings/) is a cached factory:
+# Settings() runs on first call, not on module import. The fail-fast
+# contract is preserved — anything that actually needs settings will
+# trigger validation on the first real access — but module loading
+# becomes side-effect-free.
+#
+# We additionally expose `settings` as a module-level attribute via PEP 562
+# __getattr__ so existing `from config import settings` callsites keep
+# working unchanged.
+
+from functools import lru_cache  # noqa: E402  -- placed near use site for clarity
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Return the validated Settings singleton, building it on first call.
+
+    Cached: subsequent calls return the same instance. To force a rebuild
+    (typically only in tests), call ``get_settings.cache_clear()``.
+    """
+    return Settings()
+
+
+def __getattr__(name: str):
+    """PEP 562 module attribute hook.
+
+    Lets `from config import settings` keep working transparently while
+    deferring the actual Settings() construction to first access. Without
+    this, every old import site would have to change to call get_settings().
+    """
+    if name == "settings":
+        return get_settings()
+    raise AttributeError(f"module 'config' has no attribute {name!r}")
