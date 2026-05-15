@@ -29,9 +29,11 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-# Original SQL preserved verbatim from the pre-Alembic db/migrations/001_initial.sql so the
-# baseline is auditable. Subsequent schema changes go in their own revision
-# files; never edit this one once it's applied to any database.
+# Original SQL preserved verbatim from the pre-Alembic raw-SQL migrations
+# (formerly db/migrations/001_initial.sql, deleted once Alembic became
+# the sole migration path) so the baseline is auditable. Subsequent
+# schema changes go in their own revision files; never edit this one
+# once it's applied to any database.
 _UPGRADE_SQL = r"""-- Strathon Database Schema
 -- Migration 001: Initial schema
 -- Target: Postgres 17+

@@ -95,13 +95,10 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Apply database migrations
+        working-directory: receiver
         env:
-          PGPASSWORD: strathon_dev
-        run: |
-          for f in db/migrations/*.sql; do
-            echo "Applying $f"
-            psql -h 127.0.0.1 -U strathon -d strathon -f "$f"
-          done
+          DATABASE_URL: postgresql://strathon:strathon_dev@127.0.0.1:5432/strathon
+        run: alembic upgrade head
 
       - name: Run receiver tests
         working-directory: receiver
@@ -153,13 +150,10 @@ jobs:
           pip install psycopg pytest pytest-asyncio
 
       - name: Apply database migrations
+        working-directory: receiver
         env:
-          PGPASSWORD: strathon_dev
-        run: |
-          for f in db/migrations/*.sql; do
-            echo "Applying $f"
-            psql -h 127.0.0.1 -U strathon -d strathon -f "$f"
-          done
+          DATABASE_URL: postgresql://strathon:strathon_dev@127.0.0.1:5432/strathon
+        run: alembic upgrade head
 
       - name: Run integration tests
         env:
