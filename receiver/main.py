@@ -180,6 +180,83 @@ async def _run_migrations() -> None:
     logger.info("Database migrations complete")
 
 
+async def _restore_webhook_keystore() -> None:
+    """Restore the in-memory webhook signing-key cache from operator-supplied env.
+
+    The receiver never persists plaintext signing secrets (only their
+    SHA-256 hashes — see webhooks/signing.py). After a process restart
+    the keystore is empty and outbound deliveries go unsigned until the
+    operator does one of:
+
+      (a) Pass STRATHON_WEBHOOK_SIGNING_SECRETS at boot, a comma-separated
+          list of plaintext whsec_* values. This function looks up each
+          one's hash against the active rows in webhook_signing_keys,
+          finds the matching project_id and id, and registers it in the
+          keystore.
+
+      (b) Create new keys via POST /v1/webhook_signing_keys after boot.
+          The plaintext is returned in the response and remembered in
+          the keystore directly.
+
+    This is the boot path for (a). The env variable is the recommended
+    way to keep signed delivery working across restarts in any
+    deployment that doesn't have an external secret store.
+
+    Any plaintext we can't match against an active row is logged at
+    WARNING and skipped. Common causes: the operator typo'd a value,
+    the corresponding key has been revoked, or the env var contains a
+    secret from a different deployment.
+    """
+    raw = os.getenv("STRATHON_WEBHOOK_SIGNING_SECRETS", "").strip()
+    if not raw:
+        return
+
+    secrets = [s.strip() for s in raw.split(",") if s.strip()]
+    if not secrets:
+        return
+
+    from database import async_session_maker
+    from webhooks.keystore import remember_secret
+    from webhooks.signing import hash_secret
+    from sqlalchemy import select
+    from models.webhooks import WebhookSigningKey
+
+    restored = 0
+    skipped = 0
+
+    async with async_session_maker() as session:
+        for plaintext in secrets:
+            if not plaintext.startswith("whsec_"):
+                logger.warning(
+                    "STRATHON_WEBHOOK_SIGNING_SECRETS entry does not start with "
+                    "'whsec_'; skipping"
+                )
+                skipped += 1
+                continue
+            h = hash_secret(plaintext)
+            row = await session.scalar(
+                select(WebhookSigningKey).where(
+                    WebhookSigningKey.secret_hash == h,
+                    WebhookSigningKey.revoked_at.is_(None),
+                )
+            )
+            if row is None:
+                logger.warning(
+                    "STRATHON_WEBHOOK_SIGNING_SECRETS contains a value with "
+                    "no matching active signing-key row; skipping. "
+                    "Was the key revoked or rotated since this env was set?"
+                )
+                skipped += 1
+                continue
+            remember_secret(row.project_id, plaintext, key_id=row.id)
+            restored += 1
+
+    logger.info(
+        "Webhook keystore restored from env: %d secret(s) loaded, %d skipped",
+        restored, skipped,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start up the receiver: migrations, default project, retention task."""
@@ -229,6 +306,16 @@ async def lifespan(app: FastAPI):
         name="strathon.retention",
     )
 
+    # Restore the in-memory webhook signing-key cache from operator-supplied
+    # plaintexts. The DB stores only hashes; plaintexts are not recoverable
+    # from disk, by design. Operators that want signed deliveries to
+    # survive a receiver restart pass the plaintexts via the env var
+    # STRATHON_WEBHOOK_SIGNING_SECRETS (comma-separated whsec_*). At boot
+    # we hash each one and map it to the matching active row in
+    # webhook_signing_keys; if no match, we log and skip (the operator
+    # either typo'd a secret or referenced a revoked key).
+    await _restore_webhook_keystore()
+
     # Quickstart banner: when the dev key seeded by migration 003 is still
     # active, surface it loudly. New users see "here's your key, here's the
     # endpoint, here's how to rotate" the moment the container starts.
@@ -264,13 +351,16 @@ app = FastAPI(
 
 # Mount routers. Import here (after `app` exists) so router modules can
 # stay decoupled from main.py and not see import-order issues.
-from api import api_keys, health, intervention, policies, traces  # noqa: E402
+from api import (  # noqa: E402
+    api_keys, health, intervention, policies, traces, webhook_signing_keys,
+)
 
 app.include_router(health.router)
 app.include_router(traces.router)
 app.include_router(policies.router)
 app.include_router(api_keys.router)
 app.include_router(intervention.router)
+app.include_router(webhook_signing_keys.router)
 
 
 @app.exception_handler(Exception)

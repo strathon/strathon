@@ -78,12 +78,99 @@ A policy has one of four actions:
 | Action  | What happens                                                                                                  | Where it runs |
 |---------|---------------------------------------------------------------------------------------------------------------|---------------|
 | `log`   | Annotate the matching span with `strathon.policy.*` attributes. Passive.                                      | Server        |
-| `alert` | Fire a webhook (`action_config.webhook_url`). Async, doesn't block the agent.                                 | Server        |
+| `alert` | Fire a signed webhook (`action_config.webhook_url`). Durable, retried with exponential backoff, dead-lettered after exhaustion. | Server        |
 | `block` | SDK raises `StrathonPolicyBlocked` before the tool/LLM call executes. Agent sees an error and adapts.         | SDK (client)  |
 | `steer` | SDK returns a corrective string (`action_config.replacement`) in place of real output. Agent self-corrects.   | SDK (client)  |
 
 `block` and `steer` actually prevent the action — these are SDK-side because
 by the time a span reaches the server, the action has already happened.
+
+## Webhook delivery for alert policies
+
+Alert policies POST to `action_config.webhook_url` whenever a matching
+span is ingested. The delivery layer follows the patterns serious
+webhook senders (Stripe, GitHub, OpenAI, Svix) converged on:
+
+- **Standard Webhooks signing**. Every delivery carries three headers
+  per the [Standard Webhooks spec](https://github.com/standard-webhooks/standard-webhooks):
+  `webhook-id` (stable across retries, usable as an idempotency key),
+  `webhook-timestamp`, and `webhook-signature` (HMAC-SHA256 of
+  `{id}.{timestamp}.{body}`, base64-encoded, with `v1,` prefix).
+  Consumers verify with any of seven off-the-shelf libraries; we use
+  the official `standardwebhooks` reference library on the sending side.
+
+- **Durable retries**. Each delivery is a row in `webhook_deliveries`
+  with a status (`pending`/`succeeded`/`failed_retrying`/`dlq`/
+  `abandoned`). Failed sends retry with exponential backoff
+  (defaults: 8 attempts, 1s base, 6h cap — total ~24h window). 5xx,
+  timeouts, connection errors, and 429s retry. 4xx (other than 429),
+  3xx, and malformed URLs are marked `abandoned`. Exhausted retries
+  move to `dlq` for operator review.
+
+- **Atomicity with ingest**. The delivery row is inserted in the same
+  database transaction as the matching `policy_matches` row, so a
+  rolled-back ingest produces zero phantom deliveries.
+
+### Creating a signing key
+
+Sign deliveries by creating a signing key for your project:
+
+```bash
+curl -X POST http://localhost:4318/v1/webhook_signing_keys \
+  -H "Authorization: Bearer $STRATHON_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+The response includes a `secret` field starting with `whsec_`. **Save
+it now** — the plaintext is shown exactly once and is not recoverable
+from any subsequent endpoint. Only its SHA-256 hash is persisted.
+
+Persist the plaintext into `STRATHON_WEBHOOK_SIGNING_SECRETS`
+(comma-separated `whsec_*` values) so signing survives receiver restarts.
+On boot, each plaintext is hashed and matched against the active rows
+in `webhook_signing_keys`; matches are loaded into the in-memory cache.
+
+### Rotating a signing key
+
+Stripe-style zero-downtime rotation:
+
+1. POST a new signing key. The response gives you the new plaintext.
+2. Add the new plaintext to your consumer's verifier alongside the old
+   one. Both signatures travel space-delimited in `webhook-signature`.
+3. Once every consumer accepts the new key, DELETE the old key:
+
+```bash
+curl -X DELETE http://localhost:4318/v1/webhook_signing_keys/{key_id} \
+  -H "Authorization: Bearer $STRATHON_API_KEY"
+```
+
+The old plaintext is immediately removed from the in-memory keystore.
+The next delivery signs only with the remaining active key(s).
+
+### Listing keys
+
+```bash
+# Active keys only (default)
+curl http://localhost:4318/v1/webhook_signing_keys \
+  -H "Authorization: Bearer $STRATHON_API_KEY"
+
+# Including revoked
+curl "http://localhost:4318/v1/webhook_signing_keys?include_revoked=true" \
+  -H "Authorization: Bearer $STRATHON_API_KEY"
+```
+
+Returns `id`, `prefix` (4-char public handle), `created_at`,
+`revoked_at`. No secret material — list endpoints never reveal
+plaintext or hash.
+
+### Required scopes
+
+| Endpoint                                | Scope                            |
+|----------------------------------------|----------------------------------|
+| `GET /v1/webhook_signing_keys`         | `webhook_signing_keys:read`      |
+| `POST /v1/webhook_signing_keys`        | `webhook_signing_keys:write`     |
+| `DELETE /v1/webhook_signing_keys/{id}` | `webhook_signing_keys:write`     |
 
 ## Scoping with `applies_to`
 

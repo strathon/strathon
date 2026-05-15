@@ -13,10 +13,13 @@ initial-delay) live here too because they're orchestration, not DB.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import os
 import sys
 import time
 from unittest.mock import patch
+
+import pytest
 
 
 _RECEIVER_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -30,6 +33,33 @@ from retention import (  # noqa: E402  -- sys.path manipulation above
     cleanup_once,
     retention_loop,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_settings_cache_after_test():
+    """Several config-parsing tests below use ``patch.dict(os.environ,
+    clear=True)`` plus ``importlib.reload(config)`` to drive Settings
+    with a bogus DATABASE_URL like ``postgresql://x:x@.../x``. The env
+    is restored on test exit, but the lru_cache inside
+    ``config.get_settings()`` is left populated with the bogus URL.
+    That leaks into any subsequent test (in any module) that imports
+    `database` and triggers a connection — typically the API
+    TestClient fixtures.
+
+    This fixture cleans up after every test in this module: clear the
+    cache and reload the config module so the next test starts with a
+    fresh Settings built from the real (unpatched) environment.
+    """
+    yield
+    try:
+        import config as cfg_mod
+        try:
+            cfg_mod.get_settings.cache_clear()
+        except Exception:
+            pass
+        importlib.reload(cfg_mod)
+    except Exception:
+        pass
 
 
 # ===========================================================================

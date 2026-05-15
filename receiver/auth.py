@@ -72,6 +72,13 @@ SCOPE_POLICIES_READ = "policies:read"
 SCOPE_POLICIES_WRITE = "policies:write"
 SCOPE_API_KEYS_READ = "api_keys:read"
 SCOPE_API_KEYS_WRITE = "api_keys:write"
+# Webhook signing-key management (commit C2). Operators with
+# webhook_signing_keys:write can create new signing secrets and revoke
+# existing ones; the keystore is updated accordingly so that the next
+# delivery uses the new signing material. The :read scope is enough to
+# audit which keys exist without seeing any secret material.
+SCOPE_WEBHOOK_SIGNING_KEYS_READ = "webhook_signing_keys:read"
+SCOPE_WEBHOOK_SIGNING_KEYS_WRITE = "webhook_signing_keys:write"
 
 KNOWN_SCOPES: frozenset[str] = frozenset({
     SCOPE_WILDCARD,
@@ -80,6 +87,8 @@ KNOWN_SCOPES: frozenset[str] = frozenset({
     SCOPE_POLICIES_WRITE,
     SCOPE_API_KEYS_READ,
     SCOPE_API_KEYS_WRITE,
+    SCOPE_WEBHOOK_SIGNING_KEYS_READ,
+    SCOPE_WEBHOOK_SIGNING_KEYS_WRITE,
 })
 
 # Default scopes for a new SDK-style key. Enough to ingest traces and to
