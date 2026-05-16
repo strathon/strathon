@@ -149,6 +149,18 @@ The bits below are end-to-end, tested in CI, and ready to use:
   declare what they need (`traces:write`, `policies:read`, `halts:write`,
   `budgets:write`, etc.). A leaked SDK key can ingest but can't rotate
   keys, rewrite rules, or change budgets.
+- **Per-key rate limiting.** In-memory token bucket on every non-probe
+  endpoint, 100 req/s sustained / 200 burst by default, tunable via
+  `STRATHON_RATE_LIMIT_*` env vars. Identified by the `Authorization`
+  header for authenticated requests, client IP otherwise. Returns
+  `429` with `Retry-After` and `X-RateLimit-*` headers. See
+  [`docs/self-hosting.md`](docs/self-hosting.md).
+- **Fail-closed SDK mode.** Default is fail-open (last-known halts and
+  policies stay in force during a receiver outage). Operators who
+  prefer safer-but-noisier semantics can pass `Client(fail_closed=True)`
+  to make the SDK raise `StrathonReceiverUnreachable` at tool
+  boundaries whenever the cached intervention state is older than the
+  configured threshold.
 - **Single Postgres dependency.** No Redis, no ClickHouse, no S3, no
   message broker.
 - **Alembic-managed schema** with auto-migrate on receiver startup. Set
@@ -163,12 +175,6 @@ The bits below are still in flight on the way to v1.0:
   ships, all configuration is via the REST API.
 - **Release pipeline.** No PyPI publish or pinned Docker tags yet.
   Install from a `git clone` for now.
-- **Per-API-key rate limiting.** The receiver currently has no rate
-  limit. Not exploitable, but worth tightening before v1.
-- **Fail-closed SDK mode.** The SDK currently fails open on receiver
-  outage (last-known halts remain in force, new ones don't arrive).
-  An opt-in fail-closed knob for operators who prefer the safer-but-
-  noisier default is on the list.
 
 ---
 

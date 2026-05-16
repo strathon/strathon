@@ -21,20 +21,27 @@ classes (rather than one combined enforcer) because:
 
 The extra cost is one daemon thread per Client. Negligible.
 
-Failure model: fail-OPEN
-========================
+Failure model: fail-OPEN by default, fail-CLOSED is opt-in
+==========================================================
 
 If the receiver is unreachable at SDK startup, the halt cache stays
 empty and every call allows. If the receiver becomes unreachable
 mid-session, the last-known cache stays in force until the next
-successful refresh. Either way, an outage of the receiver does NOT
-halt every agent in production — which would be the worst possible
-failure mode and the reason LaunchDarkly fails their flag SDKs open
-too.
+successful refresh. Either way, the default is that an outage of
+the receiver does NOT halt every agent in production — which would
+be the worst possible failure mode and the reason LaunchDarkly
+fails their flag SDKs open too.
 
-Operators who want fail-closed semantics will get that knob in a
-future commit alongside the budget-rollup work. The default is
-fail-open.
+Operators who want safety-over-availability semantics can opt into
+fail-closed mode by passing ``fail_closed=True`` (with an optional
+``fail_closed_max_staleness_sec`` threshold, default 60s) on the
+Client. Once enabled, ``check_halt`` raises
+``StrathonReceiverUnreachable`` from inside the tool-boundary check
+whenever the most recent successful refresh is older than the
+threshold. This is opt-in precisely because a fleet of agents
+suddenly raising on every tool call is itself an outage; operators
+should turn this on only when their environment prefers stopping
+over running-on-stale-state.
 
 Scope matching
 ==============
@@ -67,6 +74,7 @@ from typing import Any, Dict, List, Optional
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+from strathon.exceptions import StrathonReceiverUnreachable
 from strathon.policy.types import ALLOW_HALT, HaltDecision
 
 logger = logging.getLogger(__name__)
@@ -86,12 +94,16 @@ class HaltEnforcer:
         project_id: Optional[str] = None,
         refresh_interval_sec: float = 1.0,
         request_timeout_sec: float = 5.0,
+        fail_closed: bool = False,
+        fail_closed_max_staleness_sec: float = 60.0,
     ) -> None:
         self._endpoint = endpoint.rstrip("/")
         self._api_key = api_key
         self._project_id = project_id
         self._refresh_interval_sec = refresh_interval_sec
         self._request_timeout_sec = request_timeout_sec
+        self._fail_closed = fail_closed
+        self._fail_closed_max_staleness_sec = fail_closed_max_staleness_sec
 
         self._lock = threading.RLock()
         self._halts: List[Dict[str, Any]] = []
@@ -189,7 +201,16 @@ class HaltEnforcer:
         most recent active halt is what the caller sees in the raised
         exception, which is what an operator who just clicked the
         kill-switch button expects.
+
+        Fail-closed: when ``fail_closed=True`` was set on this
+        enforcer, this method raises ``StrathonReceiverUnreachable``
+        instead of returning a decision whenever the cached halt state
+        is older than ``fail_closed_max_staleness_sec``. The default
+        ``fail_closed=False`` preserves the historical fail-open
+        behavior — stale state continues to be used.
         """
+        self._assert_fresh_if_fail_closed()
+
         with self._lock:
             halts = list(self._halts)
 
@@ -244,7 +265,40 @@ class HaltEnforcer:
             self._halts = list(halts)
             self._last_refresh_at = time.time()
 
+    def set_last_refresh_for_testing(self, ts: float) -> None:
+        """Force the last-refresh timestamp for fail-closed staleness tests."""
+        with self._lock:
+            self._last_refresh_at = ts
+
     # ---- Internals ----
+
+    def _assert_fresh_if_fail_closed(self) -> None:
+        """Raise :class:`StrathonReceiverUnreachable` when fail-closed is
+        on AND the cached state is older than the configured threshold.
+
+        No-op when ``fail_closed`` is False (the default). The check is
+        single read-and-compare on the per-instance lock, so it adds
+        microseconds to the tool-boundary path even at high QPS.
+        """
+        if not self._fail_closed:
+            return
+        with self._lock:
+            last = self._last_refresh_at
+        # When no refresh has ever succeeded, ``last`` is 0.0 — staleness
+        # is effectively infinite and the threshold check naturally fails.
+        staleness = time.time() - last
+        if staleness > self._fail_closed_max_staleness_sec:
+            raise StrathonReceiverUnreachable(
+                (
+                    f"halt cache stale by {staleness:.1f}s "
+                    f"(max {self._fail_closed_max_staleness_sec:.1f}s); "
+                    "receiver may be unreachable. fail_closed=True is on, "
+                    "so this tool call is refused."
+                ),
+                subsystem="halt_enforcer",
+                staleness_seconds=staleness,
+                max_staleness_seconds=self._fail_closed_max_staleness_sec,
+            )
 
     def _auth_headers(self) -> Dict[str, str]:
         headers = {"Accept": "application/json"}

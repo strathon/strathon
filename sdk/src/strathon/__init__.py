@@ -23,6 +23,7 @@ from strathon.exceptions import (
     AuthenticationError,
     ExportError,
     InterventionError,
+    StrathonReceiverUnreachable,
 )
 from strathon.policy.types import (
     StrathonHaltExceeded,
@@ -37,6 +38,7 @@ __all__ = [
     "AuthenticationError",
     "ExportError",
     "InterventionError",
+    "StrathonReceiverUnreachable",
     "StrathonPolicyBlocked",
     "StrathonHaltExceeded",
     "instrument",

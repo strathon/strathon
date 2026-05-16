@@ -136,9 +136,33 @@ a match, the dispatcher raises `StrathonHaltExceeded` with the halt's id,
 scope, scope_value, and reason. The user's tool function body never
 executes.
 
-A halt check failing (network blip during refresh) is fail-open — the
-SDK uses its last-known halt cache rather than blocking every call. If
-you'd rather fail closed, that knob is on the roadmap.
+A halt check failing (network blip during refresh) is fail-open by
+default — the SDK uses its last-known halt cache rather than blocking
+every call. Operators who prefer safer-but-noisier semantics can opt
+into fail-closed mode by passing `fail_closed=True` on the client:
+
+```python
+client = Client(
+    api_key="stra_...",
+    endpoint="http://localhost:4318",
+    fail_closed=True,
+    fail_closed_max_staleness_sec=60.0,  # default; tune for your refresh cadence
+)
+```
+
+When fail-closed is on, both the halt enforcer and the policy
+enforcer raise `StrathonReceiverUnreachable` at the tool boundary
+whenever their cached state is older than
+`fail_closed_max_staleness_sec`. The default 60s threshold is well
+above the 1s halt refresh and 30s policy refresh intervals, so brief
+receiver hiccups don't trip it; a sustained outage does.
+
+`StrathonReceiverUnreachable` is distinct from `StrathonHaltExceeded`
+and `StrathonPolicyBlocked` so callers handling the three cases
+differently (e.g. page on-call vs retry vs surface to the user) can
+branch on the exception type. The exception carries `subsystem`
+(`halt_enforcer` or `policy_enforcer`), `staleness_seconds`, and
+`max_staleness_seconds` attributes for diagnostic logging.
 
 ### Required scopes (halts)
 

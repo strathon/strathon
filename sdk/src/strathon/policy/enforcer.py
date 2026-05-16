@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
+from strathon.exceptions import StrathonReceiverUnreachable
 from strathon.policy.expression import evaluate
 from strathon.policy.types import ALLOW, Policy, PolicyDecision
 
@@ -52,12 +53,16 @@ class PolicyEnforcer:
         project_id: Optional[str] = None,
         refresh_interval_sec: float = 30.0,
         request_timeout_sec: float = 5.0,
+        fail_closed: bool = False,
+        fail_closed_max_staleness_sec: float = 60.0,
     ) -> None:
         self._endpoint = endpoint.rstrip("/")
         self._api_key = api_key
         self._project_id = project_id
         self._refresh_interval_sec = refresh_interval_sec
         self._request_timeout_sec = request_timeout_sec
+        self._fail_closed = fail_closed
+        self._fail_closed_max_staleness_sec = fail_closed_max_staleness_sec
 
         self._lock = threading.RLock()
         self._policies: List[Policy] = []
@@ -137,7 +142,16 @@ class PolicyEnforcer:
 
         'log' and 'alert' actions are server-side and do not affect the
         return value (they are applied later when the span is ingested).
+
+        Fail-closed: when ``fail_closed=True`` was set on this
+        enforcer, this method raises ``StrathonReceiverUnreachable``
+        instead of returning a decision whenever the cached policy
+        state is older than ``fail_closed_max_staleness_sec``. The
+        default ``fail_closed=False`` preserves the historical
+        fail-open behavior — stale state continues to be used.
         """
+        self._assert_fresh_if_fail_closed()
+
         with self._lock:
             policies = list(self._policies)
 
@@ -199,7 +213,40 @@ class PolicyEnforcer:
             self._policies = sorted_policies
             self._last_refresh_at = time.time()
 
+    def set_last_refresh_for_testing(self, ts: float) -> None:
+        """Force the last-refresh timestamp for fail-closed staleness tests."""
+        with self._lock:
+            self._last_refresh_at = ts
+
     # ---- Internals ----
+
+    def _assert_fresh_if_fail_closed(self) -> None:
+        """Raise :class:`StrathonReceiverUnreachable` when fail-closed is
+        on AND the cached state is older than the configured threshold.
+
+        No-op when ``fail_closed`` is False (the default). The check is
+        a single read-and-compare on the per-instance lock, so it adds
+        microseconds to the tool-boundary path even at high QPS.
+        """
+        if not self._fail_closed:
+            return
+        with self._lock:
+            last = self._last_refresh_at
+        # When no refresh has ever succeeded, ``last`` is 0.0 — staleness
+        # is effectively infinite and the threshold check naturally fails.
+        staleness = time.time() - last
+        if staleness > self._fail_closed_max_staleness_sec:
+            raise StrathonReceiverUnreachable(
+                (
+                    f"policy cache stale by {staleness:.1f}s "
+                    f"(max {self._fail_closed_max_staleness_sec:.1f}s); "
+                    "receiver may be unreachable. fail_closed=True is on, "
+                    "so this tool call is refused."
+                ),
+                subsystem="policy_enforcer",
+                staleness_seconds=staleness,
+                max_staleness_seconds=self._fail_closed_max_staleness_sec,
+            )
 
     def _auth_headers(self) -> Dict[str, str]:
         headers = {"Accept": "application/json"}

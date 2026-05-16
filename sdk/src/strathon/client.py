@@ -39,11 +39,22 @@ class Client:
             server (default 30s).
         enable_halts: If True (default), polls the receiver for operator-imposed
             halts and raises StrathonHaltExceeded at tool boundaries when an
-            active halt matches the calling agent. Polls fail-open: an
-            unreachable receiver does NOT halt agents.
+            active halt matches the calling agent. Polls fail-open by default:
+            an unreachable receiver does NOT halt agents.
         halt_refresh_interval_sec: How often to poll for halts (default 1s).
             Faster than policy refresh because operators expect kill-switches
             to take effect quickly.
+        fail_closed: If True, both the policy and halt enforcers raise
+            StrathonReceiverUnreachable at the tool boundary whenever their
+            cached state is older than fail_closed_max_staleness_sec. Default
+            False preserves historical fail-open behavior — a brief receiver
+            outage continues to be served from last-known state. Turn this on
+            when your environment prefers stopping agents over running on
+            stale policy/halt state.
+        fail_closed_max_staleness_sec: How old the cached state may be before
+            fail-closed mode treats it as unreachable. Default 60s leaves
+            comfortable headroom over the 1s halt and 30s policy refresh
+            intervals; brief receiver hiccups don't trip it.
     """
 
     def __init__(
@@ -59,6 +70,8 @@ class Client:
         policy_refresh_interval_sec: float = 30.0,
         enable_halts: bool = True,
         halt_refresh_interval_sec: float = 1.0,
+        fail_closed: bool = False,
+        fail_closed_max_staleness_sec: float = 60.0,
     ):
         if not api_key:
             raise AuthenticationError("api_key is required")
@@ -119,6 +132,8 @@ class Client:
                 api_key=api_key,
                 project_id=project_id,
                 refresh_interval_sec=policy_refresh_interval_sec,
+                fail_closed=fail_closed,
+                fail_closed_max_staleness_sec=fail_closed_max_staleness_sec,
             )
             # start() does a synchronous fetch + spawns background refresh.
             # We swallow failures so an unreachable receiver doesn't break
@@ -143,6 +158,8 @@ class Client:
                 api_key=api_key,
                 project_id=project_id,
                 refresh_interval_sec=halt_refresh_interval_sec,
+                fail_closed=fail_closed,
+                fail_closed_max_staleness_sec=fail_closed_max_staleness_sec,
             )
             try:
                 self._halt_enforcer.start()
