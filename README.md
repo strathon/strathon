@@ -110,8 +110,27 @@ The bits below are end-to-end, tested in CI, and ready to use:
   the tool body runs. Works in LangGraph (via LangChain's tool callback
   protocol), CrewAI, and the OpenAI Agents SDK via per-framework
   instrumentation modules.
+- **Steer actions.** A matched policy returns a corrective string in
+  place of the real tool output, so the agent self-corrects on its next
+  step instead of seeing an error. Same framework coverage as block.
 - **Log and alert actions.** A matched policy records a match record and
   fires an outbound webhook without interrupting the agent.
+- **Durable webhook delivery.** Alert webhooks are signed (HMAC-SHA256),
+  retried with exponential backoff, dead-lettered after exhaustion, and
+  replayable via REST. A background sweeper recovers anything the
+  in-process queue dropped during a crash.
+- **Operator kill-switches.** `POST /v1/halts` writes a halt that the
+  SDK observes within one poll cycle (~1s) and raises
+  `StrathonHaltExceeded` at the tool boundary. Project-scope or
+  agent-scope. No agent restart needed. Clears via `DELETE`.
+  See [`docs/intervention.md`](docs/intervention.md).
+- **Cost and iteration budgets.** Per-project caps on USD spend (with
+  fixed-window reset like `1d` / `30d`) or on tool-call count (rolling
+  window for loop detection). The receiver's budget monitor evaluates
+  active budgets every few seconds and writes an auto-clearing halt
+  when a threshold is crossed. Pricing comes from a vendored model
+  catalog (LiteLLM upstream, MIT-licensed) plus per-project overrides.
+  See [`docs/budgets.md`](docs/budgets.md).
 - **PII redaction at ingest.** Default-on regex-based redaction of
   emails, credit cards (Luhn-validated), SSNs, phone numbers, IP
   addresses, and common API-key shapes (`sk-...`, `sk_live_...`,
@@ -127,8 +146,9 @@ The bits below are end-to-end, tested in CI, and ready to use:
   in Postgres with the `gen_ai.*` semconv attributes denormalized for
   query speed.
 - **Capability-scoped API keys.** Per-key `scopes TEXT[]`; endpoints
-  declare what they need (`traces:write`, `policies:read`, etc.). A leaked
-  SDK key can ingest but can't rotate keys or rewrite rules.
+  declare what they need (`traces:write`, `policies:read`, `halts:write`,
+  `budgets:write`, etc.). A leaked SDK key can ingest but can't rotate
+  keys, rewrite rules, or change budgets.
 - **Single Postgres dependency.** No Redis, no ClickHouse, no S3, no
   message broker.
 - **Alembic-managed schema** with auto-migrate on receiver startup. Set
@@ -137,20 +157,18 @@ The bits below are end-to-end, tested in CI, and ready to use:
 
 ## On the roadmap
 
-The bits below have scaffolding but aren't production-ready yet. I'm
-listing them here so you know what's coming and so the README never
-overpromises:
+The bits below are still in flight on the way to v1.0:
 
-- **Steer actions** (rewrite the model's response before the agent sees
-  it) — partial, framework parity work in progress.
-- **Dashboard** — Next.js scaffold under `dashboard/` is empty. Until it
-  ships, all policy management is via the REST API.
-- **Persistent halt state and budget rollup across processes** — the
-  earlier SDK-pull design left endpoint stubs at `/v1/intervention/*`
-  for backward compatibility. The replacement design (server-side state
-  + SDK enforcement at tool boundaries) is partway in.
-- **Release pipeline** — no PyPI publish or pinned Docker tags yet.
+- **Dashboard.** Next.js scaffold under `dashboard/` is empty. Until it
+  ships, all configuration is via the REST API.
+- **Release pipeline.** No PyPI publish or pinned Docker tags yet.
   Install from a `git clone` for now.
+- **Per-API-key rate limiting.** The receiver currently has no rate
+  limit. Not exploitable, but worth tightening before v1.
+- **Fail-closed SDK mode.** The SDK currently fails open on receiver
+  outage (last-known halts remain in force, new ones don't arrive).
+  An opt-in fail-closed knob for operators who prefer the safer-but-
+  noisier default is on the list.
 
 ---
 
@@ -182,7 +200,7 @@ Two attribute namespaces on every span:
   agent topology, and policy decisions.
 
 Detailed docs live under `docs/`: [intervention](docs/intervention.md),
-[redaction](docs/redaction.md),
+[budgets](docs/budgets.md), [redaction](docs/redaction.md),
 [observability](docs/observability.md), [retention](docs/retention.md),
 [sampling](docs/sampling.md), [self-hosting](docs/self-hosting.md),
 [api keys](docs/api_keys.md).
@@ -191,9 +209,9 @@ Detailed docs live under `docs/`: [intervention](docs/intervention.md),
 
 ## Status
 
-v0 in active development. Target v1.0: end of June 2026. The block / log /
-alert path is stable and used in the integration test suite that runs in
-CI on every push.
+v0 in active development. Target v1.0: end of June 2026. The
+block / steer / log / alert / halt / budget paths are stable and
+covered by the integration test suite that runs in CI on every push.
 
 If you find something broken or want to discuss a feature, open an issue.
 

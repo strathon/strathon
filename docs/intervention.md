@@ -85,6 +85,88 @@ A policy has one of four actions:
 `block` and `steer` actually prevent the action — these are SDK-side because
 by the time a span reaches the server, the action has already happened.
 
+## Operator kill-switches: halts
+
+Policies are *conditional* — they fire when a CEL expression matches. Halts
+are *unconditional*: they stop an agent regardless of what it's trying to do.
+This is the "something's clearly wrong, stop everything" lever.
+
+A halt is a row in `halt_state` with a scope (`agent` or `project`), an
+optional reason, and an `actor` recording who created it (`user` for an
+operator, `budget_monitor` for the automatic kind — see the budgets
+section below).
+
+### Creating a halt
+
+```http
+POST /v1/halts
+Authorization: Bearer <key with halts:write>
+
+{
+  "scope": "agent",
+  "scope_value": "research-agent",
+  "reason": "investigating runaway tool calls"
+}
+```
+
+Returns `201` with the halt row. From this moment on, any SDK whose
+client is polling `/v1/intervention/sync` (default cadence: 1s) sees the
+halt and starts raising `StrathonHaltExceeded` at every tool-call boundary
+for the matching scope.
+
+Project-scope halts (`scope=project`, no `scope_value`) match every agent
+in the project — the "kill the whole product" lever for cases where you
+don't know which agent's misbehaving. Agent-scope halts only match calls
+whose `gen_ai.agent.id` (or `strathon.agent.id`) equals `scope_value`.
+
+### Clearing a halt
+
+```http
+DELETE /v1/halts/{id}
+```
+
+The halt's `cleared_at` is stamped to `now`; the next SDK poll observes
+an empty halt list and tool calls resume.
+
+### How the SDK sees it
+
+The SDK's `HaltEnforcer` polls in the background. On each call to a
+tool, `check_halt(span_context)` consults the in-process halt cache; on
+a match, the dispatcher raises `StrathonHaltExceeded` with the halt's id,
+scope, scope_value, and reason. The user's tool function body never
+executes.
+
+A halt check failing (network blip during refresh) is fail-open — the
+SDK uses its last-known halt cache rather than blocking every call. If
+you'd rather fail closed, that knob is on the roadmap.
+
+### Required scopes (halts)
+
+`halts:read` for `GET /v1/halts` and the active-halt list in
+`/v1/intervention/sync`. `halts:write` for `POST` and `DELETE`. The
+seeded dev key has `*`; production keys should be scoped narrowly.
+
+### Audit trail
+
+Every halt row is preserved on clear — the `cleared_at` column is
+stamped rather than deleting the row, so the history of who created
+and cleared a halt remains queryable for as long as the row exists.
+Retention sweeps don't touch `halt_state` today; if you need bounded
+storage on the audit table, that's a separate cleanup job to add.
+
+## Cost and iteration budgets
+
+Halts can also be produced automatically by the receiver when a per-
+project budget is exceeded. The budget monitor evaluates active budgets
+on a tick, sums LLM cost or tool-call counts over the configured
+window, and writes a halt (with `actor='budget_monitor'`) when over
+threshold. When the budget's window resets, the halt auto-clears.
+
+This is the cost-circuit-breaker story: configure a `$100/day` cap and
+the agents stop on their own when it's exceeded, without an operator
+having to notice or intervene. Full details, REST surface, scope
+semantics, and pricing-source documentation in [`budgets.md`](budgets.md).
+
 ## Webhook delivery for alert policies
 
 Alert policies POST to `action_config.webhook_url` whenever a matching

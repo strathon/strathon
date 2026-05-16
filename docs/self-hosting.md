@@ -164,3 +164,21 @@ For real deployments, change at minimum:
 
 A production deploy recipe (Fly.io / Render / managed Postgres) ships in
 a later release.
+
+### Connection pooling caveat
+
+If you put PgBouncer (or another connection pooler) between the receiver
+and Postgres, **run it in session pooling mode**, not transaction pooling.
+
+The budget monitor uses session-scoped Postgres advisory locks
+(`pg_try_advisory_lock`) to ensure only one replica evaluates budgets
+on each tick. In transaction-pooling mode, PgBouncer recycles
+connections between transactions, which silently releases advisory
+locks held by the monitor. The symptom is duplicate halts written by
+multiple replicas racing on the same budget.
+
+Either set `pool_mode = session` for the receiver's pool, point the
+receiver at Postgres directly, or run with a single receiver replica
+(advisory locks are still useful there as a guard against startup races).
+The same caveat applies to anything else in the codebase that uses
+session-scoped state on a Postgres connection.
