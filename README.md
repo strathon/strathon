@@ -113,6 +113,11 @@ The bits below are end-to-end, tested in CI, and ready to use:
 - **Steer actions.** A matched policy returns a corrective string in
   place of the real tool output, so the agent self-corrects on its next
   step instead of seeing an error. Same framework coverage as block.
+- **Throttle actions.** A matched policy enforces a per-`(policy,
+  agent)` (or `global`) token bucket; calls under the cap proceed,
+  calls over it raise `StrathonPolicyThrottled` with
+  `retry_after_seconds` so caller code can back off and retry.
+  Configure with `action_config: {max_calls, window_seconds, scope}`.
 - **Log and alert actions.** A matched policy records a match record and
   fires an outbound webhook without interrupting the agent.
 - **Durable webhook delivery.** Alert webhooks are signed (HMAC-SHA256),

@@ -61,22 +61,28 @@ class Policy:
 class PolicyDecision:
     """The result of evaluating active policies against an action.
 
-    `action` is one of 'allow', 'block', 'steer'. 'log' and 'alert' don't
-    affect control flow and are not returned as decisions; they are applied
-    as side effects by the server.
+    `action` is one of 'allow', 'block', 'steer', 'throttle'. 'log' and
+    'alert' don't affect control flow and are not returned as decisions;
+    they are applied as side effects by the server.
 
     When action == 'steer', `replacement` holds the corrective string the
     SDK should return in place of the real tool/LLM output.
 
     When action == 'block', `message` holds the human-readable reason that
     will be attached to the raised StrathonPolicyBlocked exception.
+
+    When action == 'throttle', the call exceeded the policy's rate cap.
+    `message` carries a human-readable reason. `retry_after_seconds`
+    estimates how long until the bucket has at least one token again,
+    based on the configured refill rate.
     """
 
-    action: str  # 'allow' | 'block' | 'steer'
+    action: str  # 'allow' | 'block' | 'steer' | 'throttle'
     policy_id: Optional[str] = None
     policy_name: Optional[str] = None
     message: Optional[str] = None
     replacement: Optional[str] = None
+    retry_after_seconds: Optional[float] = None
 
     @property
     def is_allow(self) -> bool:
@@ -89,6 +95,10 @@ class PolicyDecision:
     @property
     def is_steer(self) -> bool:
         return self.action == "steer"
+
+    @property
+    def is_throttle(self) -> bool:
+        return self.action == "throttle"
 
 
 # Module-level singleton for the most common case
@@ -108,6 +118,34 @@ class StrathonPolicyBlocked(Exception):
         self.message = message
         self.policy_id = policy_id
         self.policy_name = policy_name
+
+
+class StrathonPolicyThrottled(StrathonPolicyBlocked):
+    """Raised when a 'throttle' policy refused this specific call because
+    its rate limit was already exhausted.
+
+    Subclass of :class:`StrathonPolicyBlocked` deliberately: code that
+    catches ``StrathonPolicyBlocked`` to handle policy refusal in
+    aggregate continues to work and treats throttling as a kind of
+    block. Code that wants to distinguish — e.g. to sleep
+    ``retry_after_seconds`` and retry the tool rather than escalate to
+    the user — can catch ``StrathonPolicyThrottled`` specifically.
+
+    The semantic is distinct: ``block`` says "this call would have
+    violated the rule"; ``throttle`` says "the rule allows this call,
+    just not at this rate." Operators handling the two cases
+    differently — alert vs backoff-and-retry — need the distinction.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        policy_id: Optional[str] = None,
+        policy_name: Optional[str] = None,
+        retry_after_seconds: Optional[float] = None,
+    ) -> None:
+        super().__init__(message, policy_id=policy_id, policy_name=policy_name)
+        self.retry_after_seconds = retry_after_seconds
 
 
 # ---- Halt decisions ----------------------------------------------------

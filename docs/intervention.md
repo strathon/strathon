@@ -73,17 +73,65 @@ isn't guaranteed to exist on every span.
 
 ## Actions
 
-A policy has one of four actions:
+A policy has one of five actions:
 
-| Action  | What happens                                                                                                  | Where it runs |
-|---------|---------------------------------------------------------------------------------------------------------------|---------------|
-| `log`   | Annotate the matching span with `strathon.policy.*` attributes. Passive.                                      | Server        |
-| `alert` | Fire a signed webhook (`action_config.webhook_url`). Durable, retried with exponential backoff, dead-lettered after exhaustion. | Server        |
-| `block` | SDK raises `StrathonPolicyBlocked` before the tool/LLM call executes. Agent sees an error and adapts.         | SDK (client)  |
-| `steer` | SDK returns a corrective string (`action_config.replacement`) in place of real output. Agent self-corrects.   | SDK (client)  |
+| Action     | What happens                                                                                                                          | Where it runs |
+|------------|---------------------------------------------------------------------------------------------------------------------------------------|---------------|
+| `log`      | Annotate the matching span with `strathon.policy.*` attributes. Passive.                                                              | Server        |
+| `alert`    | Fire a signed webhook (`action_config.webhook_url`). Durable, retried with exponential backoff, dead-lettered after exhaustion.       | Server        |
+| `block`    | SDK raises `StrathonPolicyBlocked` before the tool/LLM call executes. Agent sees an error and adapts.                                 | SDK (client)  |
+| `steer`    | SDK returns a corrective string (`action_config.replacement`) in place of real output. Agent self-corrects.                           | SDK (client)  |
+| `throttle` | SDK consults a per-policy token bucket. Calls under the cap proceed; calls over it raise `StrathonPolicyThrottled` with `retry_after_seconds`. | SDK (client)  |
 
-`block` and `steer` actually prevent the action — these are SDK-side because
-by the time a span reaches the server, the action has already happened.
+`block`, `steer`, and `throttle` actually prevent (or rate-limit) the
+action — these are SDK-side because by the time a span reaches the
+server, the action has already happened.
+
+### Throttle action config
+
+```json
+{
+  "name": "limit_expensive_tool",
+  "match_expression": "name == 'tool.web_search'",
+  "action": "throttle",
+  "action_config": {
+    "max_calls": 10,
+    "window_seconds": 60,
+    "scope": "agent"
+  }
+}
+```
+
+- `max_calls` (required, positive integer) — token-bucket capacity.
+- `window_seconds` (required, positive number) — interval over which
+  the bucket refills back to capacity. Combined with `max_calls`, this
+  yields a sustained rate of `max_calls / window_seconds` calls per
+  second per scope key.
+- `scope` (optional, defaults to `"agent"`) — what the bucket is keyed
+  by:
+  - `"agent"`: one bucket per `(policy, agent_id)`. The most common
+    semantic — "no single agent calls this tool more than N times per
+    window."
+  - `"global"`: one shared bucket per policy. Use this for
+    project-wide caps that apply regardless of which agent invoked.
+
+Throttle decisions raise `StrathonPolicyThrottled`, which is a subclass
+of `StrathonPolicyBlocked` — existing `except StrathonPolicyBlocked`
+handlers continue to catch it. Code that wants to distinguish a
+throttle (and backoff-and-retry) from a hard block (and escalate) can
+catch `StrathonPolicyThrottled` specifically. The exception carries
+`retry_after_seconds` so a retry loop can sleep for the right amount.
+
+When a throttle policy *admits* a call (the bucket had a token), the
+SDK does not short-circuit — lower-priority `block` or `steer`
+policies still get evaluated. A throttle that admits is "no opinion
+on this call." A throttle that denies short-circuits with the throttle
+decision.
+
+State is per-process: each SDK replica holds its own bucket dict, so
+in an N-process agent deploy the effective ceiling is
+`N × max_calls`. The matching trade-off appears in the receiver's
+rate limiter; see `docs/self-hosting.md` for the multi-replica note.
 
 ## Operator kill-switches: halts
 

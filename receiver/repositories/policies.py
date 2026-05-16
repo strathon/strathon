@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Policy, PolicyMatch
 from policies_eval import validate_expression
-from schemas.policies import VALID_ACTIONS, PolicyRead
+from schemas.policies import VALID_ACTIONS, PolicyRead, validate_action_config
 
 logger = logging.getLogger("strathon.receiver.repositories.policies")
 
@@ -95,6 +95,10 @@ async def create_policy(
         raise ValueError(
             f"action must be one of {sorted(VALID_ACTIONS)}, got {action!r}"
         )
+    # Action-specific config validation (e.g. throttle requires
+    # max_calls/window_seconds/scope shape). Raises ValueError on bad
+    # shape; the API layer maps that to a 400.
+    validate_action_config(action, action_config or {})
     # Raises PolicyExpressionError on malformed CEL — caller's HTTPException
     # handler turns this into a 400.
     validate_expression(match_expression)
@@ -148,6 +152,17 @@ async def update_policy(
         raise ValueError(
             f"action must be one of {sorted(VALID_ACTIONS)}, got {updates['action']!r}"
         )
+    # Validate action_config shape against either the new action (when
+    # action is being changed in this same PATCH) or the existing action
+    # (when only action_config is being changed). Either path that ends
+    # in a row with action="throttle" needs a well-formed config.
+    if "action_config" in updates:
+        if "action" in updates:
+            effective_action = updates["action"]
+        else:
+            existing = await get_policy(session, project_id, policy_id)
+            effective_action = existing.action if existing is not None else ""
+        validate_action_config(effective_action, updates["action_config"] or {})
     if "match_expression" in updates:
         validate_expression(updates["match_expression"])
 

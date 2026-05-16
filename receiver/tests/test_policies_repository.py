@@ -148,6 +148,123 @@ async def test_create_policy_rejects_invalid_action(session, isolated_project):
         )
 
 
+async def test_create_policy_accepts_well_formed_throttle(session, isolated_project):
+    from repositories.policies import create_policy
+
+    policy = await create_policy(
+        session,
+        isolated_project,
+        name="rate_limit",
+        match_expression="true",
+        action="throttle",
+        action_config={
+            "max_calls": 10,
+            "window_seconds": 60,
+            "scope": "agent",
+        },
+    )
+    assert policy.action == "throttle"
+    assert policy.action_config["max_calls"] == 10
+    assert policy.action_config["scope"] == "agent"
+
+
+async def test_create_policy_throttle_defaults_scope_to_agent(session, isolated_project):
+    """Scope is optional in action_config; the validator only checks it
+    when present. The SDK applies the default at enforcement time."""
+    from repositories.policies import create_policy
+
+    policy = await create_policy(
+        session,
+        isolated_project,
+        name="rate_limit",
+        match_expression="true",
+        action="throttle",
+        action_config={"max_calls": 5, "window_seconds": 30},
+    )
+    assert policy.action == "throttle"
+    assert "scope" not in policy.action_config or policy.action_config["scope"] == "agent"
+
+
+@pytest.mark.parametrize("bad_config,err_substr", [
+    ({}, "max_calls"),
+    ({"max_calls": 0, "window_seconds": 60}, "positive integer"),
+    ({"max_calls": -3, "window_seconds": 60}, "positive integer"),
+    ({"max_calls": "ten", "window_seconds": 60}, "positive integer"),
+    ({"max_calls": True, "window_seconds": 60}, "positive integer"),
+    ({"max_calls": 5}, "window_seconds"),
+    ({"max_calls": 5, "window_seconds": 0}, "positive number"),
+    ({"max_calls": 5, "window_seconds": -10}, "positive number"),
+    ({"max_calls": 5, "window_seconds": "minute"}, "positive number"),
+    ({"max_calls": 5, "window_seconds": 60, "scope": "tool"}, "scope must be one of"),
+    ({"max_calls": 5, "window_seconds": 60, "scope": ""}, "scope must be one of"),
+])
+async def test_create_policy_rejects_malformed_throttle_config(
+    session, isolated_project, bad_config, err_substr,
+):
+    """Server validates throttle action_config shape so operators get
+    an immediate 400 on a misconfigured policy rather than silent
+    failure at SDK enforcement time."""
+    from repositories.policies import create_policy
+
+    with pytest.raises(ValueError, match=err_substr):
+        await create_policy(
+            session,
+            isolated_project,
+            name="bad_throttle",
+            match_expression="true",
+            action="throttle",
+            action_config=bad_config,
+        )
+
+
+async def test_update_policy_rejects_malformed_throttle_config(
+    session, isolated_project,
+):
+    """Patching a non-throttle policy to action=throttle with a bad
+    config gets the same validation as a fresh create."""
+    from repositories.policies import create_policy, update_policy
+
+    policy = await create_policy(
+        session,
+        isolated_project,
+        name="will_be_throttle",
+        match_expression="true",
+        action="log",
+    )
+    with pytest.raises(ValueError, match="max_calls"):
+        await update_policy(
+            session,
+            isolated_project,
+            policy.id,
+            action="throttle",
+            action_config={"window_seconds": 60},
+        )
+
+
+async def test_update_policy_validates_action_config_against_existing_action(
+    session, isolated_project,
+):
+    """Patching only action_config (not action) on a throttle policy
+    must still validate the new config under the existing action."""
+    from repositories.policies import create_policy, update_policy
+
+    policy = await create_policy(
+        session,
+        isolated_project,
+        name="already_throttle",
+        match_expression="true",
+        action="throttle",
+        action_config={"max_calls": 5, "window_seconds": 30},
+    )
+    with pytest.raises(ValueError, match="positive integer"):
+        await update_policy(
+            session,
+            isolated_project,
+            policy.id,
+            action_config={"max_calls": -1, "window_seconds": 30},
+        )
+
+
 async def test_create_policy_rejects_invalid_cel(session, isolated_project):
     from policies_eval import PolicyExpressionError
     from repositories.policies import create_policy

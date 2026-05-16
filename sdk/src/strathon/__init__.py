@@ -28,6 +28,7 @@ from strathon.exceptions import (
 from strathon.policy.types import (
     StrathonHaltExceeded,
     StrathonPolicyBlocked,
+    StrathonPolicyThrottled,
 )
 
 __all__ = [
@@ -40,6 +41,7 @@ __all__ = [
     "InterventionError",
     "StrathonReceiverUnreachable",
     "StrathonPolicyBlocked",
+    "StrathonPolicyThrottled",
     "StrathonHaltExceeded",
     "instrument",
 ]

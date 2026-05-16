@@ -415,6 +415,24 @@ def _build_strathon_run_hooks(client, user_hooks):
                     policy_name=decision.policy_name,
                 )
 
+            if decision.is_throttle:
+                _emit_intervention_span_oai(
+                    client,
+                    tool_name=tool_name,
+                    attrs=attrs,
+                    decision_kind="throttled",
+                    decision=decision,
+                    error_message=decision.message or "policy throttled",
+                )
+                from strathon.policy import StrathonPolicyThrottled
+                raise StrathonPolicyThrottled(
+                    decision.message
+                    or f"Tool '{tool_name}' rate-limited by Strathon policy",
+                    policy_id=decision.policy_id,
+                    policy_name=decision.policy_name,
+                    retry_after_seconds=decision.retry_after_seconds,
+                )
+
             if decision.is_steer:
                 # on_tool_start cannot substitute the tool's return value, so
                 # full steer semantics aren't possible without a deeper hook.
@@ -715,6 +733,20 @@ def _build_strathon_guardrail_function(client):
                     "policy_id": decision.policy_id,
                     "policy_name": decision.policy_name,
                     "message": decision.message,
+                },
+            )
+
+        if decision.is_throttle:
+            # Same OAI primitive as block — raise_exception halts the
+            # specific tool call. The output_info distinguishes the
+            # cause so caller code that wants backoff-retry can branch.
+            return ToolGuardrailFunctionOutput.raise_exception(
+                output_info={
+                    "policy_id": decision.policy_id,
+                    "policy_name": decision.policy_name,
+                    "message": decision.message,
+                    "throttled": True,
+                    "retry_after_seconds": decision.retry_after_seconds,
                 },
             )
 

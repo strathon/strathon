@@ -14,6 +14,7 @@ from strathon.policy.types import (
     Policy,
     PolicyDecision,
     StrathonPolicyBlocked,
+    StrathonPolicyThrottled,
 )
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "PolicyDecision",
     "PolicyExpressionError",
     "StrathonPolicyBlocked",
+    "StrathonPolicyThrottled",
     "disable_steer",
     "enforce_steer",
     "evaluate",

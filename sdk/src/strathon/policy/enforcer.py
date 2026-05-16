@@ -34,6 +34,7 @@ from urllib.request import Request, urlopen
 
 from strathon.exceptions import StrathonReceiverUnreachable
 from strathon.policy.expression import evaluate
+from strathon.policy.throttle import ThrottleStore
 from strathon.policy.types import ALLOW, Policy, PolicyDecision
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,12 @@ class PolicyEnforcer:
         self._policies: List[Policy] = []
         self._last_refresh_at: float = 0.0
         self._last_refresh_error: Optional[str] = None
+
+        # Per-policy token buckets for the throttle action. State is
+        # process-local, like the policy cache itself; multi-replica
+        # SDKs each see their own buckets. See docs/intervention.md
+        # for the trade-off note (matches receiver/rate_limit.py).
+        self._throttle_store = ThrottleStore()
 
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -161,7 +168,7 @@ class PolicyEnforcer:
         for policy in policies:
             if not policy.enabled:
                 continue
-            if policy.action not in {"block", "steer"}:
+            if policy.action not in {"block", "steer", "throttle"}:
                 continue
             if not _span_matches_applies_to(span_context, policy.applies_to):
                 continue
@@ -179,6 +186,15 @@ class PolicyEnforcer:
                     policy_name=policy.name,
                     message=message,
                 )
+            if policy.action == "throttle":
+                decision = self._evaluate_throttle(policy, span_context)
+                if decision is None:
+                    # Bucket admitted this call; throttle is a no-op
+                    # for this specific invocation and we fall through
+                    # to keep evaluating lower-priority rules. A more
+                    # restrictive block/steer further down still wins.
+                    continue
+                return decision
             # steer
             replacement = (
                 policy.action_config.get("replacement")
@@ -192,6 +208,73 @@ class PolicyEnforcer:
             )
 
         return ALLOW
+
+    def _evaluate_throttle(
+        self, policy: Policy, span_context: Dict[str, Any],
+    ) -> Optional[PolicyDecision]:
+        """Consult the token bucket for ``policy`` and return a throttle
+        decision when the bucket is empty, or ``None`` when this call
+        was admitted.
+
+        Server-side validation ensures the config has the right shape
+        before the policy lands here, but the SDK still defends against
+        a malformed cache (e.g. an older SDK reading a newer policy
+        format). On malformed config we log once and admit the call —
+        the alternative is silently throttling agents based on a
+        misconfigured rule, which is worse than letting it through.
+        """
+        cfg = policy.action_config or {}
+        max_calls = cfg.get("max_calls")
+        window_seconds = cfg.get("window_seconds")
+        if (
+            not isinstance(max_calls, int)
+            or isinstance(max_calls, bool)
+            or max_calls <= 0
+            or not isinstance(window_seconds, (int, float))
+            or isinstance(window_seconds, bool)
+            or window_seconds <= 0
+        ):
+            logger.warning(
+                "PolicyEnforcer: throttle policy %r has malformed action_config "
+                "(max_calls=%r, window_seconds=%r); admitting call",
+                policy.name, max_calls, window_seconds,
+            )
+            return None
+
+        scope = cfg.get("scope", "agent")
+        if scope == "global":
+            scope_key = "global"
+        else:
+            # Default "agent". A missing agent id falls back to the
+            # span name so a misconfigured agent doesn't bypass the
+            # bucket entirely by simply not setting the attribute.
+            attrs = span_context.get("attrs") or {}
+            agent_id = (
+                attrs.get("strathon.agent.id")
+                or attrs.get("gen_ai.agent.id")
+            )
+            scope_key = str(agent_id) if agent_id else f"unknown:{span_context.get('name', '')}"
+
+        allowed, retry_after = self._throttle_store.consume(
+            policy_id=policy.id,
+            scope_key=scope_key,
+            max_calls=max_calls,
+            window_seconds=float(window_seconds),
+        )
+        if allowed:
+            return None
+
+        message = (
+            cfg.get("message")
+            or f"Rate limit exceeded for Strathon policy '{policy.name}'"
+        )
+        return PolicyDecision(
+            action="throttle",
+            policy_id=policy.id,
+            policy_name=policy.name,
+            message=message,
+            retry_after_seconds=retry_after,
+        )
 
     # ---- Inspection / testing helpers ----
 

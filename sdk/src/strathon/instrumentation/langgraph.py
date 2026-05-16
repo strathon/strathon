@@ -483,6 +483,31 @@ class StrathonLangGraphHandler:
                     policy_id=decision.policy_id,
                     policy_name=decision.policy_name,
                 )
+            if decision.is_throttle:
+                # Throttle: a policy's rate cap refused this specific
+                # invocation. Treated like a block for span emission
+                # and propagation; the distinct exception type lets
+                # caller code add a backoff-retry without confusing it
+                # with a hard policy rejection.
+                attrs["strathon.policy.throttled"] = True
+                attrs["strathon.policy.id"] = decision.policy_id or ""
+                attrs["strathon.policy.name"] = decision.policy_name or ""
+                attrs["strathon.policy.message"] = decision.message or ""
+                if decision.retry_after_seconds is not None:
+                    attrs["strathon.policy.retry_after_seconds"] = (
+                        decision.retry_after_seconds
+                    )
+                self._start_span(
+                    f"langgraph.tool.{tool_name}", run_id, parent_run_id, attrs
+                )
+                self._end_span(run_id, error=decision.message or "policy throttled")
+                from strathon.policy import StrathonPolicyThrottled
+                raise StrathonPolicyThrottled(
+                    decision.message or "rate-limited by Strathon policy",
+                    policy_id=decision.policy_id,
+                    policy_name=decision.policy_name,
+                    retry_after_seconds=decision.retry_after_seconds,
+                )
             if decision.is_steer:
                 # The on_tool_start callback cannot substitute a tool's
                 # return value, so the callback path can only observe
@@ -507,8 +532,9 @@ class StrathonLangGraphHandler:
                 self._end_span(run_id)
                 return
         except Exception as exc:
-            # Reraise StrathonPolicyBlocked; swallow other errors so a broken
-            # policy never breaks the underlying app.
+            # Reraise StrathonPolicyBlocked (and its StrathonPolicyThrottled
+            # subclass); swallow other errors so a broken policy never
+            # breaks the underlying app.
             from strathon.policy import StrathonPolicyBlocked
             if isinstance(exc, StrathonPolicyBlocked):
                 raise

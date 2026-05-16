@@ -77,7 +77,11 @@ import logging
 import threading
 from typing import Any, Callable, Dict, Mapping, Optional, Set, Type
 
-from strathon.policy.types import StrathonHaltExceeded, StrathonPolicyBlocked
+from strathon.policy.types import (
+    StrathonHaltExceeded,
+    StrathonPolicyBlocked,
+    StrathonPolicyThrottled,
+)
 
 
 logger = logging.getLogger("strathon.policy.steer")
@@ -347,6 +351,26 @@ def dispatch_policy_decision(
             policy_name=decision.policy_name,
         )
 
+    if decision.is_throttle:
+        # Throttle: a matching policy's rate limit refused this specific
+        # call. Audit-span it like a block so operators can see the
+        # rejection in /v1/policy_matches; raise a distinct exception so
+        # caller code that wants to backoff-and-retry can branch on type.
+        _emit_intervention_span(
+            client,
+            span_name=span_name,
+            attrs=attrs,
+            decision_kind="throttled",
+            decision=decision,
+        )
+        raise StrathonPolicyThrottled(
+            decision.message
+            or f"Tool '{tool_name}' rate-limited by Strathon policy",
+            policy_id=decision.policy_id,
+            policy_name=decision.policy_name,
+            retry_after_seconds=decision.retry_after_seconds,
+        )
+
     if decision.is_steer:
         # The agent receives our replacement string as if it were the
         # tool's real output, then self-corrects on its next turn.
@@ -462,6 +486,19 @@ def _install_class_patch(cls: Type[Any]) -> None:
                     decision.message or f"Tool '{tool_name}' blocked by Strathon policy",
                     policy_id=decision.policy_id,
                     policy_name=decision.policy_name,
+                )
+
+            if decision.is_throttle:
+                _emit_intervention_span(
+                    client, span_name=span_name, attrs=attrs,
+                    decision_kind="throttled", decision=decision,
+                )
+                raise StrathonPolicyThrottled(
+                    decision.message
+                    or f"Tool '{tool_name}' rate-limited by Strathon policy",
+                    policy_id=decision.policy_id,
+                    policy_name=decision.policy_name,
+                    retry_after_seconds=decision.retry_after_seconds,
                 )
 
             if decision.is_steer:
