@@ -23,14 +23,18 @@ from langchain_core.tools import tool  # noqa: E402
 @tool
 def send_email(to: str, body: str) -> str:
     """Send an email."""
-    send_email._executed = True
-    send_email._last_to = to
+    # BaseTool doesn't formally declare _executed / _last_to in its
+    # interface; we attach them at runtime as test-instrumentation
+    # state. The assertions below read the same attrs. Mypy can't see
+    # this dynamic shape so we localize the ignores to the attrs.
+    send_email._executed = True  # type: ignore[attr-defined]
+    send_email._last_to = to  # type: ignore[attr-defined]
     return f"sent to {to}"
 
 
 def _reset_tool():
-    send_email._executed = False
-    send_email._last_to = None
+    send_email._executed = False  # type: ignore[attr-defined]
+    send_email._last_to = None  # type: ignore[attr-defined]
 
 
 def _make_client_with_block_policy():
@@ -84,8 +88,8 @@ def test_real_langchain_tool_is_blocked_by_policy():
 
     assert "Cannot email a competitor address" in str(exc_info.value)
     assert exc_info.value.policy_name == "block_competitor_email"
-    assert send_email._executed is False
-    assert send_email._last_to is None
+    assert send_email._executed is False  # type: ignore[attr-defined]
+    assert send_email._last_to is None  # type: ignore[attr-defined]
 
 
 def test_real_langchain_tool_runs_when_policy_does_not_match():
@@ -102,8 +106,8 @@ def test_real_langchain_tool_runs_when_policy_does_not_match():
         {"to": "team@mycompany.com", "body": "hello"},
         config={"callbacks": [handler]},
     )
-    assert send_email._executed is True
-    assert send_email._last_to == "team@mycompany.com"
+    assert send_email._executed is True  # type: ignore[attr-defined]
+    assert send_email._last_to == "team@mycompany.com"  # type: ignore[attr-defined]
     assert "team@mycompany.com" in result
 
 

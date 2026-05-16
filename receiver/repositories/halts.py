@@ -335,6 +335,9 @@ async def clear_halt(
     refreshed = await session.scalar(
         select(HaltState).where(HaltState.id == halt_id)
     )
+    assert refreshed is not None, (
+        f"halt {halt_id} vanished mid-transaction"
+    )
     logger.info(
         "Cleared halt %d for project %s (was state=%s reason=%r)",
         halt_id, project_id, row.state, row.reason,

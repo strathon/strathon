@@ -200,6 +200,12 @@ async def revoke_key(
     refreshed = await session.scalar(
         select(WebhookSigningKey).where(WebhookSigningKey.id == key_id)
     )
+    # We just UPDATEd this row by id inside the same transaction; the
+    # row cannot have vanished. The assertion both documents that
+    # invariant and lets mypy narrow the Optional away.
+    assert refreshed is not None, (
+        f"webhook signing key {key_id} vanished mid-transaction"
+    )
     logger.info(
         "Revoked webhook signing key %s (prefix=%s) for project %s",
         key_id, existing.prefix, project_id,

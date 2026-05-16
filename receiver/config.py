@@ -231,7 +231,10 @@ def get_settings() -> Settings:
     Cached: subsequent calls return the same instance. To force a rebuild
     (typically only in tests), call ``get_settings.cache_clear()``.
     """
-    return Settings()
+    # database_url is declared required at the Pydantic-field level but
+    # is sourced from the DATABASE_URL env var at construction; mypy
+    # doesn't see the BaseSettings env-loading and flags it as missing.
+    return Settings()  # type: ignore[call-arg]
 
 
 def __getattr__(name: str):

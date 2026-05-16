@@ -525,7 +525,11 @@ def _install_policy_patch(client) -> bool:
             on_allow=_on_allow,
         )
 
-    CrewStructuredTool.invoke = _policy_aware_invoke
+    # Dynamic method replacement on a class we don't own. Mypy doesn't
+    # model this pattern (which is intentional for instrumentation
+    # libraries that wrap third-party APIs); the install is tested and
+    # the corresponding _uninstall_policy_patch restores the original.
+    CrewStructuredTool.invoke = _policy_aware_invoke  # type: ignore[method-assign]
     logger.info(
         "CrewAI policy enforcement patch installed on CrewStructuredTool.invoke"
     )
@@ -540,7 +544,7 @@ def _uninstall_policy_patch() -> None:
         return
     try:
         from crewai.tools.structured_tool import CrewStructuredTool
-        CrewStructuredTool.invoke = _ORIGINAL_INVOKE
+        CrewStructuredTool.invoke = _ORIGINAL_INVOKE  # type: ignore[method-assign]
     except ImportError:
         pass
     _ORIGINAL_INVOKE = None

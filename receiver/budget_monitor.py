@@ -185,6 +185,16 @@ async def evaluate_one_budget(
         )
 
     elif budget.is_iteration_budget:
+        # is_iteration_budget is true iff loop_window_seconds and
+        # max_repeated_calls are both set (enforced in create_budget).
+        # Mypy can't follow the @property → field-set relationship; the
+        # asserts both narrow the type and document the invariant.
+        assert budget.loop_window_seconds is not None, (
+            "is_iteration_budget should imply loop_window_seconds is set"
+        )
+        assert budget.max_repeated_calls is not None, (
+            "is_iteration_budget should imply max_repeated_calls is set"
+        )
         iteration_count = await budgets_repo.compute_iteration_count(
             session,
             project_id=project_id,

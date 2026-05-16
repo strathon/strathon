@@ -601,9 +601,17 @@ def _install_policy_patch(client) -> bool:
         merged = _build_strathon_run_hooks(_PATCHED_CLIENT, hooks)
         return _ORIGINAL_RUN_STREAMED(cls, starting_agent, input, *args, hooks=merged, **kwargs)
 
-    Runner.run = classmethod(_strathon_run)
-    Runner.run_sync = classmethod(_strathon_run_sync)
-    Runner.run_streamed = classmethod(_strathon_run_streamed)
+    # The Runner.run* methods are bound classmethods on a framework
+    # class we don't own. We're replacing them at import time with our
+    # wrapper that injects strathon RunHooks before delegating to the
+    # original. Mypy doesn't model dynamic method-replacement (it sees
+    # the framework's typed classmethod signature and the type of a
+    # freshly-built classmethod() object as incompatible). The patch is
+    # intentional and tested; the type: ignores are scoped to the
+    # exact lines so other type errors in this file aren't masked.
+    Runner.run = classmethod(_strathon_run)  # type: ignore[method-assign,assignment]
+    Runner.run_sync = classmethod(_strathon_run_sync)  # type: ignore[method-assign,assignment]
+    Runner.run_streamed = classmethod(_strathon_run_streamed)  # type: ignore[method-assign,assignment]
 
     logger.info("OpenAI Agents SDK policy enforcement patch installed on Runner.run*")
     return True
@@ -617,9 +625,10 @@ def _uninstall_policy_patch() -> None:
         return
     try:
         from agents import Runner
-        Runner.run = classmethod(_ORIGINAL_RUN)
-        Runner.run_sync = classmethod(_ORIGINAL_RUN_SYNC)
-        Runner.run_streamed = classmethod(_ORIGINAL_RUN_STREAMED)
+        # Same dynamic-method-replacement pattern as the install path.
+        Runner.run = classmethod(_ORIGINAL_RUN)  # type: ignore[method-assign,assignment,arg-type]
+        Runner.run_sync = classmethod(_ORIGINAL_RUN_SYNC)  # type: ignore[method-assign,assignment,arg-type]
+        Runner.run_streamed = classmethod(_ORIGINAL_RUN_STREAMED)  # type: ignore[method-assign,assignment,arg-type]
     except ImportError:
         pass
     _ORIGINAL_RUN = None
@@ -650,7 +659,12 @@ def instrument(client) -> bool:
         return False
 
     processor = StrathonAgentsSDKProcessor(client)
-    add_trace_processor(processor)
+    # StrathonAgentsSDKProcessor implements the methods the framework's
+    # TracingProcessor Protocol declares but doesn't formally inherit
+    # from it (the framework's class is not stable across versions and
+    # importing it conditionally creates a circular dep). At runtime
+    # it duck-types correctly; mypy sees the missing nominal bond.
+    add_trace_processor(processor)  # type: ignore[arg-type]
 
     # Install policy enforcement patch on Runner.run*.
     # No-op if the client has policies disabled.

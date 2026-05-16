@@ -16,7 +16,7 @@ def instrument(client) -> bool:
         True if instrumentation was successful (framework is installed), False otherwise.
     """
     try:
-        import anthropic  # noqa: F401
+        import anthropic  # type: ignore[import-not-found]  # noqa: F401
     except ImportError:
         logger.debug("Anthropic not installed; skipping instrumentation")
         return False

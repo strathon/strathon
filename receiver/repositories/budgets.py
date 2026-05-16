@@ -254,20 +254,21 @@ def _validate_create_args(
                 f"scope={scope} requires a non-empty scope_value"
             )
 
-    is_cost = max_spend_usd is not None
-    is_iter = max_repeated_calls is not None
-
-    if not is_cost and not is_iter:
+    # Direct None-checks rather than flag-based; mypy doesn't follow
+    # the implication "is_cost True ⇒ max_spend_usd is not None" so the
+    # original `if is_cost: max_spend_usd <= 0` was flagged. The flags
+    # would only re-narrow with a redundant assert at the use site.
+    if max_spend_usd is None and max_repeated_calls is None:
         raise ValueError(
             "budget must have either max_spend_usd (cost budget) or "
             "max_repeated_calls (iteration budget)"
         )
-    if is_cost and is_iter:
+    if max_spend_usd is not None and max_repeated_calls is not None:
         raise ValueError(
             "budget cannot be both cost and iteration; create two separate budgets"
         )
 
-    if is_cost:
+    if max_spend_usd is not None:
         if max_spend_usd <= 0:
             raise ValueError("max_spend_usd must be positive")
         if not budget_duration:
@@ -278,7 +279,7 @@ def _validate_create_args(
                 f"Valid: {sorted(VALID_DURATIONS)}"
             )
 
-    if is_iter:
+    if max_repeated_calls is not None:
         if max_repeated_calls <= 0:
             raise ValueError("max_repeated_calls must be positive")
         if loop_window_seconds is None or loop_window_seconds <= 0:
@@ -321,6 +322,13 @@ async def create_budget(
     now = datetime.now(timezone.utc)
     budget_reset_at = None
     if max_spend_usd is not None:
+        # _validate_create_args raised if a cost budget arrived without
+        # a duration, so this is unreachable with None. The assert
+        # documents the invariant and lets mypy narrow the type.
+        assert budget_duration is not None, (
+            "_validate_create_args should have rejected a cost budget "
+            "without a duration"
+        )
         budget_reset_at = compute_next_reset(now, budget_duration)
 
     values = {
@@ -406,7 +414,9 @@ async def delete_budget(
             Budget.project_id == project_id,
         )
     )
-    return result.rowcount > 0
+    # rowcount exposed by the runtime CursorResult; SQLAlchemy 2.x
+    # protocol stubs hide it.
+    return result.rowcount > 0  # type: ignore[attr-defined]
 
 
 # ---- Spend aggregation (THE budget evaluation query) ------------------

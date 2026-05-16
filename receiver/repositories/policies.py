@@ -198,7 +198,9 @@ async def delete_policy(
         Policy.id == policy_id,
     )
     result = await session.execute(stmt)
-    return bool(result.rowcount)
+    # rowcount is on the runtime CursorResult; SQLAlchemy 2.x stubs
+    # type session.execute() as the protocol Result, which omits it.
+    return bool(result.rowcount)  # type: ignore[attr-defined]
 
 
 # ---- Audit trail --------------------------------------------------------

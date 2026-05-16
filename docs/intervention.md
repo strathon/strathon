@@ -134,6 +134,24 @@ in an N-process agent deploy the effective ceiling is
 `N × max_calls`. The matching trade-off appears in the receiver's
 rate limiter; see `docs/self-hosting.md` for the multi-replica note.
 
+#### Counting SDK-side throttle decisions
+
+The SDK doesn't expose its own Prometheus `/metrics` endpoint — that
+matches LaunchDarkly's architecture, where application-embedded SDKs
+emit analytics events and the server-side Relay Proxy aggregates them.
+Strathon's equivalent is the intervention span: every `throttle`
+decision (and every `block`, `steer`, and synthetic-deny in allow-list
+mode) emits an intervention span with a boolean
+`strathon.policy.<decision_kind>` attribute set to `true` — concretely
+`strathon.policy.throttled`, `strathon.policy.blocked`, or
+`strathon.policy.steered`, along with `strathon.policy.id` and
+`strathon.policy.name`. To count SDK-side throttle decisions, query
+intervention spans where `strathon.policy.throttled = true` — by
+policy, by agent, by tool — over whatever window matters. The
+receiver's own `strathon_receiver_rate_limit_rejections_total` counter
+covers the HTTP-edge limiter only; it does not count SDK-side policy
+throttles.
+
 ### Allow-list mode (default-deny)
 
 By default, a call that doesn't match any policy is admitted. This is
@@ -182,6 +200,22 @@ Evaluation rules:
 - The default action is read from the project setting on each SDK
   refresh of `/v1/policies`. Flipping the project setting takes
   effect on the next refresh cycle (within 30s by default).
+
+#### Contrast with IAM / Cedar / OPA
+
+AWS IAM and Cedar enforce "explicit `deny` always wins" — an explicit
+deny statement supersedes any explicit allow, regardless of priority.
+OPA/Rego explicitly leaves the choice to the policy author: "neither
+allow nor deny are keywords in Rego, so if you want to treat them as
+contradictory you control which takes precedence." Strathon follows
+OPA's posture: pure priority ordering across all action types, no
+built-in "deny supersedes" rule.
+
+To get IAM-style "explicit deny always wins" behavior in Strathon,
+give your block policies a higher `priority` than any allow policy.
+A common pattern is to reserve `priority >= 1000` for blocks and
+keep allows at `priority < 1000`. Then no allow can ever override a
+block, regardless of ordering changes to the rest of the rule set.
 
 Reading the current setting:
 

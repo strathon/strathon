@@ -170,7 +170,12 @@ The bits below are end-to-end, tested in CI, and ready to use:
   endpoint, 100 req/s sustained / 200 burst by default, tunable via
   `STRATHON_RATE_LIMIT_*` env vars. Identified by the `Authorization`
   header for authenticated requests, client IP otherwise. Returns
-  `429` with `Retry-After` and `X-RateLimit-*` headers. See
+  `429` with `Retry-After` and `X-RateLimit-*` headers. State is
+  per-process — a multi-replica deploy multiplies the effective ceiling
+  by the replica count. This matches Sentry's self-hosted posture
+  (their internal limiter is per-process; they recommend a reverse-proxy
+  limit for production). For hard global limits in front of an
+  N-replica Strathon, put nginx / Traefik / HAProxy in front. See
   [`docs/self-hosting.md`](docs/self-hosting.md).
 - **Fail-closed SDK mode.** Default is fail-open (last-known halts and
   policies stay in force during a receiver outage). Operators who

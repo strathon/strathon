@@ -126,12 +126,13 @@ def disable_redaction(client):
         conn.close()
 
 
-def _read_persisted_attrs(span_id_hex: str) -> dict:
+def _read_persisted_attrs(span_id_hex: str) -> dict | None:
     """Pull the attributes column for one span_id via raw SQL.
 
     We use psycopg directly rather than the FastAPI session because the
     TestClient's transaction has already committed by the time we read,
-    and we want a fresh view of the table.
+    and we want a fresh view of the table. Returns None when no row
+    matches; callers either assert presence or check explicitly.
     """
     import psycopg
     db_url = os.environ["DATABASE_URL"]

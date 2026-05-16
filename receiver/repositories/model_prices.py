@@ -120,6 +120,9 @@ async def upsert_override(
         refreshed = await session.scalar(
             select(ModelPriceOverride).where(ModelPriceOverride.id == existing.id)
         )
+        assert refreshed is not None, (
+            f"model price override {existing.id} vanished mid-transaction"
+        )
         logger.info(
             "Updated price override for %s in project %s", model_name, project_id,
         )
@@ -184,7 +187,9 @@ async def delete_override(
             ModelPriceOverride.model_name == model_name,
         )
     )
-    return result.rowcount > 0
+    # rowcount is exposed by the runtime CursorResult; the SQLAlchemy
+    # 2.x protocol type hides it.
+    return result.rowcount > 0  # type: ignore[attr-defined]
 
 
 __all__ = [

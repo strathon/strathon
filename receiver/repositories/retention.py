@@ -99,7 +99,10 @@ async def cleanup_once(
                 "batch_size": batch_size,
             },
         )
-        deleted = delete_result.rowcount or 0
+        # SQLAlchemy 2.x stubs type session.execute() as Result[Any]
+        # which doesn't expose rowcount, but the underlying CursorResult
+        # does. The cast happens at runtime regardless.
+        deleted = delete_result.rowcount or 0  # type: ignore[attr-defined]
 
         if deleted > 0:
             logger.info(

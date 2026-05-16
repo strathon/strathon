@@ -302,16 +302,19 @@ def redact_string(
         return _apply_value_action(matched, entity_name, action)
 
     for ent in entities:
-        out = ent.pattern.sub(
-            lambda m, ent=ent: _replace(m, ent.name, ent.validator),
-            out,
-        )
+        # Bind ``ent`` per-iteration via default arg; lambdas defer
+        # closure resolution and would otherwise all reference the
+        # final loop value. The named-arg form is mypy-typeable too.
+        def _ent_sub(m: re.Match[str], ent: EntityDef = ent) -> str:
+            return _replace(m, ent.name, ent.validator)
+
+        out = ent.pattern.sub(_ent_sub, out)
 
     for entity_name, pat in custom_patterns:
-        out = pat.sub(
-            lambda m, name=entity_name: _replace(m, name, None),
-            out,
-        )
+        def _custom_sub(m: re.Match[str], name: str = entity_name) -> str:
+            return _replace(m, name, None)
+
+        out = pat.sub(_custom_sub, out)
 
     return out
 

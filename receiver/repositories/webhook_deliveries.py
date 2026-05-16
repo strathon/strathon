@@ -307,6 +307,10 @@ async def replay_delivery(
     refreshed = await session.scalar(
         select(WebhookDelivery).where(WebhookDelivery.id == delivery_id)
     )
+    # Row exists: we just UPDATEd it by id inside the same transaction.
+    assert refreshed is not None, (
+        f"webhook delivery {delivery_id} vanished mid-transaction"
+    )
     logger.info(
         "Replayed webhook delivery %s for project %s (was %s)",
         delivery_id, project_id, row.status,

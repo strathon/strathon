@@ -22,15 +22,19 @@ class SendEmailTool(BaseTool):
     description: str = "Send an email to a recipient"
 
     def _run(self, to: str = "", body: str = "") -> str:
-        SendEmailTool._sent.append({"to": to, "body": body})
+        # _sent is class-level state we attach below for the test to
+        # inspect; BaseTool doesn't declare it. Mypy can't see the
+        # runtime monkey-attach, so the dynamic-attribute reads are
+        # marked locally.
+        SendEmailTool._sent.append({"to": to, "body": body})  # type: ignore[attr-defined]
         return f"sent to {to}"
 
 
-SendEmailTool._sent = []
+SendEmailTool._sent = []  # type: ignore[attr-defined]
 
 
 def _reset_tool() -> None:
-    SendEmailTool._sent = []
+    SendEmailTool._sent = []  # type: ignore[attr-defined]
 
 
 def _make_client_with_policy(policy: Policy) -> Client:
@@ -110,7 +114,7 @@ def test_real_crewai_tool_is_blocked_when_policy_matches():
 
     assert "Cannot email a competitor address" in str(exc_info.value)
     assert exc_info.value.policy_name == "block_competitor_email"
-    assert SendEmailTool._sent == []  # tool body never executed
+    assert SendEmailTool._sent == []  # type: ignore[attr-defined]  # tool body never executed  # type: ignore[attr-defined]
 
 
 def test_real_crewai_tool_runs_when_policy_does_not_match():
@@ -123,8 +127,8 @@ def test_real_crewai_tool_runs_when_policy_does_not_match():
     result = structured.invoke({"to": "team@mycompany.com", "body": "hi"})
 
     assert "team@mycompany.com" in result
-    assert len(SendEmailTool._sent) == 1
-    assert SendEmailTool._sent[0]["to"] == "team@mycompany.com"
+    assert len(SendEmailTool._sent) == 1  # type: ignore[attr-defined]
+    assert SendEmailTool._sent[0]["to"] == "team@mycompany.com"  # type: ignore[attr-defined]
 
 
 # ---- Steer path ----
@@ -141,7 +145,7 @@ def test_steer_policy_replaces_tool_output():
     result = structured.invoke({"to": "sales@competitor.com", "body": "hi"})
 
     # Real tool body never ran
-    assert SendEmailTool._sent == []
+    assert SendEmailTool._sent == []  # type: ignore[attr-defined]
     # Agent receives the corrective replacement
     assert result == "REDIRECTED: Use the internal alternative instead."
 
@@ -166,7 +170,7 @@ def test_no_policy_enforcer_means_no_patch():
     structured = SendEmailTool().to_structured_tool()
     result = structured.invoke({"to": "anyone@anywhere.com", "body": "hi"})
 
-    assert len(SendEmailTool._sent) == 1
+    assert len(SendEmailTool._sent) == 1  # type: ignore[attr-defined]
     assert "anyone@anywhere.com" in result
 
 
@@ -215,7 +219,7 @@ def test_retarget_after_double_instrument_uses_new_client():
     structured = SendEmailTool().to_structured_tool()
     result = structured.invoke({"to": "sales@competitor.com", "body": "hi"})
 
-    assert len(SendEmailTool._sent) == 1
+    assert len(SendEmailTool._sent) == 1  # type: ignore[attr-defined]
     assert "sales@competitor.com" in result
 
 
@@ -239,7 +243,7 @@ def test_policy_check_exception_does_not_break_tool():
     # Even with a broken enforcer, the tool runs normally
     result = structured.invoke({"to": "anyone@anywhere.com", "body": "hi"})
 
-    assert len(SendEmailTool._sent) == 1
+    assert len(SendEmailTool._sent) == 1  # type: ignore[attr-defined]
     assert "anyone@anywhere.com" in result
 
 

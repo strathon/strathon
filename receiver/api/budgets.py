@@ -221,7 +221,12 @@ async def get_budget_spend(
             ),
         }
 
-    # Iteration budget
+    # Iteration budget. is_cost_budget is_iteration_budget are mutually
+    # exclusive properties that gate the two branches; in this arm the
+    # budget IS iteration so loop_window_seconds and max_repeated_calls
+    # are guaranteed non-None by create_budget's validation.
+    assert budget.loop_window_seconds is not None
+    assert budget.max_repeated_calls is not None
     count = await budgets_repo.compute_iteration_count(
         session,
         project_id=pid,
@@ -274,6 +279,9 @@ async def patch_budget(
         values["description"] = body.description
     if body.max_spend_usd is not None:
         new_max = _str_to_decimal("max_spend_usd", body.max_spend_usd)
+        # _str_to_decimal returns None only when its input is None; we
+        # just checked the input isn't.
+        assert new_max is not None
         if not existing.is_cost_budget:
             raise HTTPException(
                 status_code=400,
@@ -315,6 +323,10 @@ async def patch_budget(
     )
     await session.flush()
     refreshed = await budgets_repo.get_budget(session, budget_id, pid)
+    # Row exists: we just UPDATEd it inside the same transaction.
+    assert refreshed is not None, (
+        f"budget {budget_id} vanished mid-transaction"
+    )
     return {"budget": refreshed.to_json()}
 
 

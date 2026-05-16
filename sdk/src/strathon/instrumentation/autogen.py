@@ -16,7 +16,7 @@ def instrument(client) -> bool:
         True if instrumentation was successful (framework is installed), False otherwise.
     """
     try:
-        import autogen_agentchat  # noqa: F401
+        import autogen_agentchat  # type: ignore[import-not-found]  # noqa: F401
     except ImportError:
         logger.debug("AutoGen not installed; skipping instrumentation")
         return False

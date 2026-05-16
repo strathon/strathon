@@ -124,7 +124,7 @@ async def enqueue_delivery(
     # RuntimeError. Instead we use a once-only flag inside the closure
     # so a subsequent commit on the same session is a no-op for this row.
     sync_session = session.sync_session
-    _already_sent = []  # list-of-bool, used as a mutable cell
+    _already_sent: list[bool] = []  # list-of-bool, used as a mutable cell
 
     def _on_commit(_sync_sess):
         if _already_sent:

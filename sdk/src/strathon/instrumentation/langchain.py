@@ -16,7 +16,7 @@ def instrument(client) -> bool:
         True if instrumentation was successful (framework is installed), False otherwise.
     """
     try:
-        import langchain  # noqa: F401
+        import langchain  # type: ignore[import-not-found]  # noqa: F401
     except ImportError:
         logger.debug("LangChain not installed; skipping instrumentation")
         return False

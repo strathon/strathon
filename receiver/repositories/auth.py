@@ -157,8 +157,10 @@ async def revoke_api_key(session: AsyncSession, key_id: UUID) -> bool:
         .values(revoked_at=func.now())
     )
     result = await session.execute(stmt)
-    # rowcount returns the number of rows the UPDATE actually affected
-    return bool(result.rowcount)
+    # rowcount returns the number of rows the UPDATE actually affected.
+    # SQLAlchemy 2.x stubs hide it on the protocol Result; runtime
+    # CursorResult exposes it.
+    return bool(result.rowcount)  # type: ignore[attr-defined]
 
 
 # ---- Identity verification (the hot path) -------------------------------
