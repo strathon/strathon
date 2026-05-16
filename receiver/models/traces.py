@@ -251,6 +251,16 @@ class Span(Base):
             "intervention_state",
             postgresql_where=text("intervention_state IS NOT NULL"),
         ),
+        # Budget aggregation hot path. The monitor's per-budget query
+        # is SUM(cost_usd) WHERE project_id = ? AND end_time > N.
+        # Partial index keeps the size bounded — only LLM spans get
+        # cost_usd populated, which is a fraction of total span volume.
+        Index(
+            "idx_spans_cost_window",
+            "project_id",
+            "end_time_unix_nano",
+            postgresql_where=text("cost_usd IS NOT NULL"),
+        ),
     )
 
 

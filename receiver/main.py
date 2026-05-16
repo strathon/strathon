@@ -330,6 +330,27 @@ async def lifespan(app: FastAPI):
         name="strathon.webhook_sweeper",
     )
 
+    # Budget monitor background task. Ticks every N seconds (5 by
+    # default), evaluates every active budget across every project,
+    # and produces or clears halts depending on whether spend has
+    # crossed the threshold. Operator halts are not auto-cleared;
+    # only halts the monitor itself produced.
+    #
+    # Multi-replica safety is via Postgres advisory lock; if multiple
+    # receivers run concurrently, only one acquires the lock per tick
+    # and the others skip. No new infrastructure dependency.
+    import budget_monitor
+    app.state.budget_monitor_config = budget_monitor.MonitorConfig.from_env()
+    app.state.budget_monitor_shutdown = asyncio.Event()
+    app.state.budget_monitor_task = asyncio.create_task(
+        budget_monitor.monitor_loop(
+            app.state.budget_monitor_config,
+            app.state.budget_monitor_shutdown,
+            session_maker=async_session_maker,
+        ),
+        name="strathon.budget_monitor",
+    )
+
     # Restore the in-memory webhook signing-key cache from operator-supplied
     # plaintexts. The DB stores only hashes; plaintexts are not recoverable
     # from disk, by design. Operators that want signed deliveries to
@@ -373,6 +394,18 @@ async def lifespan(app: FastAPI):
         except (asyncio.CancelledError, Exception):
             pass
 
+    # Stop the budget monitor loop cleanly
+    app.state.budget_monitor_shutdown.set()
+    try:
+        await asyncio.wait_for(app.state.budget_monitor_task, timeout=10)
+    except asyncio.TimeoutError:
+        logger.warning("budget monitor did not stop in 10s; cancelling")
+        app.state.budget_monitor_task.cancel()
+        try:
+            await app.state.budget_monitor_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
     # Clear the metrics singleton so a subsequent import doesn't see
     # state from a previous lifespan.
     metrics_mod.reset_global_metrics_for_testing()
@@ -392,8 +425,8 @@ app = FastAPI(
 # Mount routers. Import here (after `app` exists) so router modules can
 # stay decoupled from main.py and not see import-order issues.
 from api import (  # noqa: E402
-    api_keys, halts, health, intervention, policies, traces,
-    webhook_deliveries, webhook_signing_keys,
+    api_keys, budgets, halts, health, intervention, model_prices,
+    policies, traces, webhook_deliveries, webhook_signing_keys,
 )
 
 app.include_router(health.router)
@@ -404,6 +437,8 @@ app.include_router(intervention.router)
 app.include_router(halts.router)
 app.include_router(webhook_signing_keys.router)
 app.include_router(webhook_deliveries.router)
+app.include_router(budgets.router)
+app.include_router(model_prices.router)
 
 
 @app.exception_handler(Exception)

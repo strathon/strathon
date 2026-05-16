@@ -31,7 +31,7 @@ import logging
 from typing import Any, Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -142,6 +142,7 @@ async def upsert_span(
     conversation_id: Optional[str],
     input_tokens: Optional[int],
     output_tokens: Optional[int],
+    cost_usd: Optional[Any] = None,
     attributes: dict[str, Any],
 ) -> None:
     """Insert-or-merge a span row.
@@ -179,6 +180,7 @@ async def upsert_span(
         "conversation_id": conversation_id,
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
+        "cost_usd": cost_usd,
         "attributes": attributes,
     }
 
@@ -189,6 +191,12 @@ async def upsert_span(
             "end_time_unix_nano": stmt.excluded.end_time_unix_nano,
             "status_code": stmt.excluded.status_code,
             "status_message": stmt.excluded.status_message,
+            # cost_usd typically arrives with the end-time update (the
+            # tokens aren't known until the call completes). Only
+            # overwrite if the incoming value is non-null, so a
+            # streaming-start record with cost_usd=NULL doesn't blow
+            # away a previously-recorded cost.
+            "cost_usd": func.coalesce(stmt.excluded.cost_usd, Span.cost_usd),
             # JSONB concat: existing keys win for collisions where EXCLUDED
             # is undefined, but the standard `||` operator has EXCLUDED win.
             # We want EXCLUDED to overwrite (the new ingest is fresher).

@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
 import policies as policy_mod
+import pricing as pricing_mod
 import redaction as redaction_mod
 import repositories.policies as policies_repo
 import repositories.project_settings as project_settings_repo
@@ -166,6 +167,30 @@ async def ingest_traces(
             project_id,
         )
         redaction_config = redaction_mod.RedactionConfig.disabled()
+
+    # Load the model pricing catalog (process-level cache after first call)
+    # and the project's per-model overrides (one DB read per ingest batch).
+    # The catalog drives per-span cost computation; spans get a cost_usd
+    # column populated at insert time, which the budget monitor's
+    # aggregation query later sums over a window.
+    #
+    # We DO NOT update any budget counter at ingest. The earlier counter
+    # design serialized every span ingest on a single budgets row, which
+    # becomes the bottleneck at scale (the depesz/Avito pattern). The
+    # write-once-aggregate-later pattern that every mature LLM
+    # observability backend (Uptrace, Langfuse, Langwatch, Opik) uses
+    # has zero contention on the ingest path.
+    pricing_catalog = pricing_mod.get_default_catalog()
+    try:
+        pricing_overrides = await pricing_mod.get_project_overrides(
+            session, project_id,
+        )
+    except Exception:
+        logger.exception(
+            "failed to load price overrides for project %s; using catalog only",
+            project_id,
+        )
+        pricing_overrides = {}
 
     # Collected (policy, trace_id, span_id, outcome) tuples for audit logging
     # after the main insert transaction commits. Webhooks fire after as well.
@@ -297,6 +322,29 @@ async def ingest_traces(
                 input_tokens = span_attrs.get("gen_ai.usage.input_tokens")
                 output_tokens = span_attrs.get("gen_ai.usage.output_tokens")
 
+                # Compute per-span LLM cost. Returns None for non-LLM
+                # spans (tool calls, generic ops) and for unknown
+                # models — see pricing.compute_cost_usd docstring for
+                # why None vs 0. The model name we look up is the
+                # REQUEST model, not the response model: providers
+                # sometimes return the actual model in response_model
+                # (e.g. "gpt-4o-2024-08-06" when you asked for "gpt-4o"),
+                # but pricing is charged against what you asked for.
+                # If the SDK already wrote strathon.agent.cost.usd we
+                # trust it — caller-supplied cost takes precedence over
+                # our catalog lookup (the SDK may have access to
+                # provider-specific pricing we don't, like cache-hit
+                # discounts).
+                cost_usd = span_attrs.get("strathon.agent.cost.usd")
+                if cost_usd is None:
+                    cost_usd = pricing_mod.compute_cost_usd(
+                        model_name=request_model,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        catalog=pricing_catalog,
+                        overrides=pricing_overrides,
+                    )
+
                 # Upsert trace row before inserting the span (FK requirement).
                 # Idempotent at the trace level — only the first span in a
                 # trace actually inserts.
@@ -335,6 +383,7 @@ async def ingest_traces(
                     conversation_id=conversation_id,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
+                    cost_usd=cost_usd,
                     attributes=persisted_attrs,
                 )
                 span_count += 1

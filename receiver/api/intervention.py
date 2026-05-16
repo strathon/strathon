@@ -77,9 +77,40 @@ async def intervention_sync(
     """
     pid = coerce_project_id(request, None)
     halts = await halts_repo.get_active_halts_for_sync(session, pid)
+
+    # Surface active budgets to the SDK as well. The SDK does NOT
+    # enforce off these values — the halt mechanism does that, and
+    # the budget monitor emits a halt when threshold is crossed. The
+    # budget list here is for SDK-side dashboards and operator
+    # visibility ("we've spent $42 of $50 today"). Keep the shape
+    # compact: callers don't need the full budget row, just the bits
+    # a status display would render.
+    import repositories.budgets as budgets_repo
+    budget_rows = await budgets_repo.list_budgets(
+        session, pid, include_inactive=False, limit=100,
+    )
+    budgets_compact = [
+        {
+            "id": str(b.id),
+            "name": b.name,
+            "scope": b.scope,
+            "scope_value": b.scope_value,
+            "max_spend_usd": (
+                str(b.max_spend_usd) if b.max_spend_usd is not None else None
+            ),
+            "spent_usd": str(b.spent_usd),
+            "max_repeated_calls": b.max_repeated_calls,
+            "budget_duration": b.budget_duration,
+            "budget_reset_at": (
+                b.budget_reset_at.isoformat() if b.budget_reset_at else None
+            ),
+        }
+        for b in budget_rows
+    ]
+
     return {
         "halts": halts,
-        "budgets": [],
+        "budgets": budgets_compact,
         "synced_at_unix_nano": time.time_ns(),
     }
 

@@ -92,6 +92,17 @@ SCOPE_WEBHOOK_DELIVERIES_WRITE = "webhook_deliveries:write"
 # only needs :read; humans creating kill-switches need :write.
 SCOPE_HALTS_READ = "halts:read"
 SCOPE_HALTS_WRITE = "halts:write"
+# Budget management. :read covers GET endpoints + the
+# /v1/intervention/sync endpoint that surfaces budgets to the SDK.
+# :write covers POST + PATCH + DELETE of budget rows. The budget
+# monitor runs in-process and uses no scope (no API key involved).
+SCOPE_BUDGETS_READ = "budgets:read"
+SCOPE_BUDGETS_WRITE = "budgets:write"
+# Per-project model price overrides. Separate from budgets so an
+# operator can grant the pricing team read+write access to prices
+# without exposing the budget surface.
+SCOPE_MODEL_PRICES_READ = "model_prices:read"
+SCOPE_MODEL_PRICES_WRITE = "model_prices:write"
 
 KNOWN_SCOPES: frozenset[str] = frozenset({
     SCOPE_WILDCARD,
@@ -106,6 +117,10 @@ KNOWN_SCOPES: frozenset[str] = frozenset({
     SCOPE_WEBHOOK_DELIVERIES_WRITE,
     SCOPE_HALTS_READ,
     SCOPE_HALTS_WRITE,
+    SCOPE_BUDGETS_READ,
+    SCOPE_BUDGETS_WRITE,
+    SCOPE_MODEL_PRICES_READ,
+    SCOPE_MODEL_PRICES_WRITE,
 })
 
 # Default scopes for a new SDK-style key. Enough to ingest traces and to

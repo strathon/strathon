@@ -85,6 +85,12 @@ def receiver(database_url: str) -> Iterator[str]:
     env["STRATHON_LOG_LEVEL"] = env.get("STRATHON_LOG_LEVEL", "WARNING")
     # Don't make the test wait for a real retention sweep
     env["STRATHON_RETENTION_ENABLED"] = "false"
+    # Speed up the budget monitor for e2e tests. Default in production
+    # is 5s; for tests we want sub-second so the e2e test doesn't take
+    # half a minute waiting for the natural tick.
+    env["STRATHON_BUDGET_EVAL_INTERVAL_SECONDS"] = env.get(
+        "STRATHON_BUDGET_EVAL_INTERVAL_SECONDS", "0.5",
+    )
 
     proc = subprocess.Popen(
         [
