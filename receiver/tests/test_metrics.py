@@ -50,6 +50,8 @@ def test_strathon_metrics_has_all_expected_collectors():
         # Cost tracking
         "strathon_receiver_cost_tracked_usd_total",
         "strathon_receiver_cost_spans_with_unknown_model_total",
+        # Rate limiting
+        "strathon_receiver_rate_limit_rejections_total",
     ]
     for name in expected_metrics:
         assert name in text, f"metric {name} missing from /metrics body"

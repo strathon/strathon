@@ -250,6 +250,19 @@ class StrathonMetrics:
             registry=self.registry,
         )
 
+        # ---- Rate limiting ----
+        # key_type: api_key | ip. Lets operators tell apart "a single
+        # API key got throttled" (typically a runaway agent) from "an
+        # IP got throttled" (typically credential stuffing on
+        # unauthenticated paths). Health/readiness/metrics endpoints
+        # are exempt from rate limiting so they never appear here.
+        self.rate_limit_rejections = Counter(
+            "strathon_receiver_rate_limit_rejections_total",
+            "Requests rejected with 429 by the rate limiter, by key type",
+            ["key_type"],
+            registry=self.registry,
+        )
+
         # Internal tracking — Prometheus Counters only support .inc(),
         # so we mirror the SamplingCounters delta-by-delta each scrape.
         self._lock = threading.Lock()

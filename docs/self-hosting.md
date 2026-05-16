@@ -95,14 +95,17 @@ defaults; the compose file picks it up automatically.
 
 | Variable                              | Default          | Purpose                                |
 |---------------------------------------|------------------|----------------------------------------|
-| `POSTGRES_PASSWORD`                   | `strathon_dev`   | Postgres password.                     |
-| `STRATHON_LOG_LEVEL`                  | `INFO`           | Receiver log verbosity.                |
-| `STRATHON_LOG_FORMAT`                 | `text`           | `text` or `json` (one record per line).|
-| `STRATHON_AUTO_MIGRATE`               | `true`           | Run `alembic upgrade head` at startup. |
-| `STRATHON_SAMPLING_RATE`              | `1.0`            | 0.0-1.0. See docs/sampling.md.         |
-| `STRATHON_RETENTION_ENABLED`          | `true`           | Background trace cleanup.              |
-| `STRATHON_RETENTION_INTERVAL_SECONDS` | `3600`           | Seconds between retention sweeps.      |
-| `STRATHON_RETENTION_BATCH_SIZE`       | `5000`           | Max traces deleted per project/sweep.  |
+| `POSTGRES_PASSWORD`                            | `strathon_dev`   | Postgres password.                                                                              |
+| `STRATHON_LOG_LEVEL`                           | `INFO`           | Receiver log verbosity.                                                                         |
+| `STRATHON_LOG_FORMAT`                          | `text`           | `text` or `json` (one record per line).                                                         |
+| `STRATHON_AUTO_MIGRATE`                        | `true`           | Run `alembic upgrade head` at startup.                                                          |
+| `STRATHON_SAMPLING_RATE`                       | `1.0`            | 0.0-1.0. See docs/sampling.md.                                                                  |
+| `STRATHON_RETENTION_ENABLED`                   | `true`           | Background trace cleanup.                                                                       |
+| `STRATHON_RETENTION_INTERVAL_SECONDS`          | `3600`           | Seconds between retention sweeps.                                                               |
+| `STRATHON_RETENTION_BATCH_SIZE`                | `5000`           | Max traces deleted per project/sweep.                                                           |
+| `STRATHON_RATE_LIMIT_ENABLED`                  | `true`           | Per-key in-memory rate limiter. Set `false` to bypass entirely.                                 |
+| `STRATHON_RATE_LIMIT_REQUESTS_PER_SECOND`      | `100`            | Sustained per-key throughput. Token bucket refills at this rate.                                |
+| `STRATHON_RATE_LIMIT_BURST`                    | `200`            | Token-bucket capacity. Maximum momentary burst before throttling.                               |
 
 ## Lifecycle commands
 
@@ -245,7 +248,35 @@ The receiver's readiness checks are individually bounded under 500ms,
 so a 2-second probe timeout has comfortable headroom even when the
 database is briefly slow.
 
+### Rate limiting
 
+The receiver enforces a per-identifier token-bucket rate limit by
+default (100 req/s sustained, 200 burst). The identifier is the
+`Authorization` header's SHA-256 digest for authenticated requests,
+the client IP otherwise (`X-Forwarded-For` leftmost when present).
+`/health`, `/ready`, and `/metrics` are exempt — probes always answer
+regardless of load.
+
+Responses include `X-RateLimit-Limit` and `X-RateLimit-Remaining`
+headers so well-behaved clients can self-throttle. On rejection the
+response is `429 Too Many Requests` with `Retry-After` (seconds, RFC
+9110) and a JSON body `{"detail": "rate limit exceeded, retry in Ns"}`.
+
+Tune via the three `STRATHON_RATE_LIMIT_*` env vars listed above.
+Set `STRATHON_RATE_LIMIT_ENABLED=false` to bypass entirely; do this
+when running behind a reverse proxy that already enforces limits.
+
+**Multi-replica caveat.** State is per-process: in an N-replica deploy
+each replica holds its own buckets, so the effective per-key ceiling
+is `N × STRATHON_RATE_LIMIT_REQUESTS_PER_SECOND`. The dominant
+self-hosting pattern is one receiver replica behind a load balancer,
+which is unaffected. Multi-replica operators who need exact shared
+limits should run a rate-limiting reverse proxy (nginx `limit_req`,
+HAProxy `stick-table`, AWS WAF, Cloudflare, etc.) in front of the
+receiver and set `STRATHON_RATE_LIMIT_ENABLED=false` to avoid
+double-counting.
+
+### Connection pooling caveat
 
 If you put PgBouncer (or another connection pooler) between the receiver
 and Postgres, **run it in session pooling mode**, not transaction pooling.

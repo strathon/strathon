@@ -297,6 +297,30 @@ async def lifespan(app: FastAPI):
     # has no access to app.state) can emit webhook send/dlq counters.
     metrics_mod.set_global_metrics(app.state.metrics)
 
+    # Rate limiter — in-memory token bucket per identifier (API-key
+    # hash for authenticated requests, client IP otherwise). Constructed
+    # here so the middleware (which reads app.state.rate_limiter on
+    # every request) has the store available from the first request.
+    # When disabled the attribute is set to None and the middleware
+    # short-circuits.
+    from config import settings as receiver_settings_for_rl
+    if receiver_settings_for_rl.rate_limit_enabled:
+        from rate_limit import RateLimiterStore
+        app.state.rate_limiter = RateLimiterStore(
+            capacity=receiver_settings_for_rl.rate_limit_burst,
+            refill_per_second=float(
+                receiver_settings_for_rl.rate_limit_requests_per_second,
+            ),
+        )
+        logger.info(
+            "Rate limiter enabled (rps=%d, burst=%d)",
+            receiver_settings_for_rl.rate_limit_requests_per_second,
+            receiver_settings_for_rl.rate_limit_burst,
+        )
+    else:
+        app.state.rate_limiter = None
+        logger.info("Rate limiter disabled (STRATHON_RATE_LIMIT_ENABLED=false)")
+
     # Retention background task
     app.state.retention_config = retention.RetentionConfig.from_env()
     app.state.retention_shutdown = asyncio.Event()
@@ -421,6 +445,14 @@ app = FastAPI(
     version="0.0.1",
     lifespan=lifespan,
 )
+
+
+# Rate-limit middleware. The actual limiter store lives on
+# app.state.rate_limiter (populated by the lifespan handler), so this
+# class is only the wiring; the construction here is side-effect-free
+# and works correctly whether or not rate limiting is enabled.
+from middleware import RateLimitMiddleware  # noqa: E402
+app.add_middleware(RateLimitMiddleware)
 
 
 # Mount routers. Import here (after `app` exists) so router modules can

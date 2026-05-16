@@ -126,6 +126,42 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ---- Rate limiting ----
+    # Per-identifier token bucket. Identifier is the API key (hashed
+    # from the Authorization header) when present, the client IP
+    # otherwise. /health, /ready, and /metrics are always exempt.
+    # State is per-process: in a multi-replica deploy each replica
+    # holds its own buckets, so the effective ceiling is N replicas x
+    # rate_limit_requests_per_second per key. The docs note this.
+    rate_limit_enabled: bool = Field(
+        default=True, alias="STRATHON_RATE_LIMIT_ENABLED",
+        description=(
+            "Enable the in-memory per-key token-bucket rate limiter. "
+            "Set to false to bypass entirely (useful when running "
+            "behind a rate-limiting reverse proxy that already enforces "
+            "limits)."
+        ),
+    )
+    rate_limit_requests_per_second: int = Field(
+        default=100, alias="STRATHON_RATE_LIMIT_REQUESTS_PER_SECOND", ge=1,
+        description=(
+            "Sustained per-key throughput. The token bucket refills at "
+            "this rate. Default 100/s catches runaway agent loops "
+            "(which emit hundreds of spans per second) while leaving "
+            "comfortable headroom for normal multi-agent traffic."
+        ),
+    )
+    rate_limit_burst: int = Field(
+        default=200, alias="STRATHON_RATE_LIMIT_BURST", ge=1,
+        description=(
+            "Token-bucket capacity. The maximum momentary burst a key "
+            "is allowed before it has to wait for the bucket to refill. "
+            "Set higher than requests_per_second to absorb startup "
+            "spikes when an agent dispatches several traces in rapid "
+            "succession."
+        ),
+    )
+
     # ---- Derived properties ----
 
     @field_validator("database_url")

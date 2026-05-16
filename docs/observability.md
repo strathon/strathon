@@ -85,6 +85,12 @@ All metrics live in the `strathon_receiver_` namespace.
 | `strathon_receiver_cost_tracked_usd_total`                     | `model`   | Cumulative USD cost tracked at ingest, by model. Float counter incremented by per-span cost. `rate()` gives \$/second. |
 | `strathon_receiver_cost_spans_with_unknown_model_total`        | (none)    | LLM spans (had a model name and non-zero tokens) whose model wasn't in the catalog or overrides. A non-zero rate here means cost dashboards are under-counting. |
 
+#### Rate limiting
+
+| Metric                                                | Labels      | Description                                                                                       |
+|-------------------------------------------------------|-------------|---------------------------------------------------------------------------------------------------|
+| `strathon_receiver_rate_limit_rejections_total`       | `key_type`  | Requests rejected with 429. `key_type=api_key` for authenticated traffic (typically a runaway agent); `key_type=ip` for unauthenticated traffic (typically credential stuffing). |
+
 ### Useful PromQL queries
 
 ```promql
@@ -117,6 +123,14 @@ rate(strathon_receiver_budget_monitor_ticks_total{outcome="skipped_no_lock"}[5m]
 
 # Alert if cost visibility is degrading
 rate(strathon_receiver_cost_spans_with_unknown_model_total[5m]) > 0
+
+# Rate-limit rejections per minute, split by key type
+sum by (key_type) (rate(strathon_receiver_rate_limit_rejections_total[1m]))
+
+# Alert when sustained rejection rate is non-trivial. The key_type
+# label is intentionally low-cardinality (api_key | ip) — identifying
+# the specific offending key means correlating with access logs.
+sum by (key_type) (rate(strathon_receiver_rate_limit_rejections_total[5m])) > 1
 ```
 
 ## Structured logging
