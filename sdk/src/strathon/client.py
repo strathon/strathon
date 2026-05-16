@@ -37,6 +37,13 @@ class Client:
             from the receiver and enforces block/steer rules via check_policy().
         policy_refresh_interval_sec: How often to refresh policies from the
             server (default 30s).
+        enable_halts: If True (default), polls the receiver for operator-imposed
+            halts and raises StrathonHaltExceeded at tool boundaries when an
+            active halt matches the calling agent. Polls fail-open: an
+            unreachable receiver does NOT halt agents.
+        halt_refresh_interval_sec: How often to poll for halts (default 1s).
+            Faster than policy refresh because operators expect kill-switches
+            to take effect quickly.
     """
 
     def __init__(
@@ -50,6 +57,8 @@ class Client:
         set_global_tracer: bool = True,
         enable_policies: bool = True,
         policy_refresh_interval_sec: float = 30.0,
+        enable_halts: bool = True,
+        halt_refresh_interval_sec: float = 1.0,
     ):
         if not api_key:
             raise AuthenticationError("api_key is required")
@@ -121,6 +130,28 @@ class Client:
                     "Strathon: policy enforcer failed to start; intervention disabled until next refresh"
                 )
 
+        # Runtime intervention: optional halt enforcer
+        # Same start-time + fail-open pattern as the policy enforcer.
+        # Conceptually parallel: policies are "this specific action is
+        # blocked", halts are "this whole agent is stopped".
+        self._halt_enforcer = None
+        if enable_halts:
+            from strathon.policy.halt_enforcer import HaltEnforcer
+
+            self._halt_enforcer = HaltEnforcer(
+                endpoint=self.endpoint,
+                api_key=api_key,
+                project_id=project_id,
+                refresh_interval_sec=halt_refresh_interval_sec,
+            )
+            try:
+                self._halt_enforcer.start()
+            except Exception:
+                logger.debug(
+                    "Strathon: halt enforcer failed to start; halt enforcement "
+                    "disabled until next refresh"
+                )
+
         logger.debug(
             "Strathon Client initialized: endpoint=%s environment=%s service=%s",
             self.endpoint,
@@ -137,6 +168,11 @@ class Client:
     def policy_enforcer(self):
         """The runtime intervention policy enforcer, or None if disabled."""
         return self._policy_enforcer
+
+    @property
+    def halt_enforcer(self):
+        """The operator-halt enforcer, or None if disabled."""
+        return self._halt_enforcer
 
     def check_policy(self, span_context: dict):
         """Evaluate active policies against a candidate action.
@@ -158,6 +194,24 @@ class Client:
             from strathon.policy.types import ALLOW
             return ALLOW
         return self._policy_enforcer.check_policy(span_context)
+
+    def check_halt(self, span_context: dict):
+        """Consult the halt cache for the calling agent.
+
+        Mirror of check_policy but for operator-imposed kill-switches.
+        Framework integrations call this in the same hook as
+        check_policy, and check halt FIRST — if halt fires, the policy
+        check is skipped because there's no point evaluating match
+        expressions on an agent that's supposed to be off.
+
+        Returns:
+            A HaltDecision. On is_allow, proceed. On is_halt, raise
+            StrathonHaltExceeded with the halt's reason/scope.
+        """
+        if self._halt_enforcer is None:
+            from strathon.policy.types import ALLOW_HALT
+            return ALLOW_HALT
+        return self._halt_enforcer.check_halt(span_context)
 
     def flush(self, timeout_millis: int = 30000) -> bool:
         """

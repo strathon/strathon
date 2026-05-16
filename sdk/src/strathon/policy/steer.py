@@ -77,7 +77,7 @@ import logging
 import threading
 from typing import Any, Callable, Dict, Mapping, Optional, Set, Type
 
-from strathon.policy.types import StrathonPolicyBlocked
+from strathon.policy.types import StrathonHaltExceeded, StrathonPolicyBlocked
 
 
 logger = logging.getLogger("strathon.policy.steer")
@@ -193,6 +193,17 @@ def _emit_intervention_span(
         span_attrs["strathon.policy.name"] = decision.policy_name
     if getattr(decision, "message", None):
         span_attrs["strathon.policy.message"] = decision.message
+    # Halt-specific audit fields. Only populated when the decision
+    # passed in is a HaltDecision; HaltDecision doesn't carry policy_*
+    # fields, so the policy block above is a no-op for halts.
+    if getattr(decision, "halt_id", None) is not None:
+        span_attrs["strathon.halt.id"] = decision.halt_id
+    if getattr(decision, "reason", None):
+        span_attrs["strathon.halt.reason"] = decision.reason
+    if getattr(decision, "scope", None):
+        span_attrs["strathon.halt.scope"] = decision.scope
+    if getattr(decision, "scope_value", None):
+        span_attrs["strathon.halt.scope_value"] = decision.scope_value
     if replacement is not None:
         span_attrs["strathon.policy.replacement"] = _truncate(replacement, _MAX_ARG_LEN)
 
@@ -202,6 +213,13 @@ def _emit_intervention_span(
             if decision_kind == "blocked":
                 span.set_status(
                     Status(StatusCode.ERROR, decision.message or "policy blocked")
+                )
+            elif decision_kind == "halted":
+                span.set_status(
+                    Status(
+                        StatusCode.ERROR,
+                        getattr(decision, "reason", None) or "halted by operator",
+                    )
                 )
             else:
                 span.set_status(Status(StatusCode.OK))
@@ -266,6 +284,45 @@ def dispatch_policy_decision(
     working regardless of bugs in policy code.
     """
     tool_name = attrs.get("strathon.tool.name") or attrs.get("gen_ai.tool.name") or "tool"
+
+    # ---- Halt check first ----
+    # Operator-imposed kill-switches override everything. If the agent
+    # has been stopped by an operator, we don't run policy CEL or the
+    # tool body. Same fail-open isolation as the policy check below:
+    # any exception in the halt lookup logs and proceeds, so a bug in
+    # halt code can't break the user's tool.
+    try:
+        halt_decision = client.check_halt({"name": span_name, "attrs": attrs})
+    except Exception:
+        logger.exception(
+            "halt check raised for %s; allowing tool", tool_name,
+        )
+        halt_decision = None
+
+    if halt_decision is not None and halt_decision.is_halt:
+        _emit_intervention_span(
+            client,
+            span_name=span_name,
+            attrs=attrs,
+            decision_kind="halted",
+            decision=halt_decision,
+        )
+        scope_desc = (
+            f"agent '{halt_decision.scope_value}'"
+            if halt_decision.scope == "agent"
+            else "project"
+        )
+        raise StrathonHaltExceeded(
+            (
+                f"Tool '{tool_name}' halted by Strathon "
+                f"(halt #{halt_decision.halt_id}, {scope_desc}): "
+                f"{halt_decision.reason or 'no reason given'}"
+            ),
+            halt_id=halt_decision.halt_id,
+            scope=halt_decision.scope,
+            scope_value=halt_decision.scope_value,
+            reason=halt_decision.reason,
+        )
 
     try:
         decision = client.check_policy({"name": span_name, "attrs": attrs})

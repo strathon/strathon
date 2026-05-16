@@ -108,3 +108,73 @@ class StrathonPolicyBlocked(Exception):
         self.message = message
         self.policy_id = policy_id
         self.policy_name = policy_name
+
+
+# ---- Halt decisions ----------------------------------------------------
+#
+# Halts are operator-imposed kill-switches that live on the server in
+# the halt_state table and are pulled by the SDK on a fast poll. They
+# are a separate concept from policy match decisions: a halt is "stop
+# this agent, no matter what it tries to do," not "this specific
+# action violates this rule." Hence a separate decision type and a
+# separate exception. Frameworks check halt FIRST at the per-tool
+# boundary; if a halt is active the policy code never runs (no point
+# evaluating match expressions when the agent is supposed to be off).
+
+
+@dataclass(frozen=True)
+class HaltDecision:
+    """The result of consulting the halt cache for a given call.
+
+    action is 'allow' or 'halt'. On 'halt', the SDK raises
+    StrathonHaltExceeded at the tool boundary. halt_id is the row id
+    in the receiver's halt_state table; scope/scope_value identify
+    which halt fired (useful for the operator looking at the
+    exception in their logs).
+    """
+
+    action: str  # 'allow' | 'halt'
+    halt_id: Optional[int] = None
+    scope: Optional[str] = None         # 'agent' | 'project'
+    scope_value: Optional[str] = None   # agent_id, or None for project-scope
+    reason: Optional[str] = None
+    state: Optional[str] = None         # 'paused' | 'halted'
+
+    @property
+    def is_allow(self) -> bool:
+        return self.action == "allow"
+
+    @property
+    def is_halt(self) -> bool:
+        return self.action == "halt"
+
+
+# Module-level singleton — every allow returns this.
+ALLOW_HALT = HaltDecision(action="allow")
+
+
+class StrathonHaltExceeded(Exception):
+    """Raised when an operator-imposed halt is active for the calling agent.
+
+    Distinct from StrathonPolicyBlocked because the semantics differ:
+    a block says "this specific action would violate a policy", while
+    a halt says "this agent has been stopped by an operator regardless
+    of what it tries to do." Callers handling the two cases
+    differently (e.g. retry-able-vs-not, alert-vs-no-alert) need the
+    distinction.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        halt_id: Optional[int] = None,
+        scope: Optional[str] = None,
+        scope_value: Optional[str] = None,
+        reason: Optional[str] = None,
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.halt_id = halt_id
+        self.scope = scope
+        self.scope_value = scope_value
+        self.reason = reason
