@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
 import repositories.policies as policies_repo
+import repositories.project_settings as project_settings_repo
 from database import get_db_session
 from policies import PolicyExpressionError
 
@@ -41,8 +42,23 @@ async def list_policies_endpoint(
     ctx: auth_mod.ApiKeyContext = Depends(require_scope(auth_mod.SCOPE_POLICIES_READ)),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
+    """List policies plus the project's intervention default action.
+
+    The default-action field is part of the SDK's enforcement
+    contract — it determines whether unmatched calls allow or deny.
+    Returning it alongside policies in this single endpoint means
+    the SDK refresh path stays one HTTP round-trip; a separate fetch
+    would let the two pieces of state drift across the refresh
+    window.
+    """
     policies = await policies_repo.list_policies(session, ctx.project_id)
-    return {"policies": [p.model_dump(mode="json") for p in policies]}
+    default_action = await project_settings_repo.load_intervention_default_action(
+        session, ctx.project_id,
+    )
+    return {
+        "policies": [p.model_dump(mode="json") for p in policies],
+        "intervention_default_action": default_action,
+    }
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

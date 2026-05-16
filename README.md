@@ -118,6 +118,12 @@ The bits below are end-to-end, tested in CI, and ready to use:
   calls over it raise `StrathonPolicyThrottled` with
   `retry_after_seconds` so caller code can back off and retry.
   Configure with `action_config: {max_calls, window_seconds, scope}`.
+- **Allow-list mode.** Per-project `intervention_default_action`
+  toggle. Default `allow` keeps the historical permissive posture;
+  set `block` and the SDK denies any tool call that no `allow` policy
+  explicitly admits. Toggle via `PATCH /v1/project/settings`. Priority
+  ordering is preserved across action types — a higher-priority block
+  still beats a lower-priority allow.
 - **Log and alert actions.** A matched policy records a match record and
   fires an outbound webhook without interrupting the agent.
 - **Durable webhook delivery.** Alert webhooks are signed (HMAC-SHA256),

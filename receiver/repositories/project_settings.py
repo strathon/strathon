@@ -179,4 +179,79 @@ async def load_redaction_config(
     )
 
 
-__all__ = ["load_redaction_config"]
+# ---- Intervention default action ----------------------------------------
+#
+# The ``project_settings.intervention_default_action`` column was added
+# in migration 001 as a forward-looking slot constrained to
+# ``'allow' | 'block'`` with a default of ``'allow'``. It governs what
+# happens at the SDK's tool boundary when no policy matches the call.
+# ``'allow'`` (the historical default) is the permissive posture and
+# matches the pre-allow-list behavior. ``'block'`` flips the project
+# into allow-list mode: a call must be explicitly admitted by an
+# ``action="allow"`` policy or it is denied with a synthetic block
+# decision carrying ``policy_id=None``.
+
+VALID_INTERVENTION_DEFAULT_ACTIONS = {"allow", "block"}
+
+
+async def load_intervention_default_action(
+    session: AsyncSession, project_id: UUID,
+) -> str:
+    """Read the project's intervention default action.
+
+    Returns ``"allow"`` or ``"block"``. Falls back to ``"allow"`` when
+    no settings row exists yet (preserves the permissive historical
+    behavior) and when the stored value somehow violates the CHECK
+    constraint (defensive: the column is constrained at the DB level,
+    but we treat any unrecognized value as ``"allow"`` to avoid
+    silently denying every call in a project on a schema mismatch).
+    """
+    stmt = select(ProjectSettings.intervention_default_action).where(
+        ProjectSettings.project_id == project_id,
+    )
+    result = await session.execute(stmt)
+    value = result.scalar_one_or_none()
+    if value not in VALID_INTERVENTION_DEFAULT_ACTIONS:
+        return "allow"
+    return value
+
+
+async def update_intervention_default_action(
+    session: AsyncSession, project_id: UUID, new_value: str,
+) -> str:
+    """Set the project's intervention default action.
+
+    Raises ``ValueError`` on an unrecognized value (caller maps to 400).
+    Upserts the settings row when missing so a fresh project that has
+    never had a settings row written still gets the value persisted.
+    Returns the value that was stored.
+    """
+    if new_value not in VALID_INTERVENTION_DEFAULT_ACTIONS:
+        raise ValueError(
+            f"intervention_default_action must be one of "
+            f"{sorted(VALID_INTERVENTION_DEFAULT_ACTIONS)}, got {new_value!r}"
+        )
+
+    # Postgres-specific upsert. The migration-001 seed already creates a
+    # row for the seeded default project, but a project_settings row
+    # might not exist for projects added by future tooling, so we
+    # ON CONFLICT to handle either path.
+    from sqlalchemy import text
+    await session.execute(
+        text(
+            "INSERT INTO project_settings (project_id, intervention_default_action) "
+            "VALUES (:pid, :val) "
+            "ON CONFLICT (project_id) DO UPDATE "
+            "SET intervention_default_action = EXCLUDED.intervention_default_action"
+        ),
+        {"pid": str(project_id), "val": new_value},
+    )
+    return new_value
+
+
+__all__ = [
+    "VALID_INTERVENTION_DEFAULT_ACTIONS",
+    "load_intervention_default_action",
+    "load_redaction_config",
+    "update_intervention_default_action",
+]

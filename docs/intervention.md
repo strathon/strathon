@@ -73,7 +73,7 @@ isn't guaranteed to exist on every span.
 
 ## Actions
 
-A policy has one of five actions:
+A policy has one of six actions:
 
 | Action     | What happens                                                                                                                          | Where it runs |
 |------------|---------------------------------------------------------------------------------------------------------------------------------------|---------------|
@@ -82,10 +82,11 @@ A policy has one of five actions:
 | `block`    | SDK raises `StrathonPolicyBlocked` before the tool/LLM call executes. Agent sees an error and adapts.                                 | SDK (client)  |
 | `steer`    | SDK returns a corrective string (`action_config.replacement`) in place of real output. Agent self-corrects.                           | SDK (client)  |
 | `throttle` | SDK consults a per-policy token bucket. Calls under the cap proceed; calls over it raise `StrathonPolicyThrottled` with `retry_after_seconds`. | SDK (client)  |
+| `allow`    | SDK admits the call and short-circuits subsequent policies. Useful for carve-outs and required for allow-list mode.                   | SDK (client)  |
 
-`block`, `steer`, and `throttle` actually prevent (or rate-limit) the
-action — these are SDK-side because by the time a span reaches the
-server, the action has already happened.
+`block`, `steer`, `throttle`, and `allow` actually affect the call —
+these are SDK-side because by the time a span reaches the server, the
+action has already happened.
 
 ### Throttle action config
 
@@ -132,6 +133,66 @@ State is per-process: each SDK replica holds its own bucket dict, so
 in an N-process agent deploy the effective ceiling is
 `N × max_calls`. The matching trade-off appears in the receiver's
 rate limiter; see `docs/self-hosting.md` for the multi-replica note.
+
+### Allow-list mode (default-deny)
+
+By default, a call that doesn't match any policy is admitted. This is
+the permissive posture and works well for projects that use Strathon
+primarily for observability + spot-fix policies.
+
+For environments that need the inverse — "list everything that's
+permitted, deny the rest" — flip the project into allow-list mode by
+setting `intervention_default_action` to `block`:
+
+```bash
+curl -X PATCH http://localhost:4318/v1/project/settings \
+  -H "Authorization: Bearer $STRATHON_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"intervention_default_action": "block"}'
+```
+
+In allow-list mode, a call at the tool boundary must be admitted by an
+explicit `action: "allow"` policy or it is denied. The SDK raises
+`StrathonPolicyBlocked` with `policy_id=None` and a message that names
+allow-list mode, so operators reading exception logs see the cause
+immediately.
+
+Example allow policy:
+
+```json
+{
+  "name": "permit_safe_search",
+  "match_expression": "name == 'tool.web_search' && attrs['strathon.agent.id'] == 'research-bot'",
+  "action": "allow",
+  "priority": 100
+}
+```
+
+Evaluation rules:
+
+- Policies evaluate in priority-descending order. The first matching
+  policy whose action affects control flow (`block`, `steer`,
+  `throttle` when denied, or `allow`) short-circuits.
+- A higher-priority `block` beats a lower-priority `allow`. The
+  priority ordering is preserved across action types — there is no
+  "allow always wins" or "deny always wins" override.
+- A matched `allow` short-circuits subsequent policies in BOTH modes.
+  Outside allow-list mode, that lets operators carve a specific tool
+  out from being affected by a broader lower-priority block.
+- The default action is read from the project setting on each SDK
+  refresh of `/v1/policies`. Flipping the project setting takes
+  effect on the next refresh cycle (within 30s by default).
+
+Reading the current setting:
+
+```bash
+curl http://localhost:4318/v1/project/settings \
+  -H "Authorization: Bearer $STRATHON_API_KEY"
+```
+
+The endpoint requires the `project_settings:read` scope (and
+`project_settings:write` for PATCH). The dev key has `*` so it can
+read and write both; production keys should be scoped narrowly.
 
 ## Operator kill-switches: halts
 

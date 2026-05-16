@@ -69,6 +69,15 @@ class PolicyEnforcer:
         self._policies: List[Policy] = []
         self._last_refresh_at: float = 0.0
         self._last_refresh_error: Optional[str] = None
+        # Project-level "what happens to unmatched calls" knob. The
+        # receiver returns this alongside the policy list in /v1/policies.
+        # 'allow' (the historical default) admits unmatched calls;
+        # 'block' flips the project into allow-list mode where a call
+        # must be explicitly admitted by an action="allow" policy or it
+        # is denied at the tool boundary. Defaults to 'allow' on first
+        # construction so the SDK behaves identically to pre-allow-list
+        # behavior until a refresh tells us otherwise.
+        self._intervention_default_action: str = "allow"
 
         # Per-policy token buckets for the throttle action. State is
         # process-local, like the policy cache itself; multi-replica
@@ -132,23 +141,50 @@ class PolicyEnforcer:
         # Sort by priority desc so first match wins
         policies.sort(key=lambda p: (-p.priority, p.name))
 
+        # Read the project-level intervention default action. Older
+        # receivers (pre-allow-list) won't send this field; we fall
+        # back to "allow" to preserve their behavior.
+        default_action_raw = payload.get("intervention_default_action", "allow")
+        if default_action_raw not in {"allow", "block"}:
+            logger.warning(
+                "PolicyEnforcer: server returned unknown "
+                "intervention_default_action %r; defaulting to 'allow'",
+                default_action_raw,
+            )
+            default_action = "allow"
+        else:
+            default_action = default_action_raw
+
         with self._lock:
             self._policies = policies
+            self._intervention_default_action = default_action
             self._last_refresh_at = time.time()
             self._last_refresh_error = None
-        logger.debug("PolicyEnforcer: loaded %d policies", len(policies))
+        logger.debug(
+            "PolicyEnforcer: loaded %d policies, default_action=%s",
+            len(policies), default_action,
+        )
         return True
 
     def check_policy(self, span_context: Dict[str, Any]) -> PolicyDecision:
         """Evaluate active policies against a candidate action.
 
-        Returns the highest-priority decision that affects control flow:
-            - PolicyDecision(action='block', ...) if any block rule matches
-            - PolicyDecision(action='steer', ...) if any steer rule matches
-            - ALLOW otherwise
+        Iteration is priority-descending. The first matching policy
+        whose action affects control flow ('block', 'steer',
+        'throttle' [when denied], or 'allow') short-circuits and that
+        decision is returned. ``log`` and ``alert`` actions are
+        server-side only and don't affect the return value.
 
-        'log' and 'alert' actions are server-side and do not affect the
-        return value (they are applied later when the span is ingested).
+        At the end of the iteration (no short-circuit fired) the
+        project's ``intervention_default_action`` decides:
+
+          * ``"allow"`` (default) — returns ALLOW. Pre-allow-list
+            behavior; unmatched calls go through.
+          * ``"block"`` — allow-list mode. Returns a synthetic block
+            decision with ``policy_id=None`` and a "no policy
+            explicitly allowed" message. The caller raises
+            ``StrathonPolicyBlocked`` from this just like any other
+            block decision.
 
         Fail-closed: when ``fail_closed=True`` was set on this
         enforcer, this method raises ``StrathonReceiverUnreachable``
@@ -161,14 +197,15 @@ class PolicyEnforcer:
 
         with self._lock:
             policies = list(self._policies)
+            default_action = self._intervention_default_action
 
         if not policies:
-            return ALLOW
+            return self._default_decision(default_action)
 
         for policy in policies:
             if not policy.enabled:
                 continue
-            if policy.action not in {"block", "steer", "throttle"}:
+            if policy.action not in {"block", "steer", "throttle", "allow"}:
                 continue
             if not _span_matches_applies_to(span_context, policy.applies_to):
                 continue
@@ -185,6 +222,18 @@ class PolicyEnforcer:
                     policy_id=policy.id,
                     policy_name=policy.name,
                     message=message,
+                )
+            if policy.action == "allow":
+                # Explicit allow: short-circuits subsequent policies.
+                # In allow-list mode this is how a call gets admitted;
+                # outside allow-list mode it lets an operator carve out
+                # a specific tool from being affected by lower-priority
+                # block/steer rules. Priority ordering still applies, so
+                # a higher-priority block beats a lower-priority allow.
+                return PolicyDecision(
+                    action="allow",
+                    policy_id=policy.id,
+                    policy_name=policy.name,
                 )
             if policy.action == "throttle":
                 decision = self._evaluate_throttle(policy, span_context)
@@ -207,6 +256,29 @@ class PolicyEnforcer:
                 replacement=replacement,
             )
 
+        return self._default_decision(default_action)
+
+    def _default_decision(self, default_action: str) -> PolicyDecision:
+        """Build the end-of-iteration decision for ``default_action``.
+
+        ``"allow"`` returns the shared ALLOW singleton (no allocation
+        on the hot path). ``"block"`` returns a synthetic block
+        decision with no associated policy — callers see
+        ``decision.policy_id is None`` and a message that names
+        allow-list mode explicitly, which makes the cause obvious
+        when the exception lands in an operator's logs.
+        """
+        if default_action == "block":
+            return PolicyDecision(
+                action="block",
+                policy_id=None,
+                policy_name=None,
+                message=(
+                    "no policy explicitly allowed this call "
+                    "(project is in allow-list mode: "
+                    "intervention_default_action=block)"
+                ),
+            )
         return ALLOW
 
     def _evaluate_throttle(
@@ -289,6 +361,18 @@ class PolicyEnforcer:
         with self._lock:
             return self._last_refresh_error
 
+    @property
+    def intervention_default_action(self) -> str:
+        """The project's current default for unmatched calls.
+
+        Mirrors what the SDK last received from the receiver's
+        ``/v1/policies`` response. Useful for tests and operator
+        tooling that wants to confirm the SDK has the expected
+        allow-list-mode state.
+        """
+        with self._lock:
+            return self._intervention_default_action
+
     def set_policies_for_testing(self, policies: List[Policy]) -> None:
         """Manually seed policies, bypassing the receiver. Tests only."""
         sorted_policies = sorted(policies, key=lambda p: (-p.priority, p.name))
@@ -300,6 +384,18 @@ class PolicyEnforcer:
         """Force the last-refresh timestamp for fail-closed staleness tests."""
         with self._lock:
             self._last_refresh_at = ts
+
+    def set_intervention_default_action_for_testing(self, value: str) -> None:
+        """Force the project's default action without going through the
+        receiver. Tests only — production state arrives via refresh().
+        """
+        if value not in {"allow", "block"}:
+            raise ValueError(
+                f"intervention_default_action must be 'allow' or 'block', "
+                f"got {value!r}"
+            )
+        with self._lock:
+            self._intervention_default_action = value
 
     # ---- Internals ----
 

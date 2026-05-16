@@ -103,6 +103,13 @@ SCOPE_BUDGETS_WRITE = "budgets:write"
 # without exposing the budget surface.
 SCOPE_MODEL_PRICES_READ = "model_prices:read"
 SCOPE_MODEL_PRICES_WRITE = "model_prices:write"
+# Project settings — currently exposes the intervention default action
+# (allow-list mode toggle); future commits will likely surface other
+# per-project knobs here too. Kept distinct from policies:* so an
+# operator can delegate policy editing without exposing the toggle that
+# flips a project into allow-list mode.
+SCOPE_PROJECT_SETTINGS_READ = "project_settings:read"
+SCOPE_PROJECT_SETTINGS_WRITE = "project_settings:write"
 
 KNOWN_SCOPES: frozenset[str] = frozenset({
     SCOPE_WILDCARD,
@@ -121,6 +128,8 @@ KNOWN_SCOPES: frozenset[str] = frozenset({
     SCOPE_BUDGETS_WRITE,
     SCOPE_MODEL_PRICES_READ,
     SCOPE_MODEL_PRICES_WRITE,
+    SCOPE_PROJECT_SETTINGS_READ,
+    SCOPE_PROJECT_SETTINGS_WRITE,
 })
 
 # Default scopes for a new SDK-style key. Enough to ingest traces and to
