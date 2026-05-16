@@ -23,6 +23,14 @@ the OTel GenAI semconv. In CEL you access them with map indexing:
 
     attrs["gen_ai.tool.name"] == "send_email"
 
+The evaluator additionally binds ``now`` to a CEL ``timestamp`` of the
+current UTC time at the moment the expression evaluates. Operators can
+write time-based policies using the standard CEL timestamp methods —
+``now.getDayOfWeek()``, ``now.getHours()``, ``now.getDate()`` — and
+timestamp/duration arithmetic. This is the cel-spec idiom (matches
+gcloud IAM, Envoy, KrakenD, etc.), so policies port between systems
+without rewriting.
+
 ### Example expressions
 
 Block any send_email tool call to a competitor address::
@@ -39,6 +47,16 @@ Allow only a specific set of models::
 
     attrs["gen_ai.request.model"] in ["claude-opus-4-7", "gpt-4o"]
 
+Block weekend tool calls (UTC; Sunday=0, Saturday=6 per cel-spec)::
+
+    now.getDayOfWeek() == 0 || now.getDayOfWeek() == 6
+
+Restrict expensive operations to business hours in a specific timezone::
+
+    name.startsWith("tool.expensive_") &&
+    (now.getHours("America/Los_Angeles") < 9 ||
+     now.getHours("America/Los_Angeles") >= 17)
+
 This module is dependency-light: it imports `celpy` lazily so importing
 `strathon.policy` without using policies costs nothing.
 """
@@ -47,6 +65,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -101,29 +120,55 @@ def _compile_cached(expression: str):
     return program
 
 
-def _activation_from_span(span_context: Dict[str, Any]):
+def _activation_from_span(
+    span_context: Dict[str, Any], now: Optional[datetime] = None,
+):
     """Build a CEL activation dict from a span context.
 
     Converts native Python types into CEL types so the evaluator can index
-    into the attrs map and compare strings/numbers correctly.
+    into the attrs map and compare strings/numbers correctly. Also binds
+    ``now`` to a CEL timestamp; tests can pin the value by passing a
+    ``datetime`` (must be timezone-aware), otherwise the current UTC time
+    is used.
     """
     import celpy
 
     name = span_context.get("name") or ""
     attrs = span_context.get("attrs") or {}
 
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        # CEL timestamps are unambiguously UTC. A naive datetime would
+        # be interpreted as local time by Python's strftime/comparison
+        # primitives and produce wrong getDayOfWeek/getHours results.
+        # Promote to UTC explicitly so the policy sees what the caller
+        # almost certainly meant.
+        now = now.replace(tzinfo=timezone.utc)
+
     return {
         "name": celpy.celtypes.StringType(name),
         "attrs": celpy.json_to_cel(attrs),
+        "now": celpy.celtypes.TimestampType(now),
     }
 
 
-def evaluate(expression: Optional[str], span_context: Dict[str, Any]) -> bool:
+def evaluate(
+    expression: Optional[str],
+    span_context: Dict[str, Any],
+    now: Optional[datetime] = None,
+) -> bool:
     """Evaluate a CEL expression against a span context.
 
     Returns True only when the expression evaluates to boolean True. Any
     runtime evaluation error is logged and returns False — we prefer
     silent-deny over crashing the receiver / SDK.
+
+    The ``now`` parameter pins the timestamp bound to the CEL ``now``
+    variable. Tests pass a deterministic value; production callers omit
+    it and get the current UTC time. Either way, the expression sees
+    ``now`` as a CEL timestamp and can call the standard timestamp
+    methods on it.
     """
     if not expression:
         return False
@@ -135,7 +180,7 @@ def evaluate(expression: Optional[str], span_context: Dict[str, Any]) -> bool:
         return False
 
     try:
-        activation = _activation_from_span(span_context)
+        activation = _activation_from_span(span_context, now=now)
         result = program.evaluate(activation)
     except Exception:
         logger.exception("CEL evaluation crashed for %r", expression)

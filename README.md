@@ -151,6 +151,12 @@ The bits below are end-to-end, tested in CI, and ready to use:
   the unredacted span so the firewall semantics are preserved.
   See [`docs/redaction.md`](docs/redaction.md).
 - **CEL expressions.** Full [CEL](https://github.com/google/cel-spec)
+  evaluator (via `cel-python`) over the span's attributes plus a
+  bound `now` timestamp for time-based rules (`now.getDayOfWeek()`,
+  `now.getHours("America/Los_Angeles")`, timestamp/duration
+  arithmetic). Compile-time syntax checking on `POST /v1/policies`.
+  Same expression surface gcloud IAM, Envoy, and Kubernetes
+  admission use.
   evaluator (via `cel-python`) over the span's attributes. Compile-time
   syntax checking on `POST /v1/policies`.
 - **OTLP/HTTP trace ingest.** Standard OpenTelemetry exporter. Spans land

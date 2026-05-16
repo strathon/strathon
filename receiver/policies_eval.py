@@ -12,6 +12,22 @@ Kubernetes, Envoy, and gcloud IAM use for policy rules. Users get a
 familiar, safe surface; operators get a predictable, bounded evaluator
 that can't run arbitrary code.
 
+### Expression context
+
+Every CEL expression is evaluated against a span context that looks like:
+
+    {
+        "name":  "langgraph.tool.send_email",
+        "attrs": {"gen_ai.tool.name": "send_email", ...},
+    }
+
+Additionally, ``now`` is bound to a CEL timestamp of the current UTC
+time at the moment of evaluation. Time-based rules use the standard
+CEL timestamp methods — ``now.getDayOfWeek()``, ``now.getHours()``,
+``now.getDate()`` — and timestamp/duration arithmetic. This is the
+cel-spec idiom; the SDK binds the same variable so server-side and
+client-side evaluation see the same surface.
+
 Public surface:
     PolicyExpressionError    -- raised on compile failure
     evaluate(expr, ctx)      -- evaluate to bool, swallows runtime errors
@@ -25,6 +41,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 _logger = logging.getLogger("strathon.receiver.policies_eval")
@@ -71,11 +88,22 @@ def _compile_cached(expression: str):
     return program
 
 
-def evaluate(expression: Optional[str], span_context: Dict[str, Any]) -> bool:
+def evaluate(
+    expression: Optional[str],
+    span_context: Dict[str, Any],
+    now: Optional[datetime] = None,
+) -> bool:
     """Evaluate a CEL expression against a span context.
 
     span_context shape:
         {"name": "<span name>", "attrs": {<flat attribute map>}}
+
+    The ``now`` parameter pins the timestamp bound to the CEL ``now``
+    variable. Tests pass a deterministic value; production callers omit
+    it and get the current UTC time. Naive ``datetime``s are promoted to
+    UTC so the policy sees what the caller almost certainly meant — a
+    Python-local-time interpretation would break getDayOfWeek/getHours
+    in subtle ways.
 
     Returns False on missing expression, compile error, or runtime error.
     Logs runtime crashes; compile errors are logged at warning level since
@@ -93,9 +121,14 @@ def evaluate(expression: Optional[str], span_context: Dict[str, Any]) -> bool:
         return False
     try:
         import celpy
+        if now is None:
+            now = datetime.now(timezone.utc)
+        elif now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
         activation = {
             "name": celpy.celtypes.StringType(span_context.get("name") or ""),
             "attrs": celpy.json_to_cel(span_context.get("attrs") or {}),
+            "now": celpy.celtypes.TimestampType(now),
         }
         result = program.evaluate(activation)
     except Exception:

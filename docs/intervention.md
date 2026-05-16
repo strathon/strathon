@@ -194,6 +194,78 @@ The endpoint requires the `project_settings:read` scope (and
 `project_settings:write` for PATCH). The dev key has `*` so it can
 read and write both; production keys should be scoped narrowly.
 
+### Time-based policies
+
+Every policy match expression is evaluated against a context that
+includes `now` — a CEL `timestamp` of the current UTC time at the
+moment of evaluation. Operators write time conditions using the
+standard CEL timestamp methods, the same surface that gcloud IAM,
+Envoy, and Kubernetes admission policies expose. Methods include:
+
+| Method                          | Returns                       |
+|---------------------------------|-------------------------------|
+| `now.getFullYear()`             | 4-digit year                  |
+| `now.getMonth()`                | 0-11 (January = 0)            |
+| `now.getDate()`                 | day-of-month, 1-31            |
+| `now.getDayOfMonth()`           | day-of-month, 0-30 (zero-based) |
+| `now.getDayOfWeek()`            | **0 = Sunday, ..., 6 = Saturday** |
+| `now.getDayOfYear()`            | 0-365 (zero-based)            |
+| `now.getHours()`                | 0-23                          |
+| `now.getMinutes()`              | 0-59                          |
+| `now.getSeconds()`              | 0-59                          |
+
+All of these accept an optional IANA timezone string —
+`now.getHours("America/Los_Angeles")` — so operators in non-UTC
+deployments can write policies in local terms without doing offset
+math themselves.
+
+Note the day-of-week convention: cel-spec uses **Sunday = 0**, which
+differs from Python's `datetime.weekday()` (Monday = 0). The policy
+sees the cel-spec value.
+
+Time arithmetic also works: `timestamp("...")` and `duration("...")`
+are CEL constructors and the standard `+` / `-` / comparison operators
+combine them.
+
+#### Example: block tool use on weekends (UTC)
+
+```json
+{
+  "name": "no_weekend_tools",
+  "match_expression": "now.getDayOfWeek() == 0 || now.getDayOfWeek() == 6",
+  "action": "block",
+  "action_config": {"message": "No agent operations on weekends."}
+}
+```
+
+#### Example: restrict expensive tools to Pacific business hours
+
+```json
+{
+  "name": "business_hours_only",
+  "match_expression": "name.startsWith('tool.expensive_') && (now.getDayOfWeek(\"America/Los_Angeles\") == 0 || now.getDayOfWeek(\"America/Los_Angeles\") == 6 || now.getHours(\"America/Los_Angeles\") < 9 || now.getHours(\"America/Los_Angeles\") >= 17)",
+  "action": "block"
+}
+```
+
+#### Example: rate-limit a slow rollout via a time gate
+
+Combine time conditions with `throttle` to phase in a new tool:
+allow only N calls/minute until a flag day passes.
+
+```json
+{
+  "name": "phased_rollout",
+  "match_expression": "name == 'tool.new_feature' && now < timestamp(\"2026-07-01T00:00:00Z\")",
+  "action": "throttle",
+  "action_config": {"max_calls": 5, "window_seconds": 60, "scope": "agent"}
+}
+```
+
+After the flag date the match expression returns false and the
+policy stops applying; the SDK doesn't need a separate "disable"
+action to retire the rule.
+
 ## Operator kill-switches: halts
 
 Policies are *conditional* — they fire when a CEL expression matches. Halts
