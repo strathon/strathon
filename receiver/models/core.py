@@ -200,6 +200,24 @@ class ProjectSettings(Base):
     pii_redaction_patterns: Mapped[Optional[list[Any]]] = mapped_column(
         JSONB, server_default=text("'[]'::jsonb")
     )
+    # Per-entity actions for matches by the default + custom value
+    # patterns. Keys are entity names (EMAIL_ADDRESS, CREDIT_CARD,
+    # etc.); values are one of redact/mask/hash. Missing entries
+    # default to "redact" in the redactor. See migration 006.
+    pii_redaction_strategy: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    # Whole-attribute actions keyed by attribute name. Supports
+    # redact/mask/hash/delete (delete is meaningless for value-pattern
+    # matches and only valid here). Empty = no key-level redaction.
+    pii_redaction_key_actions: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    # Allowlist mode: if non-empty, ONLY these attribute keys survive
+    # the redactor. Strongest privacy posture, deny-by-default.
+    pii_attribute_allowlist: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
     content_capture_enabled: Mapped[bool] = mapped_column(
         nullable=False, server_default=text("false")
     )

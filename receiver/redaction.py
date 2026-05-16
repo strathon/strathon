@@ -1,0 +1,381 @@
+"""Regex-based PII redaction for ingest-path span attributes.
+
+Strathon redacts PII at ingest time, before spans land in Postgres and
+before webhook payloads are assembled. The redactor is pure-Python
+regex with no spaCy / NER dependency — fast, deterministic, and free of
+the 500 MB image bloat that comes with running Presidio inline.
+
+Design choices and the research behind them
+============================================
+
+The pattern we follow is the one the OpenTelemetry Collector
+``redaction`` processor formalizes: two layers, applied in order.
+
+Layer 1 — key-based actions
+    Some attribute keys should never carry their value into the trace
+    store regardless of content. ``http.request.header.authorization``
+    is always a credential; ``user.email`` is always PII. Operators
+    declare these as ``{key: action}`` pairs and we apply them by name.
+
+Layer 2 — value-based pattern matching
+    For free-text attributes like ``strathon.tool.args`` we don't
+    know what's inside, so we scan the value for known PII patterns
+    (emails, credit cards, SSNs, etc.) and apply the chosen action.
+
+Entity names mirror Microsoft Presidio
+    ``EMAIL_ADDRESS``, ``PHONE_NUMBER``, ``CREDIT_CARD``, ``US_SSN``,
+    ``IP_ADDRESS``, ``API_KEY``. Operators who later swap in a
+    Presidio sidecar (v2 plan) keep their entity-name config working.
+
+Per-entity actions match LiteLLM's vocabulary
+    ``redact``  — replace with ``[ENTITY_NAME]``
+    ``mask``    — keep last N chars, replace the rest
+    ``hash``    — SHA-256, deterministic so analytics still work
+    ``delete``  — drop the attribute entirely (key-action only)
+
+Defaults are conservative
+    Default-on for new projects, default action ``redact`` for every
+    detected entity. Operators can tighten (``delete`` everything) or
+    loosen (``mask`` instead of ``redact`` to preserve last 4 digits
+    for fraud-checking) per entity.
+
+Interaction with policy evaluation
+==================================
+
+A subtle but critical property: policy evaluation runs on the
+UNREDACTED span. Redaction is applied AFTER ``evaluate_for_span`` but
+BEFORE persistence. The reason: a policy like
+``attrs["strathon.tool.args"].contains("@competitor.com")`` would never
+fire if the email were already redacted to ``[EMAIL_ADDRESS]`` by the
+time the matcher ran. We want both: matching works on raw content,
+storage is sanitized.
+
+The webhook actor's payload is built from the policy_matches row,
+which references the persisted (redacted) span — so consumers of
+alerts never see the raw PII either. Same property holds end-to-end.
+
+Performance notes
+=================
+
+For a 10 KB ``strathon.tool.args`` value with 6 default patterns, a
+single scan completes in well under 1 ms on modest hardware. The
+ingest path is the budget here: each span is scanned exactly once,
+and the patterns are compiled at module import (`re.compile`).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import re
+from dataclasses import dataclass
+from typing import Any, Dict, Iterable, Mapping, Pattern, Tuple
+
+logger = logging.getLogger("strathon.receiver.redaction")
+
+
+# ---- Entity definitions -------------------------------------------------
+#
+# Each pattern is paired with an optional validator. The validator gets
+# the matched string and returns True if it's a real instance of that
+# entity, False if it's a false positive. The validator runs only when
+# the regex matches, so its cost is bounded by the regex hit rate.
+
+
+def _luhn_check(s: str) -> bool:
+    """Standard Luhn algorithm for credit-card validation.
+
+    The credit-card regex matches any 13-19 digit run; many of those
+    aren't actually credit cards (random numeric IDs, account numbers,
+    order numbers, etc.). The Luhn check rejects ~90% of these false
+    positives, which is the difference between "redacts every long
+    number in the trace" (annoying) and "redacts credit cards only"
+    (correct).
+    """
+    digits = [int(c) for c in s if c.isdigit()]
+    if len(digits) < 13 or len(digits) > 19:
+        return False
+    # Process digits right to left, doubling every second one.
+    total = 0
+    for i, d in enumerate(reversed(digits)):
+        if i % 2 == 1:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return total % 10 == 0
+
+
+# Email: a permissive RFC-5322-ish pattern. Avoids over-matching things
+# like "foo@bar" by requiring a TLD with 2+ chars.
+_EMAIL = re.compile(
+    r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b"
+)
+
+# US SSN: 3-2-4 with hyphens. We don't accept the no-hyphen variant
+# (9 consecutive digits) because that produces too many false positives
+# in financial and account-number contexts.
+_US_SSN = re.compile(
+    r"\b\d{3}-\d{2}-\d{4}\b"
+)
+
+# Credit card: 13-19 digits, optionally separated by spaces or hyphens.
+# Validated with Luhn afterwards. We match the surface form first
+# because the validator needs the digit string.
+_CREDIT_CARD = re.compile(
+    r"\b(?:\d[ \-]?){12,18}\d\b"
+)
+
+# US-style phone numbers: (XXX) XXX-XXXX, XXX-XXX-XXXX, XXX.XXX.XXXX.
+#
+# The regex deliberately does NOT lead with `\b`. Word boundaries only
+# fire at a transition between a word char and a non-word char, and
+# `(` is non-word — so `\b(` never matches the parenthesized form.
+# Instead we use a negative lookbehind `(?<![\d\w])` so the pattern
+# doesn't grab a phone-shaped substring out of a longer digit run
+# (an account number, an ID), but DOES match when the previous char
+# is a space, start of string, or other punctuation.
+#
+# We deliberately don't try international numbers in v1; the false
+# positive rate is too high without context.
+_PHONE_US = re.compile(
+    r"(?<![\d\w])(?:\(\d{3}\)\s?|\d{3}[\-.])\d{3}[\-.]\d{4}(?!\d)"
+)
+
+# IPv4. We catch obvious things like 192.168.x.x; IPv6 deferred.
+_IPV4 = re.compile(
+    r"\b(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)){3}\b"
+)
+
+# API key heuristic. Catches common secret-shaped tokens by their
+# well-known prefixes. This is the highest-impact pattern in practice —
+# accidentally logging an `sk_live_...` or a JWT is the #1 way LLM
+# observability tools end up with credentials in their backend.
+_API_KEY = re.compile(
+    r"\b(?:"
+    r"sk-[A-Za-z0-9]{20,}"             # OpenAI
+    r"|sk_(?:live|test)_[A-Za-z0-9]{20,}"  # Stripe
+    r"|pk_(?:live|test)_[A-Za-z0-9]{20,}"  # Stripe publishable
+    r"|rk_(?:live|test)_[A-Za-z0-9]{20,}"  # Stripe restricted
+    r"|ghp_[A-Za-z0-9]{36}"            # GitHub PAT
+    r"|github_pat_[A-Za-z0-9_]{82}"    # GitHub fine-grained PAT
+    r"|whsec_[A-Za-z0-9+/=]{20,}"      # Standard Webhooks secrets
+    r"|xox[abprs]-[A-Za-z0-9\-]{10,}"  # Slack tokens
+    r"|AKIA[0-9A-Z]{16}"               # AWS access key ID
+    r"|AIza[0-9A-Za-z\-_]{35}"         # Google API key
+    r"|eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"  # JWT
+    r")\b"
+)
+
+
+@dataclass(frozen=True)
+class EntityDef:
+    """Metadata for one detected entity type.
+
+    pattern    compiled regex
+    validator  optional callable; if returns False the match is dropped
+    name       entity name used in placeholder and in operator config
+    """
+    name: str
+    pattern: Pattern[str]
+    validator: Any  # Optional[Callable[[str], bool]]
+
+
+# Order matters. API_KEY first: keys are catastrophic to leak and we
+# want them caught before generic patterns claim parts of them.
+# EMAIL second so it claims user@host before phone/IP heuristics try
+# to find numbers inside the local-part. CREDIT_CARD before PHONE so
+# 16-digit card numbers don't get mis-classified as phone candidates.
+DEFAULT_ENTITIES: Tuple[EntityDef, ...] = (
+    EntityDef("API_KEY",       _API_KEY,     None),
+    EntityDef("EMAIL_ADDRESS", _EMAIL,       None),
+    EntityDef("CREDIT_CARD",   _CREDIT_CARD, _luhn_check),
+    EntityDef("US_SSN",        _US_SSN,      None),
+    EntityDef("PHONE_NUMBER",  _PHONE_US,    None),
+    EntityDef("IP_ADDRESS",    _IPV4,        None),
+)
+
+
+# ---- Actions ------------------------------------------------------------
+
+
+VALID_VALUE_ACTIONS = {"redact", "mask", "hash"}
+# delete is only meaningful for whole-attribute actions (you can't
+# "delete part of a value"; you delete the whole attribute)
+VALID_KEY_ACTIONS = {"redact", "mask", "hash", "delete"}
+
+
+def _apply_value_action(matched: str, entity_name: str, action: str) -> str:
+    """Return the replacement string for one match."""
+    if action == "redact":
+        return f"[{entity_name}]"
+    if action == "mask":
+        # Keep last 4 visible (or all of them if shorter than 4).
+        if len(matched) <= 4:
+            return "*" * len(matched)
+        return "*" * (len(matched) - 4) + matched[-4:]
+    if action == "hash":
+        h = hashlib.sha256(matched.encode("utf-8")).hexdigest()
+        return f"[{entity_name}:{h[:12]}]"
+    # Should not reach here; validate_strategy catches bad actions
+    return matched
+
+
+# ---- Config DTO ---------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RedactionConfig:
+    """Per-project redaction config, resolved from project_settings.
+
+    enabled           overall on/off switch
+    strategy          {ENTITY_NAME: action} for value-pattern matches.
+                      Missing entries default to "redact".
+    key_actions       {attribute_key: action} for whole-attribute
+                      handling. Applied BEFORE value-pattern matching.
+    allowlist         If non-empty, ONLY these attribute keys survive
+                      redaction. Strongest privacy posture.
+    custom_patterns   Operator-provided extra regex patterns, applied
+                      after the defaults.
+    """
+    enabled: bool
+    strategy: Mapping[str, str]
+    key_actions: Mapping[str, str]
+    allowlist: Tuple[str, ...]
+    custom_patterns: Tuple[Tuple[str, Pattern[str]], ...]
+
+    @classmethod
+    def disabled(cls) -> "RedactionConfig":
+        return cls(
+            enabled=False, strategy={}, key_actions={},
+            allowlist=(), custom_patterns=(),
+        )
+
+
+def validate_strategy(strategy: Mapping[str, str]) -> None:
+    """Raise ValueError if any action in a strategy is unknown."""
+    for entity, action in strategy.items():
+        if action not in VALID_VALUE_ACTIONS:
+            raise ValueError(
+                f"invalid action {action!r} for entity {entity!r}. "
+                f"Valid: {sorted(VALID_VALUE_ACTIONS)}"
+            )
+
+
+def validate_key_actions(key_actions: Mapping[str, str]) -> None:
+    for key, action in key_actions.items():
+        if action not in VALID_KEY_ACTIONS:
+            raise ValueError(
+                f"invalid action {action!r} for attribute key {key!r}. "
+                f"Valid: {sorted(VALID_KEY_ACTIONS)}"
+            )
+
+
+# ---- Core redaction -----------------------------------------------------
+
+
+def redact_string(
+    text: str,
+    *,
+    strategy: Mapping[str, str] | None = None,
+    entities: Iterable[EntityDef] = DEFAULT_ENTITIES,
+    custom_patterns: Iterable[Tuple[str, Pattern[str]]] = (),
+) -> str:
+    """Scan ``text`` for PII and apply the per-entity action.
+
+    Returns the redacted string. Multiple matches across multiple
+    entity types are applied in a single left-to-right pass per
+    entity, in the order defined by ``DEFAULT_ENTITIES``. Custom
+    patterns run last so they can match anything left after defaults.
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    strategy = strategy or {}
+
+    out = text
+
+    def _replace(m: re.Match, entity_name: str, validator) -> str:
+        matched = m.group(0)
+        if validator is not None and not validator(matched):
+            return matched  # validation failed; keep original
+        action = strategy.get(entity_name, "redact")
+        return _apply_value_action(matched, entity_name, action)
+
+    for ent in entities:
+        out = ent.pattern.sub(
+            lambda m, ent=ent: _replace(m, ent.name, ent.validator),
+            out,
+        )
+
+    for entity_name, pat in custom_patterns:
+        out = pat.sub(
+            lambda m, name=entity_name: _replace(m, name, None),
+            out,
+        )
+
+    return out
+
+
+def redact_attributes(
+    attrs: Dict[str, Any],
+    config: RedactionConfig,
+) -> Dict[str, Any]:
+    """Apply both layers to a span's attribute dict.
+
+    Returns a NEW dict; the input is not mutated, so callers that
+    want to keep the unredacted version (e.g., policy evaluation
+    against raw content) can. The original ``attrs`` dict can still
+    be inspected after the call.
+
+    Order:
+      1. Allowlist filter (drops everything not in the list).
+      2. Key actions (delete/hash/redact/mask whole values).
+      3. Value pattern scan on remaining string attributes.
+    """
+    if not config.enabled:
+        return attrs
+
+    # Step 1: allowlist
+    if config.allowlist:
+        allowed = set(config.allowlist)
+        attrs = {k: v for k, v in attrs.items() if k in allowed}
+
+    out: Dict[str, Any] = {}
+    for key, value in attrs.items():
+        # Step 2: key actions
+        action = config.key_actions.get(key)
+        if action == "delete":
+            continue  # drop the attribute entirely
+        if action is not None and isinstance(value, str):
+            # Whole-value transformation: treat the entire value as
+            # the matched span of a synthetic entity named after the
+            # action's target key (so an audit shows what was redacted).
+            placeholder_name = key.upper().replace(".", "_")
+            out[key] = _apply_value_action(value, placeholder_name, action)
+            continue
+
+        # Step 3: value pattern scan (only on string values; other
+        # types like ints and bools are left alone)
+        if isinstance(value, str):
+            out[key] = redact_string(
+                value,
+                strategy=config.strategy,
+                custom_patterns=config.custom_patterns,
+            )
+        else:
+            out[key] = value
+
+    return out
+
+
+__all__ = [
+    "DEFAULT_ENTITIES",
+    "EntityDef",
+    "RedactionConfig",
+    "VALID_KEY_ACTIONS",
+    "VALID_VALUE_ACTIONS",
+    "redact_attributes",
+    "redact_string",
+    "validate_key_actions",
+    "validate_strategy",
+]

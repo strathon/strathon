@@ -39,7 +39,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
 import policies as policy_mod
+import redaction as redaction_mod
 import repositories.policies as policies_repo
+import repositories.project_settings as project_settings_repo
 import repositories.traces as traces_repo
 import sampling
 import webhooks.dispatch as webhooks_dispatch
@@ -145,6 +147,26 @@ async def ingest_traces(
         logger.exception("failed to load policies for ingest; proceeding without policy eval")
         active_policies = []
 
+    # Load the project's PII redaction config once for the whole batch.
+    # Redaction is applied AFTER policy evaluation but BEFORE persistence
+    # and webhook payload assembly, so that:
+    #   * match expressions can reference unredacted content
+    #     ("contains @competitor.com" still fires)
+    #   * neither the spans table nor the webhook payload ever carries
+    #     the raw PII downstream
+    # A failure here logs and degrades to "no redaction" — same pattern
+    # as policies above: ingest is never blocked by config issues.
+    try:
+        redaction_config = await project_settings_repo.load_redaction_config(
+            session, project_id,
+        )
+    except Exception:
+        logger.exception(
+            "failed to load redaction config for project %s; proceeding without redaction",
+            project_id,
+        )
+        redaction_config = redaction_mod.RedactionConfig.disabled()
+
     # Collected (policy, trace_id, span_id, outcome) tuples for audit logging
     # after the main insert transaction commits. Webhooks fire after as well.
     matches_to_record: list[dict[str, Any]] = []
@@ -206,6 +228,20 @@ async def ingest_traces(
                                 "policy_name": p["name"],
                             },
                         })
+
+                # ---- PII redaction (P1) ----
+                # Runs after policy evaluation so match_expressions see
+                # the raw content, but before webhook payload assembly
+                # and span persistence so neither downstream consumer
+                # ever sees the original PII. The function returns a
+                # NEW dict; the original merged_attrs is preserved here
+                # in case later code in the loop wants it.
+                persisted_attrs = redaction_mod.redact_attributes(
+                    merged_attrs, redaction_config,
+                )
+
+                if matched_policies:
+                    for p in matched_policies:
                         if p["action"] == "alert":
                             webhook_url = (p.get("action_config") or {}).get("webhook_url")
                             if webhook_url:
@@ -215,7 +251,7 @@ async def ingest_traces(
                                     "span_name": span.name,
                                     "trace_id": trace_id.hex(),
                                     "span_id": span_id.hex(),
-                                    "attrs": merged_attrs,
+                                    "attrs": persisted_attrs,
                                 }, p["id"]))
 
                 # ---- Sampling decision ----
@@ -299,7 +335,7 @@ async def ingest_traces(
                     conversation_id=conversation_id,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
-                    attributes=merged_attrs,
+                    attributes=persisted_attrs,
                 )
                 span_count += 1
 

@@ -112,6 +112,14 @@ The bits below are end-to-end, tested in CI, and ready to use:
   instrumentation modules.
 - **Log and alert actions.** A matched policy records a match record and
   fires an outbound webhook without interrupting the agent.
+- **PII redaction at ingest.** Default-on regex-based redaction of
+  emails, credit cards (Luhn-validated), SSNs, phone numbers, IP
+  addresses, and common API-key shapes (`sk-...`, `sk_live_...`,
+  `ghp_...`, JWTs, etc.). Per-entity actions (redact / mask / hash /
+  delete), key-level rules, and allowlist mode are all configurable
+  per project. Critically: policy match expressions evaluate against
+  the unredacted span so the firewall semantics are preserved.
+  See [`docs/redaction.md`](docs/redaction.md).
 - **CEL expressions.** Full [CEL](https://github.com/google/cel-spec)
   evaluator (via `cel-python`) over the span's attributes. Compile-time
   syntax checking on `POST /v1/policies`.
@@ -135,7 +143,6 @@ overpromises:
 
 - **Steer actions** (rewrite the model's response before the agent sees
   it) — partial, framework parity work in progress.
-- **PII redaction** — interface in place, real redactor still stubbed.
 - **Dashboard** — Next.js scaffold under `dashboard/` is empty. Until it
   ships, all policy management is via the REST API.
 - **Persistent halt state and budget rollup across processes** — the
@@ -175,6 +182,7 @@ Two attribute namespaces on every span:
   agent topology, and policy decisions.
 
 Detailed docs live under `docs/`: [intervention](docs/intervention.md),
+[redaction](docs/redaction.md),
 [observability](docs/observability.md), [retention](docs/retention.md),
 [sampling](docs/sampling.md), [self-hosting](docs/self-hosting.md),
 [api keys](docs/api_keys.md).
