@@ -48,8 +48,11 @@ Once you see it, the receiver is ready for traffic.
 ## Verifying
 
 ```bash
-# Health check
+# Liveness probe (lightweight; "is the process up?")
 curl http://localhost:4318/health
+
+# Readiness probe (deep dependency check; "should traffic be routed here?")
+curl http://localhost:4318/ready
 
 # Authenticated request
 curl -H "Authorization: Bearer stra_dev_local_default_project_do_not_use_in_production" \
@@ -58,6 +61,25 @@ curl -H "Authorization: Bearer stra_dev_local_default_project_do_not_use_in_prod
 # Prometheus metrics
 curl http://localhost:4318/metrics
 ```
+
+A healthy `/ready` response looks like:
+
+```json
+{
+  "status": "ready",
+  "checks": {
+    "db": {"status": "ok", "latency_ms": 1.21},
+    "migrations": {"status": "ok", "current": "007", "head": "007"},
+    "retention_task": {"status": "ok"},
+    "webhook_sweeper_task": {"status": "ok"},
+    "budget_monitor_task": {"status": "ok"}
+  }
+}
+```
+
+A failing check flips `status` to `"not_ready"`, the HTTP status to `503`,
+and adds a short `reason` field to the failed check. See the
+[health probes](#health-probes) section below for the Kubernetes wiring.
 
 Or run one of the framework demos:
 
@@ -165,7 +187,65 @@ For real deployments, change at minimum:
 A production deploy recipe (Fly.io / Render / managed Postgres) ships in
 a later release.
 
-### Connection pooling caveat
+### Health probes
+
+The receiver exposes two probe endpoints with distinct semantics, matching
+the Kubernetes liveness/readiness convention:
+
+- **`/health`** — Liveness probe. Returns `200 {"status": "ok", ...}` as
+  long as the event loop is responsive. Does not touch the database or
+  any background task. Use this when you want "restart the pod if the
+  process is wedged."
+- **`/ready`** — Readiness probe. Returns `200` with a per-check
+  breakdown when every dependency is healthy, `503` with the same
+  shape when any check fails. Checks: database connectivity, schema
+  migration version (compared to the code's expected head), and the
+  three background tasks (retention sweep, webhook sweeper, budget
+  monitor). Use this when you want "stop routing traffic to this
+  replica until it recovers."
+
+Keeping liveness lightweight matters: a deep check on the liveness
+endpoint would cause Kubernetes to kill an otherwise-healthy pod the
+moment a downstream dependency hiccups, replacing a routing problem
+with an availability problem.
+
+Both endpoints are unauthenticated by design — Prometheus scrapers and
+Kubernetes probes commonly run without credentials. Restrict them at
+the network layer (ACL or reverse proxy) if your environment requires
+it.
+
+Example Kubernetes pod spec:
+
+```yaml
+spec:
+  containers:
+  - name: receiver
+    image: strathon/receiver:latest
+    ports:
+    - containerPort: 4318
+
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: 4318
+      periodSeconds: 10
+      failureThreshold: 3
+      timeoutSeconds: 1
+
+    readinessProbe:
+      httpGet:
+        path: /ready
+        port: 4318
+      periodSeconds: 5
+      failureThreshold: 3
+      timeoutSeconds: 2
+```
+
+The receiver's readiness checks are individually bounded under 500ms,
+so a 2-second probe timeout has comfortable headroom even when the
+database is briefly slow.
+
+
 
 If you put PgBouncer (or another connection pooler) between the receiver
 and Postgres, **run it in session pooling mode**, not transaction pooling.
