@@ -86,6 +86,12 @@ SCOPE_WEBHOOK_SIGNING_KEYS_WRITE = "webhook_signing_keys:write"
 # consumer.
 SCOPE_WEBHOOK_DELIVERIES_READ = "webhook_deliveries:read"
 SCOPE_WEBHOOK_DELIVERIES_WRITE = "webhook_deliveries:write"
+# Halt management. :read covers operator inspection plus the
+# /v1/intervention/sync endpoint that the SDK polls. :write covers
+# creating and clearing halts (the operator-facing actions). The SDK
+# only needs :read; humans creating kill-switches need :write.
+SCOPE_HALTS_READ = "halts:read"
+SCOPE_HALTS_WRITE = "halts:write"
 
 KNOWN_SCOPES: frozenset[str] = frozenset({
     SCOPE_WILDCARD,
@@ -98,6 +104,8 @@ KNOWN_SCOPES: frozenset[str] = frozenset({
     SCOPE_WEBHOOK_SIGNING_KEYS_WRITE,
     SCOPE_WEBHOOK_DELIVERIES_READ,
     SCOPE_WEBHOOK_DELIVERIES_WRITE,
+    SCOPE_HALTS_READ,
+    SCOPE_HALTS_WRITE,
 })
 
 # Default scopes for a new SDK-style key. Enough to ingest traces and to

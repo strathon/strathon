@@ -392,7 +392,7 @@ app = FastAPI(
 # Mount routers. Import here (after `app` exists) so router modules can
 # stay decoupled from main.py and not see import-order issues.
 from api import (  # noqa: E402
-    api_keys, health, intervention, policies, traces,
+    api_keys, halts, health, intervention, policies, traces,
     webhook_deliveries, webhook_signing_keys,
 )
 
@@ -401,6 +401,7 @@ app.include_router(traces.router)
 app.include_router(policies.router)
 app.include_router(api_keys.router)
 app.include_router(intervention.router)
+app.include_router(halts.router)
 app.include_router(webhook_signing_keys.router)
 app.include_router(webhook_deliveries.router)
 
