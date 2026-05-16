@@ -124,6 +124,48 @@ class StrathonMetrics:
             registry=self.registry,
         )
 
+        # ---- Webhook delivery (C3) ----
+        # Counted at the actor on every send classification. The
+        # outcome label is the row's final status for that attempt:
+        # succeeded | abandoned | failed_retrying | dlq.
+        self.webhook_sends = Counter(
+            "strathon_receiver_webhook_sends_total",
+            "Webhook delivery attempts that ran (one increment per actor "
+            "invocation that issued an HTTP request).",
+            ["outcome"],
+            registry=self.registry,
+        )
+        # The dispatch counter mirrors enqueue_delivery() — counts the
+        # number of webhook_deliveries rows we've inserted, regardless
+        # of whether they later succeeded.
+        self.webhook_dispatched = Counter(
+            "strathon_receiver_webhook_dispatched_total",
+            "Webhook delivery rows enqueued via enqueue_delivery()",
+            registry=self.registry,
+        )
+        # DLQ landings — useful as an alerting target.
+        self.webhook_dlq = Counter(
+            "strathon_receiver_webhook_dlq_total",
+            "Webhook deliveries that exhausted retries and landed in DLQ",
+            registry=self.registry,
+        )
+        # Sweeper tick counters.
+        self.webhook_sweeper_runs = Counter(
+            "strathon_receiver_webhook_sweeper_runs_total",
+            "Webhook sweeper ticks completed (excluding errors)",
+            registry=self.registry,
+        )
+        self.webhook_sweeper_reclaimed = Counter(
+            "strathon_receiver_webhook_sweeper_reclaimed_total",
+            "Orphan pending delivery rows re-dispatched by the sweeper",
+            registry=self.registry,
+        )
+        self.webhook_sweeper_errors = Counter(
+            "strathon_receiver_webhook_sweeper_errors_total",
+            "Sweeper ticks that raised an exception",
+            registry=self.registry,
+        )
+
         # Internal tracking — Prometheus Counters only support .inc(),
         # so we mirror the SamplingCounters delta-by-delta each scrape.
         self._lock = threading.Lock()
@@ -181,9 +223,42 @@ def render_metrics(metrics: StrathonMetrics) -> tuple[bytes, str]:
     return body, CONTENT_TYPE_LATEST
 
 
+# ---- Global accessor for non-request-scoped code ------------------------
+#
+# The Dramatiq actor runs in a worker that doesn't see the FastAPI app
+# instance. The sweeper loop runs as a background task and could pass
+# the metrics object explicitly, but the actor cannot. We expose a
+# module-level singleton accessor: main.py's lifespan calls
+# ``set_global_metrics`` after creating the StrathonMetrics; the actor
+# calls ``get_global_metrics`` and emits to it.
+#
+# Returns None if no instance has been set (importable for tests, used
+# guarded — the actor's branch is "if metrics: metrics.x.inc()").
+
+_global_metrics: StrathonMetrics | None = None
+
+
+def set_global_metrics(metrics: StrathonMetrics) -> None:
+    global _global_metrics
+    _global_metrics = metrics
+
+
+def get_global_metrics() -> StrathonMetrics | None:
+    return _global_metrics
+
+
+def reset_global_metrics_for_testing() -> None:
+    """Tests use this to clear the singleton between cases."""
+    global _global_metrics
+    _global_metrics = None
+
+
 __all__ = [
     "RetentionCounters",
     "StrathonMetrics",
+    "get_global_metrics",
     "render_metrics",
+    "reset_global_metrics_for_testing",
+    "set_global_metrics",
     "sync_sampling_counters",
 ]

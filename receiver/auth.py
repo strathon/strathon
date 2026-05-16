@@ -79,6 +79,13 @@ SCOPE_API_KEYS_WRITE = "api_keys:write"
 # audit which keys exist without seeing any secret material.
 SCOPE_WEBHOOK_SIGNING_KEYS_READ = "webhook_signing_keys:read"
 SCOPE_WEBHOOK_SIGNING_KEYS_WRITE = "webhook_signing_keys:write"
+# Webhook delivery inspection + replay (commit C3). The :read scope is
+# enough to list and inspect deliveries (operator visibility). The
+# :write scope is needed for the replay action which re-enqueues a
+# previously-failed delivery and produces a fresh side-effect at the
+# consumer.
+SCOPE_WEBHOOK_DELIVERIES_READ = "webhook_deliveries:read"
+SCOPE_WEBHOOK_DELIVERIES_WRITE = "webhook_deliveries:write"
 
 KNOWN_SCOPES: frozenset[str] = frozenset({
     SCOPE_WILDCARD,
@@ -89,6 +96,8 @@ KNOWN_SCOPES: frozenset[str] = frozenset({
     SCOPE_API_KEYS_WRITE,
     SCOPE_WEBHOOK_SIGNING_KEYS_READ,
     SCOPE_WEBHOOK_SIGNING_KEYS_WRITE,
+    SCOPE_WEBHOOK_DELIVERIES_READ,
+    SCOPE_WEBHOOK_DELIVERIES_WRITE,
 })
 
 # Default scopes for a new SDK-style key. Enough to ingest traces and to

@@ -292,6 +292,10 @@ async def lifespan(app: FastAPI):
     # Prometheus metrics container — exposed at /metrics
     app.state.metrics = metrics_mod.StrathonMetrics()
     app.state.metrics.sampling_rate.set(app.state.sampling_config.sample_rate)
+    # Publish the metrics object as a module-level singleton so the
+    # Dramatiq actor (which runs outside the FastAPI request cycle and
+    # has no access to app.state) can emit webhook send/dlq counters.
+    metrics_mod.set_global_metrics(app.state.metrics)
 
     # Retention background task
     app.state.retention_config = retention.RetentionConfig.from_env()
@@ -304,6 +308,26 @@ async def lifespan(app: FastAPI):
             metrics_counters=retention_counters,
         ),
         name="strathon.retention",
+    )
+
+    # Webhook sweeper background task. Periodically scans for `pending`
+    # delivery rows whose Dramatiq message never landed (Redis blip
+    # during dispatch, receiver crash between insert and send, etc.)
+    # and re-dispatches them. Without this, the architecture's promise
+    # of "durability survives queue outages" is just a comment.
+    from webhooks.sweeper import SweeperConfig, SweeperMetrics, sweeper_loop
+    from database import async_session_maker
+    app.state.webhook_sweeper_config = SweeperConfig.from_env()
+    app.state.webhook_sweeper_shutdown = asyncio.Event()
+    sweeper_metrics = SweeperMetrics(app.state.metrics)
+    app.state.webhook_sweeper_task = asyncio.create_task(
+        sweeper_loop(
+            app.state.webhook_sweeper_config,
+            app.state.webhook_sweeper_shutdown,
+            session_maker=async_session_maker,
+            metrics=sweeper_metrics,
+        ),
+        name="strathon.webhook_sweeper",
     )
 
     # Restore the in-memory webhook signing-key cache from operator-supplied
@@ -337,6 +361,22 @@ async def lifespan(app: FastAPI):
         except (asyncio.CancelledError, Exception):
             pass
 
+    # Stop the webhook sweeper loop cleanly
+    app.state.webhook_sweeper_shutdown.set()
+    try:
+        await asyncio.wait_for(app.state.webhook_sweeper_task, timeout=10)
+    except asyncio.TimeoutError:
+        logger.warning("webhook sweeper did not stop in 10s; cancelling")
+        app.state.webhook_sweeper_task.cancel()
+        try:
+            await app.state.webhook_sweeper_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    # Clear the metrics singleton so a subsequent import doesn't see
+    # state from a previous lifespan.
+    metrics_mod.reset_global_metrics_for_testing()
+
     # Close the SQLAlchemy engine pool.
     from database import dispose_engine
     await dispose_engine()
@@ -352,7 +392,8 @@ app = FastAPI(
 # Mount routers. Import here (after `app` exists) so router modules can
 # stay decoupled from main.py and not see import-order issues.
 from api import (  # noqa: E402
-    api_keys, health, intervention, policies, traces, webhook_signing_keys,
+    api_keys, health, intervention, policies, traces,
+    webhook_deliveries, webhook_signing_keys,
 )
 
 app.include_router(health.router)
@@ -361,6 +402,7 @@ app.include_router(policies.router)
 app.include_router(api_keys.router)
 app.include_router(intervention.router)
 app.include_router(webhook_signing_keys.router)
+app.include_router(webhook_deliveries.router)
 
 
 @app.exception_handler(Exception)

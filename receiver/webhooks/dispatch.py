@@ -105,6 +105,17 @@ async def enqueue_delivery(
     await session.flush()
     delivery_id_str = str(delivery.id)
 
+    # Emit dispatched metric — counted at row insert regardless of
+    # whether the delivery later succeeds. Best-effort: a metrics
+    # failure must never break the dispatch.
+    try:
+        from metrics import get_global_metrics
+        m = get_global_metrics()
+        if m is not None:
+            m.webhook_dispatched.inc()
+    except Exception:  # pragma: no cover
+        pass
+
     # SQLAlchemy's session event API does not have an async after_commit;
     # the after_commit hook fires on the underlying sync session via the
     # async session's sync_session attribute. The listener cannot remove

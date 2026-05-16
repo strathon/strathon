@@ -164,6 +164,21 @@ async def _send_one(
     )
     await session.commit()
 
+    # Emit metrics. The actor runs in a Dramatiq worker, not under a
+    # FastAPI request — so we go through the module-level singleton in
+    # metrics.py rather than app.state. Branch-on-None because the
+    # singleton is unset in some test contexts (and we'd rather skip
+    # emission than crash a delivery).
+    try:
+        from metrics import get_global_metrics
+        m = get_global_metrics()
+        if m is not None:
+            m.webhook_sends.labels(outcome=new_status).inc()
+            if new_status == "dlq":
+                m.webhook_dlq.inc()
+    except Exception:  # pragma: no cover - emission must never break delivery
+        pass
+
     # For retriable outcomes that aren't yet at dlq, raise so Dramatiq's
     # Retries middleware schedules a retry with backoff. The middleware
     # owns the delay calculation; we just signal "try again."
