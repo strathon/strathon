@@ -72,13 +72,16 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import insert, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import repositories.budgets as budgets_repo
 from models.intervention import Budget, HaltState
+
+if TYPE_CHECKING:
+    from metrics import StrathonMetrics
 
 logger = logging.getLogger("strathon.receiver.budget_monitor")
 
@@ -120,11 +123,16 @@ async def evaluate_one_budget(
     budget: budgets_repo.BudgetRow,
     *,
     now: datetime,
+    metrics: Optional["StrathonMetrics"] = None,
 ) -> None:
     """Evaluate one budget and synchronize halt state.
 
     Caller is responsible for committing. We use one transaction per
     budget so a malformed budget doesn't take down the whole tick.
+
+    ``metrics`` is optional so unit tests can call this function without
+    threading a metrics fixture through; production always passes the
+    receiver's StrathonMetrics instance.
     """
     project_id = budget.project_id
     budget_id = budget.id
@@ -248,6 +256,11 @@ async def evaluate_one_budget(
             "Budget %s over threshold; created halt (reason=%s)",
             budget_id, reason,
         )
+        if metrics is not None:
+            metrics.budget_violations.labels(kind=reason_kind).inc()
+            metrics.halts_created.labels(
+                scope="project", actor="budget_monitor",
+            ).inc()
 
     elif not over_threshold and existing_halt is not None:
         # Budget under threshold again; clear our halt.
@@ -260,6 +273,10 @@ async def evaluate_one_budget(
             "Budget %s back under threshold; cleared halt %d",
             budget_id, existing_halt.id,
         )
+        if metrics is not None:
+            metrics.halts_cleared.labels(
+                actor="budget_monitor", reason="under_threshold",
+            ).inc()
 
     # ---- Step 4: bookkeeping ----
     update_kwargs: dict = {"last_evaluated_at": now}
@@ -279,6 +296,7 @@ async def evaluate_one_budget(
 async def run_one_tick(
     session_maker: async_sessionmaker,
     config: MonitorConfig,
+    metrics: Optional["StrathonMetrics"] = None,
 ) -> int:
     """One full pass over active budgets.
 
@@ -294,6 +312,8 @@ async def run_one_tick(
         )
         if not lock_acquired:
             # Another replica is running this tick
+            if metrics is not None:
+                metrics.budget_monitor_ticks.labels(outcome="skipped_no_lock").inc()
             return 0
 
         try:
@@ -307,13 +327,21 @@ async def run_one_tick(
             for budget in budgets:
                 try:
                     async with session_maker() as session:
-                        await evaluate_one_budget(session, budget, now=now)
+                        await evaluate_one_budget(
+                            session, budget, now=now, metrics=metrics,
+                        )
                         await session.commit()
                     count += 1
+                    if metrics is not None:
+                        metrics.budget_evaluations.inc()
                 except Exception:
                     logger.exception(
                         "Failed to evaluate budget %s; skipping", budget.id,
                     )
+                    if metrics is not None:
+                        metrics.budget_evaluation_errors.inc()
+            if metrics is not None:
+                metrics.budget_monitor_ticks.labels(outcome="ran").inc()
             return count
         finally:
             await lock_session.execute(
@@ -325,6 +353,7 @@ async def monitor_loop(
     config: MonitorConfig,
     shutdown: asyncio.Event,
     session_maker: async_sessionmaker,
+    metrics: Optional["StrathonMetrics"] = None,
 ) -> None:
     """Top-level loop. Runs until shutdown is set."""
     logger.info(
@@ -333,13 +362,15 @@ async def monitor_loop(
     )
     while not shutdown.is_set():
         try:
-            evaluated = await run_one_tick(session_maker, config)
+            evaluated = await run_one_tick(session_maker, config, metrics=metrics)
             if evaluated > 0:
                 logger.debug("Budget monitor: evaluated %d budgets", evaluated)
         except Exception:
             # A bug in the monitor must NEVER take the receiver down.
             # Log and keep ticking; the next tick gets a clean shot.
             logger.exception("Budget monitor tick failed; continuing")
+            if metrics is not None:
+                metrics.budget_monitor_tick_errors.inc()
 
         try:
             await asyncio.wait_for(

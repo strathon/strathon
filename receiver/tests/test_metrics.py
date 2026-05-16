@@ -31,6 +31,25 @@ def test_strathon_metrics_has_all_expected_collectors():
         "strathon_receiver_policy_matches_total",
         "strathon_receiver_auth_failures_total",
         "strathon_receiver_auth_successes_total",
+        # Webhook delivery
+        "strathon_receiver_webhook_sends_total",
+        "strathon_receiver_webhook_dispatched_total",
+        "strathon_receiver_webhook_dlq_total",
+        "strathon_receiver_webhook_sweeper_runs_total",
+        "strathon_receiver_webhook_sweeper_reclaimed_total",
+        "strathon_receiver_webhook_sweeper_errors_total",
+        # Halts (operator + budget-monitor created)
+        "strathon_receiver_halts_created_total",
+        "strathon_receiver_halts_cleared_total",
+        # Budget monitor
+        "strathon_receiver_budget_monitor_ticks_total",
+        "strathon_receiver_budget_monitor_tick_errors_total",
+        "strathon_receiver_budget_evaluations_total",
+        "strathon_receiver_budget_evaluation_errors_total",
+        "strathon_receiver_budget_violations_total",
+        # Cost tracking
+        "strathon_receiver_cost_tracked_usd_total",
+        "strathon_receiver_cost_spans_with_unknown_model_total",
     ]
     for name in expected_metrics:
         assert name in text, f"metric {name} missing from /metrics body"

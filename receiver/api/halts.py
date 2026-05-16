@@ -81,6 +81,9 @@ async def create_halt(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    request.app.state.metrics.halts_created.labels(
+        scope=body.scope, actor="user",
+    ).inc()
     return {"halt": halt.to_json()}
 
 
@@ -152,6 +155,9 @@ async def delete_halt(
 
     if halt is None:
         raise HTTPException(status_code=404, detail="halt not found")
+    request.app.state.metrics.halts_cleared.labels(
+        actor="user", reason="operator_request",
+    ).inc()
     return {"halt": halt.to_json()}
 
 

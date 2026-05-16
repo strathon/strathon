@@ -61,6 +61,30 @@ All metrics live in the `strathon_receiver_` namespace.
 | `strathon_receiver_auth_failures_total`      | counter | Requests rejected with 401.                |
 | `strathon_receiver_auth_successes_total`     | counter | Successful API key authentications.        |
 
+#### Halts
+
+| Metric                                     | Labels                | Description                                                                 |
+|--------------------------------------------|-----------------------|-----------------------------------------------------------------------------|
+| `strathon_receiver_halts_created_total`    | `scope`, `actor`      | Halts created. `scope` is `project` or `agent`; `actor` is `user` (REST API) or `budget_monitor` (auto-created on budget breach). |
+| `strathon_receiver_halts_cleared_total`    | `actor`, `reason`     | Halts cleared. `actor`/`reason` distinguishes operator clears (`user`/`operator_request`) from budget self-clears (`budget_monitor`/`under_threshold`). |
+
+#### Budget monitor
+
+| Metric                                                       | Labels      | Description                                                                                       |
+|--------------------------------------------------------------|-------------|---------------------------------------------------------------------------------------------------|
+| `strathon_receiver_budget_monitor_ticks_total`               | `outcome`   | Monitor ticks. `outcome=ran` means this replica held the advisory lock; `outcome=skipped_no_lock` means another replica did. |
+| `strathon_receiver_budget_monitor_tick_errors_total`         | (none)      | Ticks that raised before completing. The loop swallows and continues.                             |
+| `strathon_receiver_budget_evaluations_total`                 | (none)      | Individual budgets evaluated successfully (across all ticks).                                     |
+| `strathon_receiver_budget_evaluation_errors_total`           | (none)      | Per-budget evaluations that raised. The tick continues with remaining budgets.                    |
+| `strathon_receiver_budget_violations_total`                  | `kind`      | New violations that produced a halt. `kind=cost` or `kind=iteration`. Pairs with a `halts_created{actor="budget_monitor"}` increment. |
+
+#### Cost tracking
+
+| Metric                                                         | Labels    | Description                                                                                       |
+|----------------------------------------------------------------|-----------|---------------------------------------------------------------------------------------------------|
+| `strathon_receiver_cost_tracked_usd_total`                     | `model`   | Cumulative USD cost tracked at ingest, by model. Float counter incremented by per-span cost. `rate()` gives \$/second. |
+| `strathon_receiver_cost_spans_with_unknown_model_total`        | (none)    | LLM spans (had a model name and non-zero tokens) whose model wasn't in the catalog or overrides. A non-zero rate here means cost dashboards are under-counting. |
+
 ### Useful PromQL queries
 
 ```promql
@@ -77,6 +101,22 @@ sum by (action) (rate(strathon_receiver_policy_matches_total[5m]))
 
 # Auth failure rate (alert candidate)
 rate(strathon_receiver_auth_failures_total[5m])
+
+# Top 5 models by spend over the last hour
+topk(5, rate(strathon_receiver_cost_tracked_usd_total[1h]))
+
+# Total $/second across all models
+sum(rate(strathon_receiver_cost_tracked_usd_total[5m]))
+
+# Budget violations per hour, split by cost vs iteration
+sum by (kind) (rate(strathon_receiver_budget_violations_total[1h]))
+
+# Multi-replica lock health: ratio of replicas idling on the lock
+rate(strathon_receiver_budget_monitor_ticks_total{outcome="skipped_no_lock"}[5m])
+  / rate(strathon_receiver_budget_monitor_ticks_total[5m])
+
+# Alert if cost visibility is degrading
+rate(strathon_receiver_cost_spans_with_unknown_model_total[5m]) > 0
 ```
 
 ## Structured logging

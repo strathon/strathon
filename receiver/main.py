@@ -347,6 +347,7 @@ async def lifespan(app: FastAPI):
             app.state.budget_monitor_config,
             app.state.budget_monitor_shutdown,
             session_maker=async_session_maker,
+            metrics=app.state.metrics,
         ),
         name="strathon.budget_monitor",
     )

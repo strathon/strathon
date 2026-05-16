@@ -166,6 +166,90 @@ class StrathonMetrics:
             registry=self.registry,
         )
 
+        # ---- Halts (operator and budget-monitor created) ----
+        # scope: project | agent. actor: user | budget_monitor.
+        # A new time series per (scope, actor) pair gives the four
+        # combinations operators actually care about distinguishing.
+        self.halts_created = Counter(
+            "strathon_receiver_halts_created_total",
+            "Halts created, by scope and actor",
+            ["scope", "actor"],
+            registry=self.registry,
+        )
+        # actor: user | budget_monitor.
+        # reason: operator_request | under_threshold.
+        # Lets operators tell apart "operator cleared a halt" from
+        # "budget came back under threshold and the monitor cleared its
+        # own halt."
+        self.halts_cleared = Counter(
+            "strathon_receiver_halts_cleared_total",
+            "Halts cleared, by actor and reason",
+            ["actor", "reason"],
+            registry=self.registry,
+        )
+
+        # ---- Budget monitor ----
+        # outcome: ran | skipped_no_lock. The skipped variant fires on
+        # replicas that lost the advisory lock to another replica this
+        # tick. A healthy multi-replica deploy shows one replica
+        # incrementing "ran" while the others increment "skipped_no_lock".
+        self.budget_monitor_ticks = Counter(
+            "strathon_receiver_budget_monitor_ticks_total",
+            "Budget monitor ticks, by outcome",
+            ["outcome"],
+            registry=self.registry,
+        )
+        self.budget_monitor_tick_errors = Counter(
+            "strathon_receiver_budget_monitor_tick_errors_total",
+            "Budget monitor ticks that raised an exception",
+            registry=self.registry,
+        )
+        self.budget_evaluations = Counter(
+            "strathon_receiver_budget_evaluations_total",
+            "Individual budgets evaluated successfully across all ticks",
+            registry=self.registry,
+        )
+        self.budget_evaluation_errors = Counter(
+            "strathon_receiver_budget_evaluation_errors_total",
+            "Per-budget evaluations that raised an exception (the tick "
+            "continues; one bad budget doesn't poison the others)",
+            registry=self.registry,
+        )
+        # kind: cost | iteration. Increments only on a NEW violation
+        # (over threshold and no existing halt from this budget yet),
+        # not on every tick a halted budget is re-evaluated. Pairs with
+        # halts_created{actor="budget_monitor"} which fires on the same
+        # transition.
+        self.budget_violations = Counter(
+            "strathon_receiver_budget_violations_total",
+            "Budgets that crossed threshold and produced a new halt, by kind",
+            ["kind"],
+            registry=self.registry,
+        )
+
+        # ---- Cost tracking (LLM span ingest) ----
+        # The Counter is incremented by the per-span USD cost as a
+        # float. rate() over this counter gives $/second; sum() across
+        # all label series gives lifetime spend. The model label is
+        # bounded by the catalog (~20 models) plus per-project
+        # overrides, so cardinality stays in the dozens for typical
+        # deployments.
+        self.cost_tracked_usd = Counter(
+            "strathon_receiver_cost_tracked_usd_total",
+            "Cumulative USD cost tracked for ingested LLM spans, by model",
+            ["model"],
+            registry=self.registry,
+        )
+        # Counts LLM spans (had a model name and at least one token
+        # count) where the catalog lookup returned no price. A non-zero
+        # rate here means operators are losing cost visibility for some
+        # of their traffic and should add a per-project override.
+        self.cost_spans_with_unknown_model = Counter(
+            "strathon_receiver_cost_spans_with_unknown_model_total",
+            "LLM spans whose model isn't in the pricing catalog or overrides",
+            registry=self.registry,
+        )
+
         # Internal tracking — Prometheus Counters only support .inc(),
         # so we mirror the SamplingCounters delta-by-delta each scrape.
         self._lock = threading.Lock()

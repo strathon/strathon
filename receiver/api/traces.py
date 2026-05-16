@@ -345,6 +345,30 @@ async def ingest_traces(
                         overrides=pricing_overrides,
                     )
 
+                # Cost telemetry. Two metrics, both feed an operator
+                # dashboard answer to "what am I actually being charged
+                # for, and where am I blind?":
+                #
+                #   * cost_tracked_usd_total{model} accumulates the per-
+                #     span dollar cost. rate() gives $/s per model;
+                #     sum() across model labels gives lifetime spend.
+                #   * cost_spans_with_unknown_model_total counts spans
+                #     that looked like LLM calls (had a model name and
+                #     non-zero tokens) but had no matching catalog
+                #     entry. A non-zero rate means cost dashboards are
+                #     under-counting and the operator should add a
+                #     per-project price override.
+                if cost_usd is not None and cost_usd > 0 and request_model:
+                    state.metrics.cost_tracked_usd.labels(
+                        model=request_model,
+                    ).inc(float(cost_usd))
+                elif (
+                    cost_usd is None
+                    and request_model
+                    and ((input_tokens or 0) > 0 or (output_tokens or 0) > 0)
+                ):
+                    state.metrics.cost_spans_with_unknown_model.inc()
+
                 # Upsert trace row before inserting the span (FK requirement).
                 # Idempotent at the trace level — only the first span in a
                 # trace actually inserts.
