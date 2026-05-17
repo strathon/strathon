@@ -239,3 +239,81 @@ def _serialize_span(row: dict[str, Any]) -> dict[str, Any]:
         "cost_usd": str(row["cost_usd"]) if row.get("cost_usd") else None,
         "intervention_state": row.get("intervention_state"),
     }
+
+
+# ---- Trace list --------------------------------------------------------------
+
+
+async def list_traces(
+    session: AsyncSession,
+    project_id: UUID,
+    *,
+    limit: int = 50,
+    cursor: Optional[str] = None,
+    start_after: Optional[int] = None,
+    start_before: Optional[int] = None,
+    agent_name: Optional[str] = None,
+    intervention_state: Optional[str] = None,
+) -> dict[str, Any]:
+    """List traces for a project, newest first.
+
+    Returns a page of traces plus next_cursor for pagination.
+    """
+    import base64
+    import json
+
+    limit = max(1, min(limit, 1000))
+    params: dict[str, Any] = {"pid": project_id, "limit": limit + 1}
+    clauses = ["project_id = :pid"]
+
+    if start_after is not None:
+        clauses.append("start_time_unix_nano >= :start_after")
+        params["start_after"] = start_after
+    if start_before is not None:
+        clauses.append("start_time_unix_nano <= :start_before")
+        params["start_before"] = start_before
+    if agent_name is not None:
+        clauses.append("agent_name = :agent_name")
+        params["agent_name"] = agent_name
+    if intervention_state is not None:
+        clauses.append("intervention_state = :intervention_state")
+        params["intervention_state"] = intervention_state
+
+    if cursor:
+        try:
+            raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
+            obj = json.loads(raw)
+            clauses.append(
+                "(start_time_unix_nano, id) < (:cur_time, :cur_id)"
+            )
+            params["cur_time"] = int(obj["t"])
+            params["cur_id"] = bytes.fromhex(obj["id"])
+        except Exception as exc:
+            raise ValueError(f"invalid cursor: {exc}") from exc
+
+    where = " AND ".join(clauses)
+    result = await session.execute(text(
+        f"SELECT * FROM traces WHERE {where} "
+        f"ORDER BY start_time_unix_nano DESC, id DESC "
+        f"LIMIT :limit"
+    ), params)
+    rows = [dict(r) for r in result.mappings().all()]
+
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    next_cursor = None
+    if has_more and page:
+        last = page[-1]
+        payload = json.dumps({
+            "t": last["start_time_unix_nano"],
+            "id": bytes(last["id"]).hex(),
+        }, separators=(",", ":"))
+        next_cursor = (
+            base64.urlsafe_b64encode(payload.encode())
+            .decode().rstrip("=")
+        )
+
+    return {
+        "data": [_serialize_trace(r) for r in page],
+        "next_cursor": next_cursor,
+    }

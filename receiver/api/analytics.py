@@ -120,3 +120,42 @@ async def trace_tree_endpoint(
             detail=f"trace {trace_id} not found",
         )
     return tree
+
+
+@router.get("/v1/traces")
+async def list_traces_endpoint(
+    start_after: Optional[str] = Query(default=None),
+    start_before: Optional[str] = Query(default=None),
+    agent_name: Optional[str] = Query(default=None),
+    intervention_state: Optional[str] = Query(default=None),
+    cursor: Optional[str] = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=1000),
+    ctx: auth_mod.ApiKeyContext = Depends(
+        require_scope(auth_mod.SCOPE_TRACES_READ)
+    ),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """List traces for the caller's project, newest first.
+
+    Supports time range, agent name, and intervention state filters.
+    Keyset cursor pagination.
+    """
+    start_ns = _parse_timestamp(start_after, "start_after")
+    end_ns = _parse_timestamp(start_before, "start_before")
+
+    try:
+        return await analytics_repo.list_traces(
+            session,
+            ctx.project_id,
+            limit=limit,
+            cursor=cursor,
+            start_after=start_ns,
+            start_before=end_ns,
+            agent_name=agent_name,
+            intervention_state=intervention_state,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc

@@ -275,3 +275,94 @@ def test_trace_tree_invalid_hex(client):
         headers={"Authorization": f"Bearer {key}"},
     )
     assert resp.status_code == 404
+
+
+# --- Trace list tests ---------------------------------------------------------
+
+
+def test_trace_list_requires_traces_read(client):
+    key = _mint(client, f"tl-{uuid.uuid4().hex[:6]}", ["policies:read"])
+    resp = client.get(
+        "/v1/traces",
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert resp.status_code == 403
+
+
+def test_trace_list_returns_data(client, db_url, default_project_id):
+    key = _mint(client, f"tl-{uuid.uuid4().hex[:6]}", ["traces:read"])
+    spans = _insert_spans(db_url, default_project_id, [
+        {"agent_name": "bot-list"},
+    ])
+    try:
+        resp = client.get(
+            "/v1/traces",
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "data" in body
+        assert isinstance(body["data"], list)
+        if body["data"]:
+            t = body["data"][0]
+            assert "trace_id" in t
+            assert "project_id" in t
+            assert "start_time_unix_nano" in t
+    finally:
+        _cleanup(db_url, spans)
+
+
+def test_trace_list_filter_agent(client, db_url, default_project_id):
+    key = _mint(client, f"tl-{uuid.uuid4().hex[:6]}", ["traces:read"])
+    unique = f"agent-{uuid.uuid4().hex[:6]}"
+    spans = _insert_spans(db_url, default_project_id, [
+        {"agent_name": unique},
+    ])
+    # Also update the trace's agent_name (insert_spans doesn't set it on traces)
+    conn = psycopg.connect(db_url, autocommit=True)
+    try:
+        conn.execute(
+            "UPDATE traces SET agent_name = %s WHERE id = %s",
+            (unique, spans[0][0]),
+        )
+    finally:
+        conn.close()
+    try:
+        resp = client.get(
+            f"/v1/traces?agent_name={unique}",
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert len(data) >= 1
+        assert all(t.get("agent_name") == unique for t in data)
+    finally:
+        _cleanup(db_url, spans)
+
+
+def test_trace_list_pagination(client, db_url, default_project_id):
+    key = _mint(client, f"tl-{uuid.uuid4().hex[:6]}", ["traces:read"])
+    # Insert multiple traces.
+    all_spans = []
+    for _ in range(5):
+        spans = _insert_spans(db_url, default_project_id, [{"name": "pg-test"}])
+        all_spans.extend(spans)
+    try:
+        resp1 = client.get(
+            "/v1/traces?limit=2",
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        assert resp1.status_code == 200
+        body1 = resp1.json()
+        assert body1["next_cursor"] is not None
+
+        resp2 = client.get(
+            f"/v1/traces?limit=2&cursor={body1['next_cursor']}",
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        assert resp2.status_code == 200
+        ids1 = {t["trace_id"] for t in body1["data"]}
+        ids2 = {t["trace_id"] for t in resp2.json()["data"]}
+        assert ids1.isdisjoint(ids2)
+    finally:
+        _cleanup(db_url, all_spans)
