@@ -119,6 +119,7 @@ SCOPE_PROJECT_SETTINGS_WRITE = "project_settings:write"
 SCOPE_AUDIT_READ = "audit:read"
 SCOPE_AUDIT_WRITE = "audit:write"
 SCOPE_AUDIT_ADMIN = "audit:admin"
+SCOPE_PROJECTS_MANAGE = "projects:manage"
 
 KNOWN_SCOPES: frozenset[str] = frozenset({
     SCOPE_WILDCARD,
@@ -143,6 +144,7 @@ KNOWN_SCOPES: frozenset[str] = frozenset({
     SCOPE_AUDIT_READ,
     SCOPE_AUDIT_WRITE,
     SCOPE_AUDIT_ADMIN,
+    SCOPE_PROJECTS_MANAGE,
 })
 
 # Default scopes for a new SDK-style key. Enough to ingest traces and to
@@ -265,6 +267,7 @@ __all__ = [
     "SCOPE_POLICIES_WRITE",
     "SCOPE_TRACES_WRITE",
     "SCOPE_TRACES_READ",
+    "SCOPE_PROJECTS_MANAGE",
     "SCOPE_WILDCARD",
     "generate_api_key",
     "key_has_scope",
