@@ -298,7 +298,7 @@ def test_get_events_self_logs(client):
     before = _all_events(
         client, key,
         filter='action eq "audit.read"',
-        limit=200,
+        limit=1000,
     )
     initial = len(before)
     # Now make a fresh GET. Each GET should add at least one new audit.read.
@@ -306,7 +306,7 @@ def test_get_events_self_logs(client):
     after = _all_events(
         client, key,
         filter='action eq "audit.read"',
-        limit=200,
+        limit=1000,
     )
     # The second list call adds events itself; we just need the count to grow.
     assert len(after) > initial
