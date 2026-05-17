@@ -128,11 +128,25 @@ The denormalized column filters use the B-tree indexes from
 migration 001 (partial indexes on agent_name, tool_name,
 operation_name where the column is NOT NULL).
 
-## What's not yet shipped
+## Partitioned storage
+
+The spans table (along with span_events and span_links) is RANGE-
+partitioned on `start_time_unix_nano` with monthly granularity.
+The PK is `(start_time_unix_nano, trace_id, span_id)`. Children
+are co-partitioned with composite FK. No default partition.
+
+A background worker (spans_worker.py) premakes 3 months of
+partitions ahead and drops those older than 12 months, advisory-
+lock-guarded for multi-replica safety. Partition naming follows
+`spans_yYYYYmMM`.
+
+Span search queries use `SET LOCAL plan_cache_mode = 'force_custom_plan'`
+to ensure Postgres uses plan-time partition pruning rather than
+switching to a generic plan after the 6th prepared-statement
+execution.
+
+## Not yet shipped
 
 - Full-text search over span names and attributes.
-- Spans table partitioning (RANGE on start_time_unix_nano, monthly).
-  This is the next commit and requires a PK migration from
-  `(trace_id, span_id)` to `(start_time_unix_nano, trace_id, span_id)`.
 - TraceQL-style query language.
 - Span aggregation endpoints (count, sum cost, histogram by model).
