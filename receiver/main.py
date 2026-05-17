@@ -415,6 +415,17 @@ async def lifespan(app: FastAPI):
     # either typo'd a secret or referenced a revoked key).
     await _restore_webhook_keystore()
 
+    # Spans partition maintenance. Same pattern as audit: once per 6 hours,
+    # ensures the next 3 months of partitions exist for spans, span_events,
+    # span_links. Drops partitions older than 12 months. Advisory-lock-
+    # guarded so multiple replicas don't race.
+    from spans_worker import maintenance_loop as spans_maintenance_loop
+    app.state.spans_partition_shutdown = asyncio.Event()
+    app.state.spans_partition_task = asyncio.create_task(
+        spans_maintenance_loop(app.state.spans_partition_shutdown),
+        name="strathon.spans_partition_maintenance",
+    )
+
     # Quickstart banner: when the dev key seeded by migration 003 is still
     # active, surface it loudly. New users see "here's your key, here's the
     # endpoint, here's how to rotate" the moment the container starts.
@@ -463,9 +474,11 @@ async def lifespan(app: FastAPI):
     # Stop the audit log background loops cleanly
     app.state.audit_partition_shutdown.set()
     app.state.audit_anchor_shutdown.set()
+    app.state.spans_partition_shutdown.set()
     for label, task in (
         ("audit partition maintenance", app.state.audit_partition_task),
         ("audit anchor sealer", app.state.audit_anchor_task),
+        ("spans partition maintenance", app.state.spans_partition_task),
     ):
         try:
             await asyncio.wait_for(task, timeout=10)
