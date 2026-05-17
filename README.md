@@ -5,8 +5,8 @@
 [![License: Apache 2.0 (sdk)](https://img.shields.io/badge/sdk-Apache%202.0-blue.svg)](sdk/LICENSE)
 
 **An open-source firewall for AI agents.** Write a rule once, and Strathon
-blocks the tool call before it runs — in LangGraph, CrewAI, or the OpenAI
-Agents SDK.
+blocks the tool call before it runs. Supports LangGraph, CrewAI, OpenAI
+Agents SDK, OpenAI, Anthropic, LangChain, AutoGen, and the Claude Agent SDK.
 
 ---
 
@@ -17,8 +17,8 @@ to refund 100% of a transaction. A research agent is about to fetch an
 internal URL. You don't want to find out after it happened.
 
 Strathon is a rule engine that sits at the tool-call boundary in your
-agent's process. You write rules in CEL — the same expression language
-Kubernetes admission controllers use — and Strathon evaluates them before
+agent's process. You write rules in CEL (the same expression language
+Kubernetes admission controllers use) and Strathon evaluates them before
 the tool body runs:
 
 ```http
@@ -35,23 +35,18 @@ Authorization: Bearer stra_…
 ```
 
 ```python
-# Your agent code is unchanged. Strathon's instrumentation hooks the
-# framework's tool-call lifecycle and raises before the function runs.
-from strathon import Client
-from strathon.instrumentation.langgraph import instrument
+from strathon import Client, instrument
 
 client = Client(api_key="stra_…", endpoint="http://localhost:4318")
-instrument(client)
+instrument(client, frameworks=["openai"])
 
 # When the agent calls send_email(to="sales@competitor.com", ...)
 # → strathon.policy.StrathonPolicyBlocked is raised
 # → send_email's function body never executes
 ```
 
-That's the whole product loop. The receiver stores the policies, the SDK
-pulls them, and the framework instrumentation enforces them. No proxy in
-front of your LLM provider, no separate Kubernetes sidecar, no DSL beyond
-CEL. Self-host it on one container.
+No proxy in front of your LLM provider, no separate Kubernetes sidecar,
+no DSL beyond CEL. Self-host it on one container.
 
 ---
 
@@ -75,13 +70,6 @@ key, and prints a banner:
   Endpoint:   http://localhost:4318
   Dev API key (rotate before production!):
       stra_dev_local_default_project_do_not_use_in_production
-
-  Quick test:
-      curl -H "Authorization: Bearer stra_dev_…" \
-           http://localhost:4318/v1/policies
-
-  Run the intervention demo:
-      python examples/intervention_demo.py
 ============================================================
 ```
 
@@ -92,111 +80,119 @@ pip install strathon langchain-core cel-python
 python examples/intervention_demo.py
 ```
 
-The demo installs the policy above, calls `send_email` twice (once to a
+The demo creates the policy above, calls `send_email` twice (once to a
 competitor, once to an internal address), and shows you exactly one email
-making it through. The competitor email is blocked before its function body
-runs.
+making it through. The competitor email is blocked before its function
+body runs.
 
-Configuration lives in `.env.example`: Postgres password, log level, log
-format, sampling rate, retention. Copy it to `.env` and edit what you need.
+Configuration lives in `.env.example`. Copy it to `.env` and edit what
+you need.
 
 ---
 
-## What's built today
+## What's built
 
-The bits below are end-to-end, tested in CI, and ready to use:
+Everything below is end-to-end, tested in CI (960+ tests across
+receiver, SDK, and integration suites), and ready to use.
 
-- **Block actions.** A matched policy raises `StrathonPolicyBlocked` before
-  the tool body runs. Works in LangGraph (via LangChain's tool callback
-  protocol), CrewAI, and the OpenAI Agents SDK via per-framework
-  instrumentation modules.
-- **Steer actions.** A matched policy returns a corrective string in
-  place of the real tool output, so the agent self-corrects on its next
-  step instead of seeing an error. Same framework coverage as block.
-- **Throttle actions.** A matched policy enforces a per-`(policy,
-  agent)` (or `global`) token bucket; calls under the cap proceed,
-  calls over it raise `StrathonPolicyThrottled` with
-  `retry_after_seconds` so caller code can back off and retry.
-  Configure with `action_config: {max_calls, window_seconds, scope}`.
-- **Allow-list mode.** Per-project `intervention_default_action`
-  toggle. Default `allow` keeps the historical permissive posture;
-  set `block` and the SDK denies any tool call that no `allow` policy
-  explicitly admits. Toggle via `PATCH /v1/project/settings`. Priority
-  ordering is preserved across action types — a higher-priority block
-  still beats a lower-priority allow.
-- **Log and alert actions.** A matched policy records a match record and
-  fires an outbound webhook without interrupting the agent.
-- **Durable webhook delivery.** Alert webhooks are signed (HMAC-SHA256),
-  retried with exponential backoff, dead-lettered after exhaustion, and
-  replayable via REST. A background sweeper recovers anything the
-  in-process queue dropped during a crash.
-- **Operator kill-switches.** `POST /v1/halts` writes a halt that the
-  SDK observes within one poll cycle (~1s) and raises
-  `StrathonHaltExceeded` at the tool boundary. Project-scope or
-  agent-scope. No agent restart needed. Clears via `DELETE`.
-  See [`docs/intervention.md`](docs/intervention.md).
-- **Cost and iteration budgets.** Per-project caps on USD spend (with
-  fixed-window reset like `1d` / `30d`) or on tool-call count (rolling
-  window for loop detection). The receiver's budget monitor evaluates
-  active budgets every few seconds and writes an auto-clearing halt
-  when a threshold is crossed. Pricing comes from a vendored model
-  catalog (LiteLLM upstream, MIT-licensed) plus per-project overrides.
-  See [`docs/budgets.md`](docs/budgets.md).
-- **PII redaction at ingest.** Default-on regex-based redaction of
-  emails, credit cards (Luhn-validated), SSNs, phone numbers, IP
-  addresses, and common API-key shapes (`sk-...`, `sk_live_...`,
-  `ghp_...`, JWTs, etc.). Per-entity actions (redact / mask / hash /
-  delete), key-level rules, and allowlist mode are all configurable
-  per project. Critically: policy match expressions evaluate against
-  the unredacted span so the firewall semantics are preserved.
-  See [`docs/redaction.md`](docs/redaction.md).
-- **CEL expressions.** Full [CEL](https://github.com/google/cel-spec)
-  evaluator (via `cel-python`) over the span's attributes plus a
-  bound `now` timestamp for time-based rules (`now.getDayOfWeek()`,
-  `now.getHours("America/Los_Angeles")`, timestamp/duration
-  arithmetic). Compile-time syntax checking on `POST /v1/policies`.
-  Same expression surface gcloud IAM, Envoy, and Kubernetes
-  admission use.
-  evaluator (via `cel-python`) over the span's attributes. Compile-time
-  syntax checking on `POST /v1/policies`.
-- **OTLP/HTTP trace ingest.** Standard OpenTelemetry exporter. Spans land
-  in Postgres with the `gen_ai.*` semconv attributes denormalized for
-  query speed.
-- **Capability-scoped API keys.** Per-key `scopes TEXT[]`; endpoints
-  declare what they need (`traces:write`, `policies:read`, `halts:write`,
-  `budgets:write`, etc.). A leaked SDK key can ingest but can't rotate
-  keys, rewrite rules, or change budgets.
-- **Per-key rate limiting.** In-memory token bucket on every non-probe
-  endpoint, 100 req/s sustained / 200 burst by default, tunable via
-  `STRATHON_RATE_LIMIT_*` env vars. Identified by the `Authorization`
-  header for authenticated requests, client IP otherwise. Returns
-  `429` with `Retry-After` and `X-RateLimit-*` headers. State is
-  per-process — a multi-replica deploy multiplies the effective ceiling
-  by the replica count. This matches Sentry's self-hosted posture
-  (their internal limiter is per-process; they recommend a reverse-proxy
-  limit for production). For hard global limits in front of an
-  N-replica Strathon, put nginx / Traefik / HAProxy in front. See
-  [`docs/self-hosting.md`](docs/self-hosting.md).
-- **Fail-closed SDK mode.** Default is fail-open (last-known halts and
-  policies stay in force during a receiver outage). Operators who
-  prefer safer-but-noisier semantics can pass `Client(fail_closed=True)`
-  to make the SDK raise `StrathonReceiverUnreachable` at tool
-  boundaries whenever the cached intervention state is older than the
-  configured threshold.
-- **Single Postgres dependency.** No Redis, no ClickHouse, no S3, no
-  message broker.
-- **Alembic-managed schema** with auto-migrate on receiver startup. Set
-  `STRATHON_AUTO_MIGRATE=false` if you'd rather run migrations as a
-  separate deploy step.
+### Policy engine
 
-## On the roadmap
+CEL expressions over span attributes plus a bound `now` timestamp
+for time-based rules. Five enforcement actions: **block** (raise
+before the tool body), **steer** (replace tool output with a
+corrective string), **throttle** (token-bucket rate limit per
+policy-agent pair), **log** (record a match without interrupting),
+**alert** (fire a webhook). **Allow-list mode** inverts the default:
+deny everything unless an explicit `allow` policy admits it.
 
-The bits below are still in flight on the way to v1.0:
+Policies support `applies_to` path filters for restricting which
+span types they evaluate against. Compile-time CEL syntax checking
+on `POST /v1/policies`.
 
-- **Dashboard.** Next.js scaffold under `dashboard/` is empty. Until it
-  ships, all configuration is via the REST API.
-- **Release pipeline.** No PyPI publish or pinned Docker tags yet.
-  Install from a `git clone` for now.
+### Policy dry-run simulation
+
+`POST /v1/policies/simulate` evaluates a CEL expression against
+historical spans without enabling the policy. Returns matched spans,
+match rate, and timing. Lets operators test a policy before deploying it.
+
+### Framework instrumentation
+
+The SDK auto-instruments 8 frameworks:
+
+| Framework | Integration style |
+|-----------|-------------------|
+| LangGraph | LangChain BaseCallbackHandler |
+| CrewAI | Event listener on the CrewAI event bus |
+| OpenAI Agents SDK | TracingProcessor on the SDK's extension point |
+| OpenAI | Monkey-patch on `chat.completions.create` (sync + async + streaming) |
+| Anthropic | Monkey-patch on `messages.create` (sync + async + SSE streaming) |
+| LangChain | Delegates to the LangGraph handler |
+| AutoGen | Monkey-patch on `BaseChatAgent.on_messages` + `BaseGroupChat.run` |
+| Claude Agent SDK | Wraps `query()` and `ClaudeSDKClient.query()` |
+
+All modules capture `gen_ai.*` and `strathon.agent.*` attributes,
+return `False` gracefully when the framework isn't installed, and
+are idempotent.
+
+### Span search
+
+`GET /v1/spans` with time-range, denormalized column filters
+(agent_name, tool_name, model, kind, status, intervention_state,
+12 columns total), and JSONB attribute containment via the `attr.*`
+query-param prefix (backed by a GIN index). Keyset cursor pagination.
+`GET /v1/spans/{trace_id}/{span_id}` for detail with events and links.
+
+### Partitioned storage
+
+`spans`, `span_events`, and `span_links` are RANGE-partitioned on
+`start_time_unix_nano` (monthly). Composite PK
+`(start_time_unix_nano, trace_id, span_id)`. Co-partitioned children
+with composite FK. No default partition. A background worker premakes
+3 months of partitions and drops those older than 12 months,
+advisory-lock-guarded for multi-replica safety.
+
+### Tamper-evident audit log
+
+Every operator mutation (policy CRUD, halt toggle, budget change,
+API key rotation, webhook config, project settings) is recorded in
+an append-only, HMAC-SHA256 hash-chained audit log. SCIM 2.0 filter
+queries, per-minute Merkle root anchors, three scopes
+(`audit:read`, `audit:write`, `audit:admin`).
+
+### Operator controls
+
+**Kill-switches**: `POST /v1/halts` writes a halt the SDK observes
+within one poll cycle and raises `StrathonHaltExceeded`. Project-scope
+or agent-scope. No agent restart needed.
+
+**Cost and iteration budgets**: per-project caps on USD spend or
+tool-call count. The receiver's budget monitor writes an auto-clearing
+halt when a threshold is crossed.
+
+### Safety and compliance
+
+**PII redaction at ingest**: default-on, covering emails, credit cards
+(Luhn-validated), SSNs, phone numbers, IPs, and API-key shapes. Policy
+expressions evaluate against unredacted data so firewall semantics are
+preserved.
+
+**Durable webhook delivery**: HMAC-SHA256 signed, retried with
+exponential backoff, dead-lettered, replayable via REST.
+
+**Capability-scoped API keys**: per-key `scopes TEXT[]`. A leaked SDK
+key can ingest but can't rotate keys or change policies.
+
+**Per-key rate limiting**: in-memory token bucket, 100 req/s sustained /
+200 burst, tunable via env vars.
+
+**Fail-closed SDK mode**: `Client(fail_closed=True)` raises
+`StrathonReceiverUnreachable` when cached state exceeds the configured
+staleness threshold.
+
+### Infrastructure
+
+Single Postgres dependency. No Redis, no ClickHouse, no S3, no message
+broker. Alembic-managed schema with auto-migrate on startup.
 
 ---
 
@@ -215,31 +211,50 @@ The bits below are still in flight on the way to v1.0:
 │        ▼         │                                  ▼
 │  StrathonPolicy  │                          ┌──────────────┐
 │  Blocked raised  │                          │   Postgres   │
-│  before tool     │                          │              │
-│  body runs       │                          └──────────────┘
-└──────────────────┘
+│  before tool     │                          │  (partitioned│
+│  body runs       │                          │   spans)     │
+└──────────────────┘                          └──────────────┘
 ```
 
 Two attribute namespaces on every span:
 
-- `gen_ai.*` — OpenTelemetry GenAI semantic conventions
-  (`gen_ai.tool.name`, `gen_ai.usage.input_tokens`, etc.)
-- `strathon.*` — Strathon-specific extensions for tool arguments,
-  agent topology, and policy decisions.
+- `gen_ai.*`: OpenTelemetry GenAI semantic conventions
+- `strathon.*`: Strathon-specific extensions for tool arguments,
+  agent topology, and policy decisions
 
-Detailed docs live under `docs/`: [intervention](docs/intervention.md),
-[budgets](docs/budgets.md), [redaction](docs/redaction.md),
+Detailed docs: [intervention](docs/intervention.md),
+[budgets](docs/budgets.md), [audit](docs/audit.md),
+[spans](docs/spans.md), [redaction](docs/redaction.md),
 [observability](docs/observability.md), [retention](docs/retention.md),
 [sampling](docs/sampling.md), [self-hosting](docs/self-hosting.md),
 [api keys](docs/api_keys.md).
 
 ---
 
+## OWASP Agentic Security Top 10
+
+Strathon's threat model is anchored on the
+[OWASP Agentic Security Threats](https://genai.owasp.org/resource/agentic-security-threats-and-mitigations/).
+
+| Threat | Strathon primitive |
+|--------|--------------------|
+| ASI-01 Prompt injection | CEL policies on input content patterns |
+| ASI-02 Tool misuse | Block/allow-list on `gen_ai.tool.name` |
+| ASI-03 Insecure output | CEL policies on output attributes |
+| ASI-04 Reasoning manipulation | Audit log captures all policy changes |
+| ASI-05 Memory poisoning | Halt propagation on suspicious patterns |
+| ASI-06 Excessive agency | Cost and iteration budgets |
+| ASI-07 Insufficient monitoring | Span search, audit log, webhook alerts |
+| ASI-09 Identity spoofing | Capability-scoped API keys, per-key rate limits |
+| ASI-10 Overwhelming HITL | Audit-of-audit, operator kill-switches |
+
+---
+
 ## Status
 
-v0 in active development. Target v1.0: end of June 2026. The
-block / steer / log / alert / halt / budget paths are stable and
-covered by the integration test suite that runs in CI on every push.
+Active development toward v1.0. The policy engine, SDK instrumentation,
+span search, audit log, partitioned storage, and operator controls are
+stable and covered by 960+ tests that run in CI on every push.
 
 If you find something broken or want to discuss a feature, open an issue.
 
