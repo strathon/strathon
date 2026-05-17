@@ -162,6 +162,50 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ---- Audit log ----
+
+    audit_hmac_key: str = Field(
+        default="",
+        alias="STRATHON_AUDIT_HMAC_KEY",
+        description=(
+            "Secret key used to compute the HMAC-SHA256 hash chain on "
+            "audit.events rows. Must be at least 32 bytes of "
+            "high-entropy material. Generate with: "
+            "`python -c 'import secrets; print(secrets.token_hex(32))'`. "
+            "Set to a stable value per deployment; rotating it requires "
+            "a hmac_key_id bump (the previous key must remain available "
+            "for chain verification of historical rows). If empty in "
+            "production the receiver refuses to start; in development "
+            "(DEBUG=true) a deterministic dev key is substituted with a "
+            "loud log warning."
+        ),
+    )
+    audit_hot_months: int = Field(
+        default=24,
+        alias="STRATHON_AUDIT_HOT_MONTHS",
+        ge=3,
+        le=120,
+        description=(
+            "How many months of audit events to keep in the hot "
+            "Postgres tier. Partitions older than this are eligible "
+            "for archive (Stage 2). Default 24 satisfies the strictest "
+            "current frameworks (HIPAA 6yr cold + SOC 2 baseline)."
+        ),
+    )
+    audit_anchor_interval_seconds: int = Field(
+        default=60,
+        alias="STRATHON_AUDIT_ANCHOR_INTERVAL_SECONDS",
+        ge=10,
+        le=3600,
+        description=(
+            "How often the anchor sealer worker computes a Merkle "
+            "root over the prior interval's audit events. Lower "
+            "values shrink the tamper blast radius; higher values "
+            "reduce worker overhead. Default 60s matches the "
+            "research recommendation."
+        ),
+    )
+
     # ---- Derived properties ----
 
     @field_validator("database_url")

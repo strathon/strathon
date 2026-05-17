@@ -22,10 +22,16 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
+import repositories.audit as audit_repo
 import repositories.halts as halts_repo
+from audit.actions import (
+    CATEGORY_HALT,
+    HALT_CLEAR,
+    HALT_ISSUE,
+)
 from database import get_db_session
 
-from ._deps import coerce_project_id, require_scope
+from ._deps import build_audit_context, coerce_project_id, require_scope
 
 
 router = APIRouter(prefix="/v1/halts", tags=["halts"])
@@ -56,7 +62,7 @@ async def create_halt(
     body: CreateHaltRequest,
     request: Request,
     project_id: str | None = None,
-    ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
+    ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_HALTS_WRITE)
     ),
     session: AsyncSession = Depends(get_db_session),
@@ -84,6 +90,15 @@ async def create_halt(
     request.app.state.metrics.halts_created.labels(
         scope=body.scope, actor="user",
     ).inc()
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        HALT_ISSUE,
+        CATEGORY_HALT,
+        resource_type="halt",
+        resource_id=str(halt.id),
+        after_state=halt.to_json(),
+    )
     return {"halt": halt.to_json()}
 
 
@@ -136,7 +151,7 @@ async def get_halt(
 async def delete_halt(
     halt_id: int,
     request: Request,
-    ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
+    ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_HALTS_WRITE)
     ),
     session: AsyncSession = Depends(get_db_session),
@@ -147,6 +162,7 @@ async def delete_halt(
     Returns the updated row (now with cleared_at populated).
     """
     pid = coerce_project_id(request, None)
+    before = await halts_repo.get_halt(session, halt_id, pid)
     try:
         halt = await halts_repo.clear_halt(session, halt_id, pid)
     except ValueError as exc:
@@ -158,6 +174,16 @@ async def delete_halt(
     request.app.state.metrics.halts_cleared.labels(
         actor="user", reason="operator_request",
     ).inc()
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        HALT_CLEAR,
+        CATEGORY_HALT,
+        resource_type="halt",
+        resource_id=str(halt_id),
+        before_state=before.to_json() if before else None,
+        after_state=halt.to_json(),
+    )
     return {"halt": halt.to_json()}
 
 

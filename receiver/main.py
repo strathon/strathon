@@ -376,6 +376,35 @@ async def lifespan(app: FastAPI):
         name="strathon.budget_monitor",
     )
 
+    # Audit log background tasks. Two loops:
+    #
+    # - partition_maintenance_loop: once per day, ensures the next 3
+    #   months of audit.events partitions exist. Hand-rolled
+    #   maintenance (no pg_partman dependency) so self-hosters don't
+    #   have to install a Postgres extension.
+    # - anchor_sealer_loop: every audit_anchor_interval_seconds
+    #   (default 60s), computes a Merkle root over events since the
+    #   last anchor and inserts an audit.anchors row. Provides
+    #   external integrity-proof points for the per-row HMAC chain.
+    from audit.worker import (
+        anchor_sealer_loop,
+        partition_maintenance_loop,
+    )
+    from config import settings as audit_settings
+    app.state.audit_partition_shutdown = asyncio.Event()
+    app.state.audit_partition_task = asyncio.create_task(
+        partition_maintenance_loop(app.state.audit_partition_shutdown),
+        name="strathon.audit_partition_maintenance",
+    )
+    app.state.audit_anchor_shutdown = asyncio.Event()
+    app.state.audit_anchor_task = asyncio.create_task(
+        anchor_sealer_loop(
+            app.state.audit_anchor_shutdown,
+            interval_seconds=audit_settings.audit_anchor_interval_seconds,
+        ),
+        name="strathon.audit_anchor_sealer",
+    )
+
     # Restore the in-memory webhook signing-key cache from operator-supplied
     # plaintexts. The DB stores only hashes; plaintexts are not recoverable
     # from disk, by design. Operators that want signed deliveries to
@@ -431,6 +460,23 @@ async def lifespan(app: FastAPI):
         except (asyncio.CancelledError, Exception):
             pass
 
+    # Stop the audit log background loops cleanly
+    app.state.audit_partition_shutdown.set()
+    app.state.audit_anchor_shutdown.set()
+    for label, task in (
+        ("audit partition maintenance", app.state.audit_partition_task),
+        ("audit anchor sealer", app.state.audit_anchor_task),
+    ):
+        try:
+            await asyncio.wait_for(task, timeout=10)
+        except asyncio.TimeoutError:
+            logger.warning("%s did not stop in 10s; cancelling", label)
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
     # Clear the metrics singleton so a subsequent import doesn't see
     # state from a previous lifespan.
     metrics_mod.reset_global_metrics_for_testing()
@@ -458,7 +504,7 @@ app.add_middleware(RateLimitMiddleware)
 # Mount routers. Import here (after `app` exists) so router modules can
 # stay decoupled from main.py and not see import-order issues.
 from api import (  # noqa: E402
-    api_keys, budgets, halts, health, intervention, model_prices,
+    api_keys, audit, budgets, halts, health, intervention, model_prices,
     policies, project_settings, traces, webhook_deliveries, webhook_signing_keys,
 )
 
@@ -473,6 +519,7 @@ app.include_router(webhook_deliveries.router)
 app.include_router(budgets.router)
 app.include_router(model_prices.router)
 app.include_router(project_settings.router)
+app.include_router(audit.router)
 
 
 @app.exception_handler(Exception)

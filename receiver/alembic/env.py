@@ -94,6 +94,35 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def _include_object(object_, name, type_, reflected, compare_to):
+    """Exclude objects this project manages via hand-written raw SQL.
+
+    Strathon's migrations use ``op.execute()`` with raw SQL, not
+    SQLAlchemy autogenerate. ``alembic check`` exists to flag genuine
+    drift between models and DB (a forgotten migration), so we keep
+    it on for the default schema. The ``audit`` schema diverges from
+    pure-ORM expectations: the migration creates BRIN/partial/composite
+    indexes, append-only triggers, REVOKE statements, table comments,
+    and monthly partition child tables that have no SQLAlchemy
+    counterpart. ``alembic check`` would mis-report all of these as
+    drift.
+
+    The audit ORM models exist so application code can use the
+    typed mapped classes; they are intentionally not the
+    authoritative description of every index and trigger. Excluding
+    the audit schema from the drift check makes the two layers
+    consistent: migration owns the DDL, models own the typed
+    attributes.
+    """
+    schema = getattr(object_, "schema", None)
+    # Index/constraint objects expose their table via .table
+    if schema is None and hasattr(object_, "table"):
+        schema = getattr(object_.table, "schema", None)
+    if schema == "audit":
+        return False
+    return True
+
+
 def run_migrations_online() -> None:
     """Run migrations against a live database connection."""
     connectable = engine_from_config(
@@ -108,6 +137,11 @@ def run_migrations_online() -> None:
             target_metadata=target_metadata,
             # Render server-side defaults like NOW() correctly
             render_as_batch=False,
+            # See _include_object docstring: the audit schema is
+            # owned by raw-SQL migration, not autogenerate, so we
+            # exclude it from the drift check.
+            include_schemas=True,
+            include_object=_include_object,
         )
 
         with context.begin_transaction():

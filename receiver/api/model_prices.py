@@ -29,10 +29,16 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
+import repositories.audit as audit_repo
 import repositories.model_prices as prices_repo
+from audit.actions import (
+    CATEGORY_MODEL_PRICE,
+    MODEL_PRICE_DELETE,
+    MODEL_PRICE_SET,
+)
 from database import get_db_session
 
-from ._deps import coerce_project_id, require_scope
+from ._deps import build_audit_context, coerce_project_id, require_scope
 
 
 router = APIRouter(prefix="/v1/model_prices", tags=["model_prices"])
@@ -60,7 +66,7 @@ def _str_to_decimal(name: str, raw: str) -> Decimal:
 async def upsert_price(
     body: UpsertPriceRequest,
     request: Request,
-    ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
+    ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_MODEL_PRICES_WRITE)
     ),
     session: AsyncSession = Depends(get_db_session),
@@ -77,6 +83,15 @@ async def upsert_price(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        MODEL_PRICE_SET,
+        CATEGORY_MODEL_PRICE,
+        resource_type="model_price",
+        resource_id=body.model_name,
+        after_state=row.to_json(),
+    )
     return {"override": row.to_json()}
 
 
@@ -97,7 +112,7 @@ async def list_prices(
 async def delete_price(
     model_name: str,
     request: Request,
-    ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
+    ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_MODEL_PRICES_WRITE)
     ),
     session: AsyncSession = Depends(get_db_session),
@@ -106,6 +121,14 @@ async def delete_price(
     deleted = await prices_repo.delete_override(session, pid, model_name)
     if not deleted:
         raise HTTPException(status_code=404, detail="override not found")
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        MODEL_PRICE_DELETE,
+        CATEGORY_MODEL_PRICE,
+        resource_type="model_price",
+        resource_id=model_name,
+    )
     return {"deleted": True}
 
 

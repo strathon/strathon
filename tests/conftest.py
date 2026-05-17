@@ -91,6 +91,14 @@ def receiver(database_url: str) -> Iterator[str]:
     env["STRATHON_BUDGET_EVAL_INTERVAL_SECONDS"] = env.get(
         "STRATHON_BUDGET_EVAL_INTERVAL_SECONDS", "0.5",
     )
+    # Audit log HMAC key. The receiver refuses to start in production
+    # without one; integration tests aren't production but still go
+    # through the same boot path, so we supply a deterministic test
+    # key. Reproducible across runs.
+    env.setdefault(
+        "STRATHON_AUDIT_HMAC_KEY",
+        "test_audit_hmac_key_do_not_use_in_production_aaaaaaaaaaaaaaaaaaaa",
+    )
 
     proc = subprocess.Popen(
         [

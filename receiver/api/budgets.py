@@ -31,11 +31,18 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
+import repositories.audit as audit_repo
 import repositories.budgets as budgets_repo
+from audit.actions import (
+    BUDGET_CREATE,
+    BUDGET_DELETE,
+    BUDGET_UPDATE,
+    CATEGORY_BUDGET,
+)
 from database import get_db_session
 from models.intervention import Budget
 
-from ._deps import coerce_project_id, require_scope
+from ._deps import build_audit_context, coerce_project_id, require_scope
 
 
 router = APIRouter(prefix="/v1/budgets", tags=["budgets"])
@@ -102,7 +109,7 @@ def _str_to_decimal(name: str, raw: Optional[str]) -> Optional[Decimal]:
 async def create_budget(
     body: CreateBudgetRequest,
     request: Request,
-    ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
+    ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_BUDGETS_WRITE)
     ),
     session: AsyncSession = Depends(get_db_session),
@@ -127,6 +134,15 @@ async def create_budget(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        BUDGET_CREATE,
+        CATEGORY_BUDGET,
+        resource_type="budget",
+        resource_id=str(budget.id),
+        after_state=budget.to_json(),
+    )
     return {"budget": budget.to_json()}
 
 
@@ -251,7 +267,7 @@ async def patch_budget(
     budget_id: uuid.UUID,
     body: PatchBudgetRequest,
     request: Request,
-    ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
+    ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_BUDGETS_WRITE)
     ),
     session: AsyncSession = Depends(get_db_session),
@@ -327,6 +343,16 @@ async def patch_budget(
     assert refreshed is not None, (
         f"budget {budget_id} vanished mid-transaction"
     )
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        BUDGET_UPDATE,
+        CATEGORY_BUDGET,
+        resource_type="budget",
+        resource_id=str(budget_id),
+        before_state=existing.to_json(),
+        after_state=refreshed.to_json(),
+    )
     return {"budget": refreshed.to_json()}
 
 
@@ -337,15 +363,25 @@ async def patch_budget(
 async def delete_budget(
     budget_id: uuid.UUID,
     request: Request,
-    ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
+    ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_BUDGETS_WRITE)
     ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     pid = coerce_project_id(request, None)
+    before = await budgets_repo.get_budget(session, budget_id, pid)
     deleted = await budgets_repo.delete_budget(session, budget_id, pid)
     if not deleted:
         raise HTTPException(status_code=404, detail="budget not found")
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        BUDGET_DELETE,
+        CATEGORY_BUDGET,
+        resource_type="budget",
+        resource_id=str(budget_id),
+        before_state=before.to_json() if before else None,
+    )
     return {"deleted": True}
 
 

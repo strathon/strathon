@@ -36,10 +36,15 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
+import repositories.audit as audit_repo
 import repositories.webhook_deliveries as deliveries_repo
+from audit.actions import (
+    CATEGORY_WEBHOOK_DELIVERY,
+    WEBHOOK_DELIVERY_REPLAY,
+)
 from database import get_db_session
 
-from ._deps import coerce_project_id, require_scope
+from ._deps import build_audit_context, coerce_project_id, require_scope
 
 
 router = APIRouter(prefix="/v1/webhook_deliveries", tags=["webhook_deliveries"])
@@ -128,7 +133,7 @@ async def get_webhook_delivery(
 async def replay_webhook_delivery(
     delivery_id: str,
     request: Request,
-    ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
+    ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_WEBHOOK_DELIVERIES_WRITE)
     ),
     session: AsyncSession = Depends(get_db_session),
@@ -184,6 +189,14 @@ async def replay_webhook_delivery(
             pass
 
     event.listen(sync_session, "after_commit", _on_commit)
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        WEBHOOK_DELIVERY_REPLAY,
+        CATEGORY_WEBHOOK_DELIVERY,
+        resource_type="webhook_delivery",
+        resource_id=str(updated.id),
+    )
     return updated.to_summary_json()
 
 

@@ -21,17 +21,24 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
+import repositories.audit as audit_repo
 import repositories.policies as policies_repo
 import repositories.project_settings as project_settings_repo
+from audit.actions import (
+    CATEGORY_POLICY,
+    POLICY_CREATE,
+    POLICY_DELETE,
+    POLICY_UPDATE,
+)
 from database import get_db_session
 from policies import PolicyExpressionError
 
-from ._deps import require_scope
+from ._deps import build_audit_context, require_scope
 
 
 router = APIRouter(prefix="/v1/policies", tags=["policies"])
@@ -64,6 +71,7 @@ async def list_policies_endpoint(
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_policy_endpoint(
     payload: dict[str, Any],
+    request: Request,
     ctx: auth_mod.ApiKeyContext = Depends(require_scope(auth_mod.SCOPE_POLICIES_WRITE)),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
@@ -97,6 +105,15 @@ async def create_policy_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        POLICY_CREATE,
+        CATEGORY_POLICY,
+        resource_type="policy",
+        resource_id=str(policy.id),
+        after_state=policy.model_dump(mode="json"),
+    )
     return policy.model_dump(mode="json")
 
 
@@ -120,6 +137,7 @@ async def get_policy_endpoint(
 async def update_policy_endpoint(
     policy_id: str,
     payload: dict[str, Any],
+    request: Request,
     ctx: auth_mod.ApiKeyContext = Depends(require_scope(auth_mod.SCOPE_POLICIES_WRITE)),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
@@ -127,6 +145,7 @@ async def update_policy_endpoint(
         pid_uuid = UUID(policy_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid policy_id")
+    before = await policies_repo.get_policy(session, ctx.project_id, pid_uuid)
     try:
         policy = await policies_repo.update_policy(
             session, ctx.project_id, pid_uuid, **payload
@@ -137,12 +156,23 @@ async def update_policy_endpoint(
         raise HTTPException(status_code=400, detail=str(exc))
     if not policy:
         raise HTTPException(status_code=404, detail="policy not found")
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        POLICY_UPDATE,
+        CATEGORY_POLICY,
+        resource_type="policy",
+        resource_id=str(pid_uuid),
+        before_state=before.model_dump(mode="json") if before else None,
+        after_state=policy.model_dump(mode="json"),
+    )
     return policy.model_dump(mode="json")
 
 
 @router.delete("/{policy_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_policy_endpoint(
     policy_id: str,
+    request: Request,
     ctx: auth_mod.ApiKeyContext = Depends(require_scope(auth_mod.SCOPE_POLICIES_WRITE)),
     session: AsyncSession = Depends(get_db_session),
 ) -> Response:
@@ -150,7 +180,17 @@ async def delete_policy_endpoint(
         pid_uuid = UUID(policy_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid policy_id")
+    before = await policies_repo.get_policy(session, ctx.project_id, pid_uuid)
     deleted = await policies_repo.delete_policy(session, ctx.project_id, pid_uuid)
     if not deleted:
         raise HTTPException(status_code=404, detail="policy not found")
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        POLICY_DELETE,
+        CATEGORY_POLICY,
+        resource_type="policy",
+        resource_id=str(pid_uuid),
+        before_state=before.model_dump(mode="json") if before else None,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

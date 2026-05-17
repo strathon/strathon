@@ -110,6 +110,14 @@ SCOPE_MODEL_PRICES_WRITE = "model_prices:write"
 # flips a project into allow-list mode.
 SCOPE_PROJECT_SETTINGS_READ = "project_settings:read"
 SCOPE_PROJECT_SETTINGS_WRITE = "project_settings:write"
+# Audit log. read covers /v1/audit/events* and /v1/audit/anchors.
+# write covers /v1/audit/streams (creating/managing webhook
+# destinations). admin is reserved for break-glass operations like
+# legal-hold release and partition admin; not currently used in
+# Stage 1 endpoints but the scope name is reserved.
+SCOPE_AUDIT_READ = "audit:read"
+SCOPE_AUDIT_WRITE = "audit:write"
+SCOPE_AUDIT_ADMIN = "audit:admin"
 
 KNOWN_SCOPES: frozenset[str] = frozenset({
     SCOPE_WILDCARD,
@@ -130,6 +138,9 @@ KNOWN_SCOPES: frozenset[str] = frozenset({
     SCOPE_MODEL_PRICES_WRITE,
     SCOPE_PROJECT_SETTINGS_READ,
     SCOPE_PROJECT_SETTINGS_WRITE,
+    SCOPE_AUDIT_READ,
+    SCOPE_AUDIT_WRITE,
+    SCOPE_AUDIT_ADMIN,
 })
 
 # Default scopes for a new SDK-style key. Enough to ingest traces and to

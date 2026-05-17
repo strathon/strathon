@@ -31,6 +31,31 @@ DB_URL = os.getenv(
 )
 
 
+# ---- Audit log HMAC key ----------------------------------------------------
+#
+# Every mutation endpoint calls ``audit.emit`` which loads the configured
+# HMAC key from ``STRATHON_AUDIT_HMAC_KEY``. The receiver refuses to start
+# in production with no key, and tests aren't production — but CI's test
+# environment doesn't set the env var either, so without a default the
+# entire TestClient-based test suite (api_key_scopes, audit_api, ...)
+# fails at app lifespan with ``RuntimeError: STRATHON_AUDIT_HMAC_KEY is
+# required in production``.
+#
+# We could solve this with autouse fixtures in every test file that uses
+# TestClient, but the cleaner solution is a single deterministic default
+# at conftest module load. Tests that want to exercise the fail-closed
+# path (e.g. ``test_emit_fails_closed_with_empty_key_in_prod``) explicitly
+# unset / override via ``monkeypatch.setenv`` and clear the lru_cache, so
+# they continue to work.
+#
+# The value is fixed (not randomized) so test runs are reproducible.
+# 64 hex chars = 32 bytes, the minimum the receiver accepts.
+os.environ.setdefault(
+    "STRATHON_AUDIT_HMAC_KEY",
+    "test_audit_hmac_key_do_not_use_in_production_aaaaaaaaaaaaaaaaaaaa",
+)
+
+
 @pytest_asyncio.fixture
 async def async_engine():
     """Async SQLAlchemy engine pointing at the test DB.

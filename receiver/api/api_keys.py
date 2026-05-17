@@ -28,10 +28,16 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
+import repositories.audit as audit_repo
 import repositories.auth as auth_repo
+from audit.actions import (
+    API_KEY_CREATE,
+    API_KEY_REVOKE,
+    CATEGORY_API_KEY,
+)
 from database import get_db_session
 
-from ._deps import coerce_project_id, require_scope
+from ._deps import build_audit_context, coerce_project_id, require_scope
 
 
 router = APIRouter(prefix="/v1/api_keys", tags=["api_keys"])
@@ -56,7 +62,7 @@ async def list_api_keys_endpoint(
 async def create_api_key_endpoint(
     payload: dict[str, Any],
     request: Request,
-    ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
+    ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_API_KEYS_WRITE)
     ),
     session: AsyncSession = Depends(get_db_session),
@@ -90,13 +96,35 @@ async def create_api_key_endpoint(
     # The raw key is returned ONCE. Callers must save it; it cannot be
     # retrieved later. Response shape: api_key fields flattened at the
     # top level, plus "key" for the raw secret.
-    return {**response.api_key.model_dump(mode="json"), "key": response.raw_key}
+    #
+    # Audit: log creation, but NEVER include the raw key bytes. The
+    # redaction module would strip "key" / "value" anyway, but excluding
+    # at the source is the defensive path. We record the prefix (a
+    # public identifier that appears in DB and logs) and the scope set.
+    api_key_dict = response.api_key.model_dump(mode="json")
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        API_KEY_CREATE,
+        CATEGORY_API_KEY,
+        resource_type="api_key",
+        resource_id=str(response.api_key.id),
+        after_state={
+            "id": api_key_dict.get("id"),
+            "name": api_key_dict.get("name"),
+            "key_prefix": api_key_dict.get("key_prefix"),
+            "scopes": api_key_dict.get("scopes"),
+            "project_id": api_key_dict.get("project_id"),
+        },
+    )
+    return {**api_key_dict, "key": response.raw_key}
 
 
 @router.delete("/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_api_key_endpoint(
     key_id: str,
-    ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
+    request: Request,
+    ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_API_KEYS_WRITE)
     ),
     session: AsyncSession = Depends(get_db_session),
@@ -108,4 +136,12 @@ async def revoke_api_key_endpoint(
     revoked = await auth_repo.revoke_api_key(session, kid_uuid)
     if not revoked:
         raise HTTPException(status_code=404, detail="api key not found or already revoked")
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        API_KEY_REVOKE,
+        CATEGORY_API_KEY,
+        resource_type="api_key",
+        resource_id=str(kid_uuid),
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

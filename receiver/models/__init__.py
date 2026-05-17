@@ -11,6 +11,7 @@ Do not move model classes to subpackages without re-exporting them here.
 """
 
 from .base import Base, TimestampMixin
+from .audit import AuditAnchor, AuditEvent, AuditStream
 from .core import ApiKey, Project, ProjectSettings, Session
 from .git import GitCommit, GitHubIntegration
 from .identity import ProjectMember, User
@@ -50,4 +51,8 @@ __all__ = [
     # Webhooks
     "WebhookDelivery",
     "WebhookSigningKey",
+    # Audit
+    "AuditAnchor",
+    "AuditEvent",
+    "AuditStream",
 ]

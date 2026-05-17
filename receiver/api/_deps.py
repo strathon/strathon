@@ -130,3 +130,59 @@ def coerce_project_id(request: Request, value: str | None) -> UUID:
                 detail=f"invalid project_id: {value}",
             )
     return request.app.state.default_project_id
+
+
+def build_audit_context(
+    request: Request,
+    ctx: auth.ApiKeyContext,
+):
+    """Build an :class:`EmitContext` from the request envelope.
+
+    Used by every mutation endpoint to record an audit event in the
+    same transaction as the mutation. Centralizing this here means
+    endpoint code stays a one-liner — ``audit.emit(session,
+    build_audit_context(request, ctx), ...)`` — and we get consistent
+    actor/source_ip/user_agent capture without each endpoint
+    re-implementing the same boilerplate.
+
+    The actor is the API key holder. When orgs+users ship, this
+    helper expands to thread the human-user identity through; the
+    API of build_audit_context stays the same.
+    """
+    import uuid as _uuid
+    from repositories.audit import EmitContext
+
+    # request.client may be None in some test transports; degrade
+    # gracefully rather than raise. The source_ip column is INET,
+    # which rejects non-IP strings (Starlette's TestClient supplies
+    # the literal "testclient" as host); we drop any non-parseable
+    # value so the audit insert always succeeds.
+    import ipaddress as _ipaddress
+    client = request.client
+    source_ip: str | None = None
+    if client is not None and client.host:
+        try:
+            _ipaddress.ip_address(client.host)
+            source_ip = client.host
+        except ValueError:
+            source_ip = None
+    user_agent = request.headers.get("user-agent")
+    # Prefer an upstream-supplied request-id (load balancer / proxy)
+    # so audit events correlate to ingest logs; mint one if missing.
+    request_id_header = request.headers.get("x-request-id")
+    try:
+        request_id = _uuid.UUID(request_id_header) if request_id_header else _uuid.uuid4()
+    except ValueError:
+        request_id = _uuid.uuid4()
+
+    return EmitContext(
+        actor_type="service_account",
+        actor_id=str(ctx.key_id),
+        actor_display=ctx.key_prefix,
+        project_id=ctx.project_id,
+        request_id=request_id,
+        source_ip=source_ip,
+        user_agent=user_agent,
+        api_key_id=str(ctx.key_id),
+        auth_method="apikey",
+    )

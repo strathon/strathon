@@ -41,11 +41,17 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
+import repositories.audit as audit_repo
 import repositories.webhook_signing_keys as keys_repo
+from audit.actions import (
+    CATEGORY_WEBHOOK_SIGNING_KEY,
+    WEBHOOK_SIGNING_KEY_CREATE,
+    WEBHOOK_SIGNING_KEY_REVOKE,
+)
 from database import get_db_session
 from webhooks.keystore import forget_secret_by_id, remember_secret
 
-from ._deps import coerce_project_id, require_scope
+from ._deps import build_audit_context, coerce_project_id, require_scope
 
 
 router = APIRouter(prefix="/v1/webhook_signing_keys", tags=["webhook_signing_keys"])
@@ -77,7 +83,7 @@ async def create_webhook_signing_key(
     payload: dict[str, Any] | None = None,
     *,
     request: Request,
-    ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
+    ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_WEBHOOK_SIGNING_KEYS_WRITE)
     ),
     session: AsyncSession = Depends(get_db_session),
@@ -108,6 +114,22 @@ async def create_webhook_signing_key(
     remember_secret(pid, result.plaintext, key_id=result.row.id)
 
     response = result.row.to_json()
+    # Audit: never log the plaintext secret. We record the id + prefix
+    # only; the secret never leaves the response body and is never
+    # available again to anyone, including the audit log.
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        WEBHOOK_SIGNING_KEY_CREATE,
+        CATEGORY_WEBHOOK_SIGNING_KEY,
+        resource_type="webhook_signing_key",
+        resource_id=str(result.row.id),
+        after_state={
+            "id": response.get("id"),
+            "prefix": response.get("prefix"),
+            "created_at": response.get("created_at"),
+        },
+    )
     response["secret"] = result.plaintext
     return response
 
@@ -116,7 +138,7 @@ async def create_webhook_signing_key(
 async def revoke_webhook_signing_key(
     key_id: str,
     request: Request,
-    ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
+    ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_WEBHOOK_SIGNING_KEYS_WRITE)
     ),
     session: AsyncSession = Depends(get_db_session),
@@ -157,6 +179,15 @@ async def revoke_webhook_signing_key(
     # first, this old key is being retired) keeps signing seamlessly.
     forget_secret_by_id(pid, kid_uuid)
 
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        WEBHOOK_SIGNING_KEY_REVOKE,
+        CATEGORY_WEBHOOK_SIGNING_KEY,
+        resource_type="webhook_signing_key",
+        resource_id=str(kid_uuid),
+        after_state={"revoked_at": revoked.to_json().get("revoked_at")},
+    )
     return revoked.to_json()
 
 

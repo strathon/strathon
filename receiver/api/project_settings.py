@@ -21,14 +21,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
+import repositories.audit as audit_repo
 import repositories.project_settings as project_settings_repo
+from audit.actions import CATEGORY_PROJECT_SETTINGS, PROJECT_SETTINGS_UPDATE
 from database import get_db_session
 
-from ._deps import require_scope
+from ._deps import build_audit_context, require_scope
 
 
 router = APIRouter(prefix="/v1/project/settings", tags=["project-settings"])
@@ -58,6 +60,7 @@ async def get_project_settings_endpoint(
 @router.patch("")
 async def update_project_settings_endpoint(
     payload: dict[str, Any],
+    request: Request,
     ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_PROJECT_SETTINGS_WRITE),
     ),
@@ -85,6 +88,10 @@ async def update_project_settings_endpoint(
             detail=f"unknown settings keys: {sorted(unknown)}",
         )
 
+    before_action = await project_settings_repo.load_intervention_default_action(
+        session, ctx.project_id,
+    )
+
     if "intervention_default_action" in payload:
         try:
             await project_settings_repo.update_intervention_default_action(
@@ -100,6 +107,16 @@ async def update_project_settings_endpoint(
     # with a separate GET to confirm.
     default_action = await project_settings_repo.load_intervention_default_action(
         session, ctx.project_id,
+    )
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        PROJECT_SETTINGS_UPDATE,
+        CATEGORY_PROJECT_SETTINGS,
+        resource_type="project_settings",
+        resource_id=str(ctx.project_id),
+        before_state={"intervention_default_action": before_action},
+        after_state={"intervention_default_action": default_action},
     )
     return {
         "intervention_default_action": default_action,
