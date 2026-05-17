@@ -162,6 +162,42 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ---- RBAC / Authentication ----
+
+    registration_enabled: bool = Field(
+        default=True, alias="STRATHON_REGISTRATION_ENABLED",
+        description=(
+            "Allow new user registration via POST /v1/auth/register. "
+            "Set to false for closed-registration deployments where an "
+            "admin adds users via the membership API."
+        ),
+    )
+    session_ttl_hours: int = Field(
+        default=24, alias="STRATHON_SESSION_TTL_HOURS", ge=1, le=720,
+        description=(
+            "Dashboard session token lifetime in hours. After expiry the "
+            "user must log in again. Default 24h balances security with "
+            "convenience for daily operator workflows."
+        ),
+    )
+    login_rate_limit_attempts: int = Field(
+        default=5, alias="STRATHON_LOGIN_RATE_LIMIT_ATTEMPTS", ge=1,
+        description=(
+            "Maximum login attempts per IP address within the rate limit "
+            "window. After this many attempts, further logins from the "
+            "same IP are rejected with 429 until the bucket refills."
+        ),
+    )
+    login_rate_limit_window_seconds: int = Field(
+        default=60, alias="STRATHON_LOGIN_RATE_LIMIT_WINDOW_SECONDS", ge=10,
+        description=(
+            "Rate limit window for login attempts. The token bucket "
+            "refills at (attempts / window) per second. Default: 5 "
+            "attempts per 60 seconds = ~1 attempt per 12 seconds "
+            "sustained, with burst capacity of 5."
+        ),
+    )
+
     # ---- Audit log ----
 
     audit_hmac_key: str = Field(

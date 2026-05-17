@@ -25,6 +25,9 @@ dependencies = [
     "authlib>=1.4.0",
     "cel-python>=0.4.0",
     "prometheus-client>=0.21.0",
+    # RBAC: password hashing with Argon2id (OWASP recommended).
+    # argon2-cffi wraps the reference C implementation.
+    "argon2-cffi>=25.1.0",
     # Webhook delivery infrastructure (commit C: reliable alert webhooks).
     # dramatiq is the queue layer; redis is its broker. standardwebhooks is
     # the spec library for HMAC-SHA256 signing per the Standard Webhooks

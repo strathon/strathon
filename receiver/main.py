@@ -321,6 +321,24 @@ async def lifespan(app: FastAPI):
         app.state.rate_limiter = None
         logger.info("Rate limiter disabled (STRATHON_RATE_LIMIT_ENABLED=false)")
 
+    # Login rate limiter — tighter per-IP bucket for brute-force
+    # protection on the /v1/auth/login endpoint. Separate from the
+    # general API rate limiter because login attempts need much lower
+    # thresholds (5/min vs 100/sec for normal API traffic).
+    from rate_limit import RateLimiterStore as _RLS
+    app.state.login_rate_limiter = _RLS(
+        capacity=receiver_settings_for_rl.login_rate_limit_attempts,
+        refill_per_second=(
+            receiver_settings_for_rl.login_rate_limit_attempts
+            / max(receiver_settings_for_rl.login_rate_limit_window_seconds, 1)
+        ),
+    )
+    logger.info(
+        "Login rate limiter: %d attempts per %ds",
+        receiver_settings_for_rl.login_rate_limit_attempts,
+        receiver_settings_for_rl.login_rate_limit_window_seconds,
+    )
+
     # Retention background task
     app.state.retention_config = retention.RetentionConfig.from_env()
     app.state.retention_shutdown = asyncio.Event()
@@ -517,9 +535,10 @@ app.add_middleware(RateLimitMiddleware)
 # Mount routers. Import here (after `app` exists) so router modules can
 # stay decoupled from main.py and not see import-order issues.
 from api import (  # noqa: E402
-    analytics, api_keys, audit, budgets, halts, health, intervention,
-    model_prices, policies, policy_templates, project_settings, projects,
-    simulate, spans, traces, webhook_deliveries, webhook_signing_keys,
+    analytics, api_keys, audit, auth_endpoints, budgets, halts, health,
+    intervention, members, model_prices, policies, policy_templates,
+    project_settings, projects, simulate, spans, traces,
+    webhook_deliveries, webhook_signing_keys,
 )
 
 app.include_router(health.router)
@@ -539,6 +558,9 @@ app.include_router(budgets.router)
 app.include_router(model_prices.router)
 app.include_router(project_settings.router)
 app.include_router(audit.router)
+# RBAC: auth + membership management
+app.include_router(auth_endpoints.router)
+app.include_router(members.router)
 
 
 @app.exception_handler(Exception)

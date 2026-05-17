@@ -174,12 +174,24 @@ def key_has_scope(key_scopes: tuple[str, ...], required: str) -> bool:
 
 @dataclass(frozen=True)
 class ApiKeyContext:
-    """The resolved identity for an authenticated request."""
+    """The resolved identity for an authenticated request.
+
+    Used for both API key and session-based authentication. For API keys,
+    user_id/role/auth_method use their defaults. For session auth, all
+    fields are populated and auth_method is "session".
+
+    Existing code that only reads key_id/project_id/key_prefix/scopes
+    works unchanged for both auth methods.
+    """
 
     key_id: UUID
     project_id: UUID
     key_prefix: str
     scopes: tuple[str, ...] = field(default_factory=tuple)
+    # RBAC extensions — populated for session auth, None for API key auth
+    user_id: Optional[UUID] = None
+    role: Optional[str] = None
+    auth_method: str = "apikey"
 
 
 # ---- Pure helpers (no DB) ------------------------------------------------
@@ -217,41 +229,86 @@ def _extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
 
 
 async def resolve_api_key(
-    session: AsyncSession, authorization: Optional[str]
+    session: AsyncSession,
+    authorization: Optional[str],
+    project_id_override: Optional[UUID] = None,
 ) -> ApiKeyContext:
     """Verify the Authorization header and return the resolved project context.
 
-    Raises HTTPException(401) on missing / malformed / unknown / revoked keys.
+    Supports two authentication methods:
+      1. API key: Bearer stra_... → existing API key lookup
+      2. Session token: Bearer <non-stra token> → session lookup + RBAC
 
-    The session passed in is the request-scoped session from
-    `Depends(get_db_session)`. The verification doesn't commit; the
-    last_used_at update piggybacks on whatever transaction the surrounding
-    endpoint produces.
+    For session auth, project_id_override MUST be provided (from
+    X-Project-Id header or URL path) because session tokens are
+    user-scoped, not project-scoped.
+
+    Raises HTTPException(401) on missing / malformed / unknown tokens.
     """
-    # Imported here to avoid circular import (repositories.auth imports from this module).
     from repositories.auth import verify_token_and_touch
 
     token = _extract_bearer_token(authorization)
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or malformed Authorization header. Expected: Bearer <api_key>",
+            detail="Missing or malformed Authorization header. Expected: Bearer <token>",
         )
 
-    key = await verify_token_and_touch(session, token)
-    if key is None:
-        # Same response whether the prefix didn't match or the hash didn't,
-        # to avoid leaking which prefixes exist.
+    # Route 1: API key (starts with stra_ prefix)
+    if token.startswith(KEY_SCHEME):
+        key = await verify_token_and_touch(session, token)
+        if key is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid API key",
+            )
+        return ApiKeyContext(
+            key_id=key.id,
+            project_id=key.project_id,
+            key_prefix=key.key_prefix,
+            scopes=tuple(key.scopes or ()),
+        )
+
+    # Route 2: Session token (dashboard auth)
+    from repositories.sessions import resolve_session_token
+    from repositories.members import get_user_role
+
+    sess = await resolve_session_token(session, token)
+    if sess is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key",
+            detail="Invalid or expired session token",
         )
 
+    if project_id_override is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Session auth requires a project context. "
+                "Provide X-Project-Id header or use a project-scoped URL."
+            ),
+        )
+
+    # Look up the user's role in the requested project
+    role = await get_user_role(session, project_id_override, sess.user_id)
+    if role is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not a member of this project",
+        )
+
+    # Map role → scopes
+    from rbac import ROLE_SCOPES
+    scopes = ROLE_SCOPES.get(role, frozenset())
+
     return ApiKeyContext(
-        key_id=key.id,
-        project_id=key.project_id,
-        key_prefix=key.key_prefix,
-        scopes=tuple(key.scopes or ()),
+        key_id=sess.id,
+        project_id=project_id_override,
+        key_prefix="session",
+        scopes=tuple(scopes),
+        user_id=sess.user_id,
+        role=role,
+        auth_method="session",
     )
 
 

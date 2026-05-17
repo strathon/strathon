@@ -45,16 +45,32 @@ async def _authenticated(
     request: Request,
     session: AsyncSession,
     authorization: str | None,
+    x_project_id: str | None = None,
 ) -> auth.ApiKeyContext:
     """Resolve a Bearer token and bump the auth Prometheus counters.
 
     Wraps `auth.resolve_api_key` so every authed endpoint contributes to
     auth_successes / auth_failures regardless of whether it uses the
     `require_auth` dependency wrapper or calls _authenticated directly.
+
+    For session-based auth, x_project_id (from the X-Project-Id header)
+    provides the project context. API key auth ignores it.
     """
     metrics = request.app.state.metrics
+
+    # Parse X-Project-Id into UUID if provided
+    project_id_override: UUID | None = None
+    if x_project_id:
+        try:
+            project_id_override = UUID(x_project_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid X-Project-Id header: {x_project_id}",
+            )
+
     try:
-        ctx = await auth.resolve_api_key(session, authorization)
+        ctx = await auth.resolve_api_key(session, authorization, project_id_override)
     except HTTPException:
         metrics.auth_failures.inc()
         raise
@@ -65,6 +81,7 @@ async def _authenticated(
 async def require_auth(
     request: Request,
     authorization: str | None = Header(default=None),
+    x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
     session: AsyncSession = Depends(get_db_session),
 ) -> auth.ApiKeyContext:
     """FastAPI dependency that resolves the Bearer token to a project context.
@@ -72,7 +89,7 @@ async def require_auth(
     Authentication only. Use `require_scope(...)` for endpoints that need
     a specific capability.
     """
-    return await _authenticated(request, session, authorization)
+    return await _authenticated(request, session, authorization, x_project_id)
 
 
 def require_scope(scope: str):
@@ -102,9 +119,10 @@ def require_scope(scope: str):
     async def _checker(
         request: Request,
         authorization: str | None = Header(default=None),
+        x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
         session: AsyncSession = Depends(get_db_session),
     ) -> auth.ApiKeyContext:
-        ctx = await _authenticated(request, session, authorization)
+        ctx = await _authenticated(request, session, authorization, x_project_id)
         if not auth.key_has_scope(ctx.scopes, scope):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -176,13 +194,47 @@ def build_audit_context(
         request_id = _uuid.uuid4()
 
     return EmitContext(
-        actor_type="service_account",
-        actor_id=str(ctx.key_id),
+        actor_type="user" if ctx.auth_method == "session" else "service_account",
+        actor_id=str(ctx.user_id or ctx.key_id),
         actor_display=ctx.key_prefix,
         project_id=ctx.project_id,
         request_id=request_id,
         source_ip=source_ip,
         user_agent=user_agent,
-        api_key_id=str(ctx.key_id),
-        auth_method="apikey",
+        api_key_id=str(ctx.key_id) if ctx.auth_method == "apikey" else None,
+        auth_method=ctx.auth_method,
     )
+
+
+def require_role(*allowed_roles: str):
+    """Build a FastAPI dependency that requires session auth with a specific role.
+
+    Usage:
+        @router.post("/v1/projects/{slug}/members")
+        async def add_member(
+            ctx: ApiKeyContext = Depends(require_role("owner", "admin")),
+            ...
+        ):
+            ...
+
+    Only works with session-based auth. API keys don't have roles.
+    Returns HTTP 403 if the user's role is not in allowed_roles.
+    """
+    async def _checker(
+        request: Request,
+        authorization: str | None = Header(default=None),
+        x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
+        session: AsyncSession = Depends(get_db_session),
+    ) -> auth.ApiKeyContext:
+        ctx = await _authenticated(request, session, authorization, x_project_id)
+        # API keys with wildcard scope can also access role-gated endpoints
+        if ctx.auth_method == "apikey" and auth.key_has_scope(ctx.scopes, auth.SCOPE_WILDCARD):
+            return ctx
+        if ctx.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"requires role: {' or '.join(allowed_roles)}",
+            )
+        return ctx
+
+    return _checker
