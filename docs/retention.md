@@ -44,16 +44,40 @@ of throughput, plenty for any realistic backlog scenario.
 
 ## Disabling per project
 
-Set `project_settings.trace_retention_days = 0` to retain that project's
+Set `trace_retention_days` to 0 via the REST API to retain that project's
 traces forever:
 
-```sql
-UPDATE project_settings
-SET trace_retention_days = 0
-WHERE project_id = '...';
+```http
+PATCH /v1/project/settings
+Content-Type: application/json
+Authorization: Bearer stra_…
+
+{"trace_retention_days": 0}
 ```
 
 The retention loop skips projects with `trace_retention_days = 0` entirely.
+
+## REST API
+
+Retention is configured via the project settings endpoints:
+
+```http
+GET /v1/project/settings
+Authorization: Bearer stra_…
+```
+
+Returns `{"intervention_default_action": "allow", "trace_retention_days": 30}`.
+
+```http
+PATCH /v1/project/settings
+Content-Type: application/json
+Authorization: Bearer stra_…
+
+{"trace_retention_days": 90}
+```
+
+Valid range: 1–3650 days. Set to 0 to disable retention for the project.
+Requires `project_settings:write` scope.
 
 ## Multi-process / horizontal scaling caveat
 

@@ -300,6 +300,37 @@ After the flag date the match expression returns false and the
 policy stops applying; the SDK doesn't need a separate "disable"
 action to retire the rule.
 
+## Policy version history
+
+Every policy mutation (create, update, delete) captures a versioned
+snapshot in the `policy_versions` table. Sequential numbering per
+policy. The audit log also captures before/after state, but the
+versions table provides faster queries, structured version numbers,
+and works independently of audit configuration.
+
+### Listing versions
+
+```http
+GET /v1/policies/{policy_id}/versions
+Authorization: Bearer stra_…
+```
+
+Returns versions newest-first. Each entry includes the full policy
+snapshot (name, match_expression, action, action_config, applies_to,
+enabled, priority) plus `change_type` (`create`, `update`, `delete`)
+and `changed_at`.
+
+### Getting a specific version
+
+```http
+GET /v1/policies/{policy_id}/versions/{version_number}
+Authorization: Bearer stra_…
+```
+
+Returns the exact policy state at that version number.
+
+Requires `policies:read` scope.
+
 ## Operator kill-switches: halts
 
 Policies are *conditional* — they fire when a CEL expression matches. Halts

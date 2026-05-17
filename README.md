@@ -223,8 +223,10 @@ Two attribute namespaces on every span:
   agent topology, and policy decisions
 
 Detailed docs: [intervention](docs/intervention.md),
+[analytics](docs/analytics.md),
 [budgets](docs/budgets.md), [audit](docs/audit.md),
-[spans](docs/spans.md), [redaction](docs/redaction.md),
+[spans](docs/spans.md), [projects](docs/projects.md),
+[redaction](docs/redaction.md),
 [observability](docs/observability.md), [retention](docs/retention.md),
 [sampling](docs/sampling.md), [self-hosting](docs/self-hosting.md),
 [api keys](docs/api_keys.md).
