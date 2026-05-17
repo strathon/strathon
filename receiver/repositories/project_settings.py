@@ -249,9 +249,54 @@ async def update_intervention_default_action(
     return new_value
 
 
+# ---- Retention settings ------------------------------------------------------
+
+MIN_RETENTION_DAYS: int = 1
+MAX_RETENTION_DAYS: int = 3650  # 10 years
+
+
+async def load_trace_retention_days(
+    session: AsyncSession, project_id: UUID,
+) -> int:
+    """Read the project's trace retention days. Default 30."""
+    stmt = select(ProjectSettings.trace_retention_days).where(
+        ProjectSettings.project_id == project_id,
+    )
+    result = await session.execute(stmt)
+    value = result.scalar_one_or_none()
+    return value if value is not None else 30
+
+
+async def update_trace_retention_days(
+    session: AsyncSession, project_id: UUID, days: int,
+) -> int:
+    """Set the project's trace retention days.
+
+    Raises ValueError if out of range [1, 3650].
+    """
+    if not isinstance(days, int) or days < MIN_RETENTION_DAYS or days > MAX_RETENTION_DAYS:
+        raise ValueError(
+            f"trace_retention_days must be between "
+            f"{MIN_RETENTION_DAYS} and {MAX_RETENTION_DAYS}, got {days!r}"
+        )
+    from sqlalchemy import text
+    await session.execute(
+        text(
+            "INSERT INTO project_settings (project_id, trace_retention_days) "
+            "VALUES (:pid, :val) "
+            "ON CONFLICT (project_id) DO UPDATE "
+            "SET trace_retention_days = EXCLUDED.trace_retention_days"
+        ),
+        {"pid": str(project_id), "val": days},
+    )
+    return days
+
+
 __all__ = [
     "VALID_INTERVENTION_DEFAULT_ACTIONS",
     "load_intervention_default_action",
     "load_redaction_config",
+    "load_trace_retention_days",
     "update_intervention_default_action",
+    "update_trace_retention_days",
 ]

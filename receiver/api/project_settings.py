@@ -52,8 +52,12 @@ async def get_project_settings_endpoint(
     default_action = await project_settings_repo.load_intervention_default_action(
         session, ctx.project_id,
     )
+    retention_days = await project_settings_repo.load_trace_retention_days(
+        session, ctx.project_id,
+    )
     return {
         "intervention_default_action": default_action,
+        "trace_retention_days": retention_days,
     }
 
 
@@ -80,7 +84,7 @@ async def update_project_settings_endpoint(
             detail="request body must be a JSON object",
         )
 
-    allowed_keys = {"intervention_default_action"}
+    allowed_keys = {"intervention_default_action", "trace_retention_days"}
     unknown = set(payload.keys()) - allowed_keys
     if unknown:
         raise HTTPException(
@@ -89,6 +93,9 @@ async def update_project_settings_endpoint(
         )
 
     before_action = await project_settings_repo.load_intervention_default_action(
+        session, ctx.project_id,
+    )
+    before_retention = await project_settings_repo.load_trace_retention_days(
         session, ctx.project_id,
     )
 
@@ -103,9 +110,21 @@ async def update_project_settings_endpoint(
                 detail=str(exc),
             ) from None
 
-    # Return the post-update view so callers don't have to chase up
-    # with a separate GET to confirm.
+    if "trace_retention_days" in payload:
+        try:
+            await project_settings_repo.update_trace_retention_days(
+                session, ctx.project_id, payload["trace_retention_days"],
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from None
+
     default_action = await project_settings_repo.load_intervention_default_action(
+        session, ctx.project_id,
+    )
+    retention_days = await project_settings_repo.load_trace_retention_days(
         session, ctx.project_id,
     )
     await audit_repo.emit(
@@ -115,9 +134,16 @@ async def update_project_settings_endpoint(
         CATEGORY_PROJECT_SETTINGS,
         resource_type="project_settings",
         resource_id=str(ctx.project_id),
-        before_state={"intervention_default_action": before_action},
-        after_state={"intervention_default_action": default_action},
+        before_state={
+            "intervention_default_action": before_action,
+            "trace_retention_days": before_retention,
+        },
+        after_state={
+            "intervention_default_action": default_action,
+            "trace_retention_days": retention_days,
+        },
     )
     return {
         "intervention_default_action": default_action,
+        "trace_retention_days": retention_days,
     }

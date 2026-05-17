@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone
 
 from sqlalchemy import text
@@ -28,7 +29,7 @@ logger = logging.getLogger("strathon.receiver.spans_worker")
 
 MAINTENANCE_INTERVAL_SECONDS: int = 6 * 60 * 60  # every 6 hours
 PREMAKE_MONTHS: int = 3
-RETENTION_MONTHS: int = 12
+RETENTION_MONTHS: int = int(os.environ.get("STRATHON_SPAN_PARTITION_RETENTION_MONTHS", "12"))
 
 # All three tables are co-partitioned with the same monthly RANGE
 # on start_time_unix_nano. Partitions must be created and dropped

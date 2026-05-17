@@ -439,7 +439,10 @@ def test_project_settings_update_emits_audit(client):
     assert events
     latest = events[0]
     assert latest["before_state"] is not None
-    assert latest["after_state"] == {"intervention_default_action": "block"}
+    assert latest["after_state"] == {
+        "intervention_default_action": "block",
+        "trace_retention_days": 30,
+    }
 
     # Restore so other tests don't see allow-list mode.
     client.patch(
