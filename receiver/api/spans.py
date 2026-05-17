@@ -123,6 +123,15 @@ async def list_spans_endpoint(
     workflow_name: Optional[str] = Query(default=None),
     conversation_id: Optional[str] = Query(default=None),
     provider_name: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(
+        default=None,
+        description=(
+            "Full-text search query. Matches against span name, "
+            "agent_name, tool_name, operation_name, and request_model. "
+            "Uses websearch syntax: 'send email' matches both words, "
+            "'send OR email' matches either, '-internal' excludes."
+        ),
+    ),
     cursor: Optional[str] = Query(default=None),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
     ctx: auth_mod.ApiKeyContext = Depends(
@@ -175,6 +184,7 @@ async def list_spans_endpoint(
             start_before=start_before_ns,
             filters=filters or None,
             attr_contains=attr_contains,
+            query=q,
         )
     except ValueError as exc:
         raise HTTPException(

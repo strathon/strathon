@@ -75,12 +75,15 @@ async def list_spans(
     start_before: Optional[int] = None,
     filters: Optional[dict[str, str]] = None,
     attr_contains: Optional[dict[str, Any]] = None,
+    query: Optional[str] = None,
 ) -> SpanListResult:
     """Search spans for a project.
 
     ``filters`` is a dict of column_name → value for the denormalized
     columns. ``attr_contains`` is a dict passed to the ``@>`` operator
-    against the JSONB ``attributes`` column.
+    against the JSONB ``attributes`` column. ``query`` is a free-text
+    search string matched against the search_vector tsvector column
+    using websearch_to_tsquery.
 
     Returns a page of rows (as dicts) plus an opaque cursor for the
     next page, or None if no more.
@@ -113,6 +116,13 @@ async def list_spans(
     if attr_contains:
         clauses.append("attributes @> CAST(:attr_json AS jsonb)")
         params["attr_json"] = json.dumps(attr_contains)
+
+    # Full-text search.
+    if query and query.strip():
+        clauses.append(
+            "search_vector @@ websearch_to_tsquery('simple', :fts_query)"
+        )
+        params["fts_query"] = query.strip()
 
     # Cursor (keyset pagination).
     if cursor:
