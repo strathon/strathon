@@ -194,3 +194,57 @@ async def delete_policy_endpoint(
         before_state=before.model_dump(mode="json") if before else None,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---- Version history endpoints -----------------------------------------------
+
+
+@router.get("/{policy_id}/versions")
+async def list_policy_versions(
+    policy_id: str,
+    ctx: auth_mod.ApiKeyContext = Depends(
+        require_scope(auth_mod.SCOPE_POLICIES_READ)
+    ),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """List the version history of a policy, newest first."""
+    try:
+        pid_uuid = UUID(policy_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid policy_id")
+    versions = await policies_repo.list_versions(
+        session, ctx.project_id, pid_uuid
+    )
+    # Serialize UUIDs and datetimes for JSON.
+    for v in versions:
+        v["policy_id"] = str(v["policy_id"])
+        v["project_id"] = str(v["project_id"])
+        if v.get("changed_at"):
+            v["changed_at"] = v["changed_at"].isoformat()
+    return {"data": versions}
+
+
+@router.get("/{policy_id}/versions/{version}")
+async def get_policy_version(
+    policy_id: str,
+    version: int,
+    ctx: auth_mod.ApiKeyContext = Depends(
+        require_scope(auth_mod.SCOPE_POLICIES_READ)
+    ),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Get a specific version snapshot of a policy."""
+    try:
+        pid_uuid = UUID(policy_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid policy_id")
+    v = await policies_repo.get_version(
+        session, ctx.project_id, pid_uuid, version
+    )
+    if v is None:
+        raise HTTPException(status_code=404, detail="version not found")
+    v["policy_id"] = str(v["policy_id"])
+    v["project_id"] = str(v["project_id"])
+    if v.get("changed_at"):
+        v["changed_at"] = v["changed_at"].isoformat()
+    return v

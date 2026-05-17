@@ -29,7 +29,7 @@ from uuid import UUID
 from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Policy, PolicyMatch
+from models import Policy, PolicyMatch, PolicyVersion
 from policies_eval import validate_expression
 from schemas.policies import VALID_ACTIONS, PolicyRead, validate_action_config
 
@@ -119,7 +119,9 @@ async def create_policy(
     # at the request boundary, not here.
     await session.flush()
     await session.refresh(policy)
-    return PolicyRead.model_validate(policy)
+    result = PolicyRead.model_validate(policy)
+    await _capture_version(session, result, "create")
+    return result
 
 
 async def update_policy(
@@ -184,7 +186,11 @@ async def update_policy(
     )
     result = await session.execute(stmt)
     policy = result.scalar_one_or_none()
-    return PolicyRead.model_validate(policy) if policy is not None else None
+    if policy is None:
+        return None
+    updated = PolicyRead.model_validate(policy)
+    await _capture_version(session, updated, "update")
+    return updated
 
 
 async def delete_policy(
@@ -192,14 +198,20 @@ async def delete_policy(
     project_id: UUID,
     policy_id: UUID,
 ) -> bool:
-    """Hard-delete a policy. Returns True iff a row was actually deleted."""
+    """Hard-delete a policy. Returns True iff a row was actually deleted.
+
+    Captures a final 'delete' version snapshot before removal.
+    """
+    # Capture the policy state before deletion for the version log.
+    before = await get_policy(session, project_id, policy_id)
+    if before is not None:
+        await _capture_version(session, before, "delete")
+
     stmt = delete(Policy).where(
         Policy.project_id == project_id,
         Policy.id == policy_id,
     )
     result = await session.execute(stmt)
-    # rowcount is on the runtime CursorResult; SQLAlchemy 2.x stubs
-    # type session.execute() as the protocol Result, which omits it.
     return bool(result.rowcount)  # type: ignore[attr-defined]
 
 
@@ -236,3 +248,84 @@ async def record_match(
         await session.execute(stmt)
     except Exception:
         logger.exception("failed to record policy match for policy %s", policy_id)
+
+
+# ---- Version tracking --------------------------------------------------------
+
+
+async def _next_version(session: AsyncSession, policy_id: UUID) -> int:
+    """Get the next version number for a policy."""
+    from sqlalchemy import text
+    result = await session.execute(
+        text(
+            "SELECT COALESCE(MAX(version), 0) + 1 "
+            "FROM policy_versions WHERE policy_id = :pid"
+        ),
+        {"pid": policy_id},
+    )
+    return result.scalar_one()
+
+
+async def _capture_version(
+    session: AsyncSession,
+    policy: PolicyRead,
+    change_type: str,
+) -> None:
+    """Insert a version snapshot for a policy."""
+    version = await _next_version(session, policy.id)
+    session.add(PolicyVersion(
+        policy_id=policy.id,
+        project_id=policy.project_id,
+        version=version,
+        name=policy.name,
+        description=policy.description,
+        match_expression=policy.match_expression,
+        action=policy.action,
+        action_config=policy.action_config,
+        applies_to=list(policy.applies_to),
+        enabled=policy.enabled,
+        priority=policy.priority,
+        change_type=change_type,
+    ))
+    await session.flush()
+
+
+async def list_versions(
+    session: AsyncSession,
+    project_id: UUID,
+    policy_id: UUID,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """List version history for a policy, newest first."""
+    from sqlalchemy import text
+    result = await session.execute(
+        text(
+            "SELECT * FROM policy_versions "
+            "WHERE policy_id = :pid AND project_id = :proj "
+            "ORDER BY version DESC "
+            "LIMIT :lim"
+        ),
+        {"pid": policy_id, "proj": project_id, "lim": limit},
+    )
+    return [dict(r) for r in result.mappings().all()]
+
+
+async def get_version(
+    session: AsyncSession,
+    project_id: UUID,
+    policy_id: UUID,
+    version: int,
+) -> dict[str, Any] | None:
+    """Get a specific version of a policy."""
+    from sqlalchemy import text
+    result = await session.execute(
+        text(
+            "SELECT * FROM policy_versions "
+            "WHERE policy_id = :pid AND project_id = :proj "
+            "AND version = :ver "
+            "LIMIT 1"
+        ),
+        {"pid": policy_id, "proj": project_id, "ver": version},
+    )
+    row = result.mappings().first()
+    return dict(row) if row is not None else None

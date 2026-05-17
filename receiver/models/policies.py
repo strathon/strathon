@@ -118,3 +118,44 @@ class PolicyMatch(Base):
         Index("idx_policy_matches_project", "project_id", text("matched_at DESC")),
         Index("idx_policy_matches_trace", "trace_id"),
     )
+
+
+class PolicyVersion(Base):
+    """Snapshot of a policy at a point in time."""
+
+    __tablename__ = "policy_versions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    policy_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("policies.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    match_expression: Mapped[str] = mapped_column(Text, nullable=False)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    action_config: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    applies_to: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{}'")
+    )
+    enabled: Mapped[bool] = mapped_column(nullable=False, server_default=text("TRUE"))
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+
+    change_type: Mapped[str] = mapped_column(Text, nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_policy_versions_policy", "policy_id", text("version DESC")),
+    )

@@ -16,7 +16,7 @@ from .core import ApiKey, Project, ProjectSettings, Session
 from .git import GitCommit, GitHubIntegration
 from .identity import ProjectMember, User
 from .intervention import Budget, HaltState, InterventionLog, ModelPriceOverride
-from .policies import Policy, PolicyMatch
+from .policies import Policy, PolicyMatch, PolicyVersion
 from .traces import Span, SpanEvent, SpanLink, Trace
 from .webhooks import WebhookDelivery, WebhookSigningKey
 
@@ -40,6 +40,7 @@ __all__ = [
     # Policies
     "Policy",
     "PolicyMatch",
+    "PolicyVersion",
     # Intervention
     "Budget",
     "HaltState",
