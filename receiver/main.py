@@ -518,8 +518,8 @@ app.add_middleware(RateLimitMiddleware)
 # stay decoupled from main.py and not see import-order issues.
 from api import (  # noqa: E402
     analytics, api_keys, audit, budgets, halts, health, intervention,
-    model_prices, policies, project_settings, projects, simulate, spans,
-    traces, webhook_deliveries, webhook_signing_keys,
+    model_prices, policies, policy_templates, project_settings, projects,
+    simulate, spans, traces, webhook_deliveries, webhook_signing_keys,
 )
 
 app.include_router(health.router)
@@ -528,6 +528,7 @@ app.include_router(spans.router)
 app.include_router(analytics.router)
 app.include_router(projects.router)
 app.include_router(policies.router)
+app.include_router(policy_templates.router)
 app.include_router(simulate.router)
 app.include_router(api_keys.router)
 app.include_router(intervention.router)
