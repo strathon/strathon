@@ -186,7 +186,7 @@ async def upsert_span(
 
     stmt = pg_insert(Span).values(**insert_values)
     stmt = stmt.on_conflict_do_update(
-        index_elements=[Span.trace_id, Span.span_id],
+        index_elements=[Span.start_time_unix_nano, Span.trace_id, Span.span_id],
         set_={
             "end_time_unix_nano": stmt.excluded.end_time_unix_nano,
             "status_code": stmt.excluded.status_code,

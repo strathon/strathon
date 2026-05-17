@@ -135,6 +135,10 @@ async def list_spans(
         f"ORDER BY start_time_unix_nano DESC, trace_id DESC, span_id DESC "
         f"LIMIT :limit"
     )
+    # Force custom plan so Postgres uses plan-time partition pruning
+    # instead of switching to a generic plan after the 6th execution.
+    # See Opus research §6: PG 16 prepared-statement interaction.
+    await session.execute(text("SET LOCAL plan_cache_mode = 'force_custom_plan'"))
     result = await session.execute(sql, params)
     rows = [dict(r) for r in result.mappings().all()]
 

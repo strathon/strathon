@@ -79,6 +79,19 @@ async def async_engine():
         await engine.dispose()
         pytest.skip("Postgres not reachable for repository tests")
 
+    # Create test partitions covering the fake timestamp ranges used by
+    # tests (start_time_unix_nano values like 1000, 2000, 1_000_000_000_000).
+    # Production partitions cover 2026+ months. Tests use small values
+    # that fall outside any real month, so we need a catch-all test partition.
+    # Range: 0 to 2026-01-01T00:00:00Z in nanoseconds (1767225600000000000).
+    async with engine.begin() as conn:
+        for tbl in ("spans", "span_events", "span_links"):
+            await conn.execute(text(
+                f"CREATE TABLE IF NOT EXISTS {tbl}_test "
+                f"PARTITION OF {tbl} "
+                f"FOR VALUES FROM (0) TO (1767225600000000000)"
+            ))
+
     try:
         yield engine
     finally:

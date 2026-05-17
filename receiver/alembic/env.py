@@ -97,29 +97,45 @@ def run_migrations_offline() -> None:
 def _include_object(object_, name, type_, reflected, compare_to):
     """Exclude objects this project manages via hand-written raw SQL.
 
-    Strathon's migrations use ``op.execute()`` with raw SQL, not
-    SQLAlchemy autogenerate. ``alembic check`` exists to flag genuine
-    drift between models and DB (a forgotten migration), so we keep
-    it on for the default schema. The ``audit`` schema diverges from
-    pure-ORM expectations: the migration creates BRIN/partial/composite
-    indexes, append-only triggers, REVOKE statements, table comments,
-    and monthly partition child tables that have no SQLAlchemy
-    counterpart. ``alembic check`` would mis-report all of these as
-    drift.
+    Two categories are excluded from alembic check:
 
-    The audit ORM models exist so application code can use the
-    typed mapped classes; they are intentionally not the
-    authoritative description of every index and trigger. Excluding
-    the audit schema from the drift check makes the two layers
-    consistent: migration owns the DDL, models own the typed
-    attributes.
+    1. The ``audit`` schema — managed entirely by raw SQL migrations
+       with BRIN/partial/composite indexes, append-only triggers,
+       REVOKE statements, and monthly partition child tables.
+
+    2. Partition child tables for ``spans``, ``span_events``, and
+       ``span_links``. Declarative partitioning creates child tables
+       (``spans_y2026m05``, ``span_events_test``, etc.) that inherit
+       from the parent and have auto-propagated indexes and FK
+       constraints. These have no ORM model counterpart; alembic
+       would mis-report all of them as drift.
     """
+    import re
+
     schema = getattr(object_, "schema", None)
-    # Index/constraint objects expose their table via .table
     if schema is None and hasattr(object_, "table"):
         schema = getattr(object_.table, "schema", None)
     if schema == "audit":
         return False
+
+    # Exclude partition child tables and their indexes/constraints.
+    _PARTITION_RE = re.compile(
+        r"^(spans|span_events|span_links)_(y\d{4}m\d{2}|test)(_|$)"
+    )
+    tbl_name = None
+    if type_ == "table" and name:
+        tbl_name = name
+    elif hasattr(object_, "table"):
+        tbl_name = getattr(object_.table, "name", None)
+    if tbl_name and _PARTITION_RE.match(tbl_name):
+        return False
+
+    # Also exclude per-partition FK constraints that reference partition
+    # tables (they show up as FK diffs on the parent).
+    if type_ == "foreign_key_constraint" and name:
+        if re.search(r"fkey\d+$", name):
+            return False
+
     return True
 
 

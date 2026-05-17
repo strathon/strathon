@@ -134,10 +134,17 @@ class Trace(Base):
 
 
 class Span(Base):
-    """OTel span. Composite PK on (trace_id, span_id)."""
+    """OTel span. Composite PK on (start_time_unix_nano, trace_id, span_id).
+
+    Partitioned by RANGE on start_time_unix_nano (monthly). The partition
+    key must be part of the PK per Postgres declarative partitioning rules.
+    """
 
     __tablename__ = "spans"
 
+    start_time_unix_nano: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, primary_key=True
+    )
     trace_id: Mapped[bytes] = mapped_column(
         LargeBinary,
         ForeignKey("traces.id", ondelete="CASCADE"),
@@ -150,7 +157,6 @@ class Span(Base):
     # OTel core
     name: Mapped[str] = mapped_column(Text, nullable=False)
     kind: Mapped[str] = mapped_column(Text, nullable=False)
-    start_time_unix_nano: Mapped[int] = mapped_column(BigInteger, nullable=False)
     end_time_unix_nano: Mapped[Optional[int]] = mapped_column(BigInteger)
     status_code: Mapped[Optional[str]] = mapped_column(Text)
     status_message: Mapped[Optional[str]] = mapped_column(Text)
@@ -194,7 +200,8 @@ class Span(Base):
     events: Mapped[list["SpanEvent"]] = relationship(
         back_populates="span",
         primaryjoin=(
-            "and_(SpanEvent.trace_id == Span.trace_id, "
+            "and_(SpanEvent.start_time_unix_nano == Span.start_time_unix_nano, "
+            "SpanEvent.trace_id == Span.trace_id, "
             "SpanEvent.span_id == Span.span_id)"
         ),
         cascade="all, delete-orphan",
@@ -202,7 +209,8 @@ class Span(Base):
     links: Mapped[list["SpanLink"]] = relationship(
         back_populates="span",
         primaryjoin=(
-            "and_(SpanLink.trace_id == Span.trace_id, "
+            "and_(SpanLink.start_time_unix_nano == Span.start_time_unix_nano, "
+            "SpanLink.trace_id == Span.trace_id, "
             "SpanLink.span_id == Span.span_id)"
         ),
         cascade="all, delete-orphan",
@@ -275,10 +283,13 @@ class Span(Base):
 
 
 class SpanEvent(Base):
-    """OTel span event — used for intervention moments. Append-only audit row."""
+    """OTel span event. Co-partitioned with spans by start_time_unix_nano."""
 
     __tablename__ = "span_events"
 
+    start_time_unix_nano: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, primary_key=True
+    )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     trace_id: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     span_id: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
@@ -294,30 +305,26 @@ class SpanEvent(Base):
 
     __table_args__ = (
         ForeignKeyConstraint(
-            ["trace_id", "span_id"],
-            ["spans.trace_id", "spans.span_id"],
+            ["start_time_unix_nano", "trace_id", "span_id"],
+            ["spans.start_time_unix_nano", "spans.trace_id", "spans.span_id"],
             ondelete="CASCADE",
         ),
-        Index("idx_span_events_trace", "trace_id", "time_unix_nano"),
         Index(
-            "idx_span_events_intervention",
-            "project_id",
-            text("time_unix_nano DESC"),
-            postgresql_where=text(
-                "name IN ('strathon.intervention.blocked', "
-                "'strathon.intervention.steered', "
-                "'strathon.intervention.budget_exceeded', "
-                "'strathon.intervention.loop_detected')"
-            ),
+            "idx_span_events_span",
+            "start_time_unix_nano", "trace_id", "span_id",
         ),
+        Index("idx_span_events_time", "time_unix_nano"),
     )
 
 
 class SpanLink(Base):
-    """Non-tree edges between spans — tool→llm provenance, retry-from-checkpoint, etc."""
+    """Non-tree edges between spans. Co-partitioned with spans."""
 
     __tablename__ = "span_links"
 
+    start_time_unix_nano: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, primary_key=True
+    )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     trace_id: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     span_id: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
@@ -332,9 +339,12 @@ class SpanLink(Base):
 
     __table_args__ = (
         ForeignKeyConstraint(
-            ["trace_id", "span_id"],
-            ["spans.trace_id", "spans.span_id"],
+            ["start_time_unix_nano", "trace_id", "span_id"],
+            ["spans.start_time_unix_nano", "spans.trace_id", "spans.span_id"],
             ondelete="CASCADE",
         ),
-        Index("idx_span_links_span", "trace_id", "span_id"),
+        Index(
+            "idx_span_links_span",
+            "start_time_unix_nano", "trace_id", "span_id",
+        ),
     )
