@@ -261,6 +261,16 @@ class Span(Base):
             "end_time_unix_nano",
             postgresql_where=text("cost_usd IS NOT NULL"),
         ),
+        # GIN index for JSONB attribute containment queries (@>).
+        # Uses jsonb_path_ops operator class for a compact index that
+        # supports the @> operator used by span search filtering.
+        # Created by migration 011.
+        Index(
+            "idx_spans_attributes_gin",
+            "attributes",
+            postgresql_using="gin",
+            postgresql_ops={"attributes": "jsonb_path_ops"},
+        ),
     )
 
 

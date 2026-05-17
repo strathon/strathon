@@ -68,6 +68,7 @@ RAW_KEY_RANDOM_BYTES = 32  # secrets.token_urlsafe(32) -> 43 base64url chars
 SCOPE_WILDCARD = "*"
 
 SCOPE_TRACES_WRITE = "traces:write"
+SCOPE_TRACES_READ = "traces:read"
 SCOPE_POLICIES_READ = "policies:read"
 SCOPE_POLICIES_WRITE = "policies:write"
 SCOPE_API_KEYS_READ = "api_keys:read"
@@ -122,6 +123,7 @@ SCOPE_AUDIT_ADMIN = "audit:admin"
 KNOWN_SCOPES: frozenset[str] = frozenset({
     SCOPE_WILDCARD,
     SCOPE_TRACES_WRITE,
+    SCOPE_TRACES_READ,
     SCOPE_POLICIES_READ,
     SCOPE_POLICIES_WRITE,
     SCOPE_API_KEYS_READ,
@@ -262,6 +264,7 @@ __all__ = [
     "SCOPE_POLICIES_READ",
     "SCOPE_POLICIES_WRITE",
     "SCOPE_TRACES_WRITE",
+    "SCOPE_TRACES_READ",
     "SCOPE_WILDCARD",
     "generate_api_key",
     "key_has_scope",
