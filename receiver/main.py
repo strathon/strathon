@@ -575,7 +575,7 @@ app.add_middleware(RateLimitMiddleware)
 from api import (  # noqa: E402
     analytics, api_keys, audit, auth_endpoints, budgets, costs, halts, health,
     intervention, members, model_prices, policies, policy_templates,
-    project_settings, projects, simulate, spans, traces,
+    project_settings, projects, simulate, spans, topology, traces,
     webhook_deliveries, webhook_signing_keys,
 )
 
@@ -584,6 +584,7 @@ app.include_router(traces.router)
 app.include_router(spans.router)
 app.include_router(analytics.router)
 app.include_router(costs.router)
+app.include_router(topology.router)
 app.include_router(projects.router)
 app.include_router(policies.router)
 app.include_router(policy_templates.router)
