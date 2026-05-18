@@ -84,6 +84,7 @@ class PolicyCreate(BaseModel):
     applies_to: list[str] = Field(default_factory=list)
     enabled: bool = True
     priority: int = 0
+    shadow: bool = False
 
 
 class PolicyUpdate(BaseModel):
@@ -118,5 +119,6 @@ class PolicyRead(BaseModel):
     priority: int
     match_count: int = 0
     last_matched_at: Optional[datetime] = None
+    shadow: bool = False
     created_at: datetime
     updated_at: datetime

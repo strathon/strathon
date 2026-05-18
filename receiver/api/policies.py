@@ -99,6 +99,7 @@ async def create_policy_endpoint(
             applies_to=payload.get("applies_to"),
             enabled=payload.get("enabled", True),
             priority=payload.get("priority", 0),
+            shadow=payload.get("shadow", False),
         )
     except PolicyExpressionError as exc:
         raise HTTPException(
@@ -140,6 +141,7 @@ class PolicyExportItem(BaseModel):
     applies_to: list[str] = Field(default_factory=list)
     enabled: bool = True
     priority: int = 0
+    shadow: bool = False
 
 
 class PolicyImportResult(BaseModel):
@@ -173,6 +175,7 @@ async def export_policies_endpoint(
             applies_to=p.applies_to,
             enabled=p.enabled,
             priority=p.priority,
+            shadow=p.shadow,
         ).model_dump()
         for p in policies
     ]
@@ -248,6 +251,7 @@ async def import_policies_endpoint(
                 applies_to=parsed.applies_to,
                 enabled=parsed.enabled,
                 priority=parsed.priority,
+                shadow=parsed.shadow,
             )
             existing_signatures.add(sig)
             created += 1
@@ -403,6 +407,42 @@ async def get_policy_version(
     if v.get("changed_at"):
         v["changed_at"] = v["changed_at"].isoformat()
     return v
+
+
+# ---- Shadow stats ------------------------------------------------------------
+
+
+@router.get("/{policy_id}/shadow-stats")
+async def get_shadow_stats(
+    policy_id: str,
+    ctx: auth_mod.ApiKeyContext = Depends(require_scope(auth_mod.SCOPE_POLICIES_READ)),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Return match statistics for a shadow policy.
+
+    Useful for evaluating a shadow policy's match rate before promoting
+    it to enforcement. Returns match_count, last_matched_at, and the
+    shadow flag.
+    """
+    try:
+        pid_uuid = UUID(policy_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid policy id")
+    policy = await policies_repo.get_policy(session, ctx.project_id, pid_uuid)
+    if policy is None:
+        raise HTTPException(status_code=404, detail="policy not found")
+    return {
+        "policy_id": str(policy.id),
+        "name": policy.name,
+        "shadow": policy.shadow,
+        "match_count": policy.match_count,
+        "last_matched_at": (
+            policy.last_matched_at.isoformat()
+            if policy.last_matched_at else None
+        ),
+        "enabled": policy.enabled,
+        "action": policy.action,
+    }
 
 
 # ---- Batch operations --------------------------------------------------------

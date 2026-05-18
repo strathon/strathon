@@ -235,12 +235,18 @@ async def ingest_traces(
                     merged_attrs["strathon.policy.matched_ids"] = ",".join(matched_ids)
                     merged_attrs["strathon.policy.matched_actions"] = ",".join(matched_actions)
                     for p in matched_policies:
-                        outcome = {
-                            "log": "logged",
-                            "alert": "alert_queued",
-                            "block": "block_recorded",
-                            "steer": "steer_recorded",
-                        }.get(p["action"], "recorded")
+                        is_shadow = p.get("shadow", False)
+                        # Shadow policies record matches but don't enforce.
+                        # Log and alert actions still fire for shadow policies.
+                        if is_shadow and p["action"] in ("block", "steer", "throttle"):
+                            outcome = "shadow_recorded"
+                        else:
+                            outcome = {
+                                "log": "logged",
+                                "alert": "alert_queued",
+                                "block": "block_recorded",
+                                "steer": "steer_recorded",
+                            }.get(p["action"], "recorded")
                         span_matches.append({
                             "policy_id": p["id"],
                             "trace_id": trace_id,
@@ -250,6 +256,7 @@ async def ingest_traces(
                             "metadata": {
                                 "span_name": span.name,
                                 "policy_name": p["name"],
+                                "shadow": is_shadow,
                             },
                         })
 

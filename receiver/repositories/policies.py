@@ -89,18 +89,14 @@ async def create_policy(
     applies_to: Optional[list[str]] = None,
     enabled: bool = True,
     priority: int = 0,
+    shadow: bool = False,
 ) -> PolicyRead:
     """Insert a policy. Validates action enum and CEL expression before write."""
     if action not in VALID_ACTIONS:
         raise ValueError(
             f"action must be one of {sorted(VALID_ACTIONS)}, got {action!r}"
         )
-    # Action-specific config validation (e.g. throttle requires
-    # max_calls/window_seconds/scope shape). Raises ValueError on bad
-    # shape; the API layer maps that to a 400.
     validate_action_config(action, action_config or {})
-    # Raises PolicyExpressionError on malformed CEL — caller's HTTPException
-    # handler turns this into a 400.
     validate_expression(match_expression)
 
     policy = Policy(
@@ -113,6 +109,7 @@ async def create_policy(
         applies_to=list(applies_to or []),
         enabled=enabled,
         priority=priority,
+        shadow=shadow,
     )
     session.add(policy)
     # Flush so id and timestamps populate before we serialize. Commit happens
@@ -143,6 +140,7 @@ async def update_policy(
         "applies_to",
         "enabled",
         "priority",
+        "shadow",
     }
     updates = {k: v for k, v in changes.items() if k in allowed and v is not None}
     if not updates:

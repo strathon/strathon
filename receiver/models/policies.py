@@ -64,6 +64,13 @@ class Policy(Base, TimestampMixin):
         TIMESTAMP(timezone=True),
         comment="Timestamp of the most recent match.",
     )
+    shadow: Mapped[bool] = mapped_column(
+        nullable=False, server_default=text("FALSE"),
+        comment=(
+            "Shadow mode: evaluates and records matches but does not "
+            "enforce block/steer/throttle. Log and alert still fire."
+        ),
+    )
 
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="policies")
