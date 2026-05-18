@@ -293,6 +293,9 @@ async def ingest_traces(
                                 timeout = (p.get("action_config") or {}).get(
                                     "timeout_seconds", 300
                                 )
+                                approvers_req = (p.get("action_config") or {}).get(
+                                    "approvers_required", 1
+                                )
                                 approval = await approvals_repo.create_approval(
                                     session,
                                     project_id,
@@ -304,6 +307,7 @@ async def ingest_traces(
                                     tool_args=merged_attrs.get("strathon.tool.args"),
                                     policy_name=p["name"],
                                     timeout_seconds=int(timeout),
+                                    approvers_required=int(approvers_req),
                                 )
                                 merged_attrs["strathon.approval.id"] = str(approval.id)
                                 merged_attrs["strathon.approval.status"] = "pending"

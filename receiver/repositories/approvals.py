@@ -32,6 +32,7 @@ async def create_approval(
     tool_args: Optional[str] = None,
     policy_name: Optional[str] = None,
     timeout_seconds: int = 300,
+    approvers_required: int = 1,
 ) -> Approval:
     """Create a pending approval. Returns the new row."""
     now = datetime.now(timezone.utc)
@@ -46,6 +47,7 @@ async def create_approval(
         policy_name=policy_name,
         timeout_seconds=timeout_seconds,
         expires_at=now + timedelta(seconds=timeout_seconds),
+        approvers_required=max(approvers_required, 1),
     )
     session.add(approval)
     await session.flush()
@@ -89,30 +91,60 @@ async def resolve_approval(
     decision: str,
     resolved_by: Optional[str] = None,
 ) -> Optional[Approval]:
-    """Approve or deny a pending approval. Returns updated row or None.
+    """Record an approve or deny decision on a pending approval.
 
-    Only pending approvals can be resolved. Already resolved or expired
-    approvals return None.
+    Multi-party logic:
+    - **deny**: immediate veto. First deny sets status='denied' regardless
+      of how many approvals have been collected.
+    - **approve**: increments current_approvals. Only sets status='approved'
+      when current_approvals >= approvers_required. Until then, status
+      stays 'pending' and the caller sees the updated counts.
+
+    Returns the updated row, or None if not found / already resolved.
     """
     if decision not in ("approved", "denied"):
         raise ValueError(f"decision must be 'approved' or 'denied', got {decision!r}")
 
-    stmt = (
-        update(Approval)
-        .where(
-            Approval.project_id == project_id,
-            Approval.id == approval_id,
-            Approval.status == "pending",
-        )
-        .values(
-            status=decision,
-            resolved_at=sa_func.now(),
-            resolved_by=resolved_by,
-        )
-        .returning(Approval)
+    # Fetch the approval (must be pending).
+    stmt = select(Approval).where(
+        Approval.project_id == project_id,
+        Approval.id == approval_id,
+        Approval.status == "pending",
     )
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    approval = result.scalar_one_or_none()
+    if approval is None:
+        return None
+
+    now = datetime.now(timezone.utc)
+    decision_record = {
+        "actor": resolved_by or "unknown",
+        "decision": decision,
+        "timestamp": now.isoformat(),
+    }
+
+    # Append to the decisions array.
+    existing_decisions = list(approval.approval_decisions or [])
+    existing_decisions.append(decision_record)
+    approval.approval_decisions = existing_decisions
+
+    if decision == "denied":
+        # Immediate veto.
+        approval.status = "denied"
+        approval.resolved_at = now
+        approval.resolved_by = resolved_by
+    else:
+        # Approve: increment count, check threshold.
+        approval.current_approvals = (approval.current_approvals or 0) + 1
+        if approval.current_approvals >= approval.approvers_required:
+            approval.status = "approved"
+            approval.resolved_at = now
+            approval.resolved_by = resolved_by
+        # else: stays pending, waiting for more approvals.
+
+    await session.flush()
+    await session.refresh(approval)
+    return approval
 
 
 async def expire_pending_approvals(session: AsyncSession) -> int:

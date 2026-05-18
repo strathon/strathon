@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     LargeBinary,
     Text,
     text,
@@ -57,6 +58,18 @@ class Approval(Base):
     expires_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False,
     )
+    approvers_required: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1"),
+        comment="Number of approvals needed to resolve as approved.",
+    )
+    current_approvals: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0"),
+        comment="Running count of approve decisions received.",
+    )
+    approval_decisions: Mapped[list] = mapped_column(
+        JSON, nullable=False, server_default=text("'[]'::json"),
+        comment="Array of {actor, decision, timestamp} records.",
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -92,4 +105,7 @@ class Approval(Base):
             "resolved_by": self.resolved_by,
             "timeout_seconds": self.timeout_seconds,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "approvers_required": self.approvers_required,
+            "current_approvals": self.current_approvals,
+            "approval_decisions": self.approval_decisions or [],
         }
