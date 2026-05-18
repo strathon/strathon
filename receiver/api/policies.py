@@ -23,6 +23,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
@@ -248,3 +249,89 @@ async def get_policy_version(
     if v.get("changed_at"):
         v["changed_at"] = v["changed_at"].isoformat()
     return v
+
+
+# ---- Batch operations --------------------------------------------------------
+
+MAX_BATCH_SIZE = 100
+
+
+class BatchRequest(BaseModel):
+    action: str = Field(
+        ...,
+        description="Operation: enable, disable, or delete",
+    )
+    policy_ids: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_BATCH_SIZE,
+    )
+
+
+@router.post("/batch")
+async def batch_policies(
+    body: BatchRequest,
+    request: Request,
+    ctx: auth_mod.ApiKeyContext = Depends(
+        require_scope(auth_mod.SCOPE_POLICIES_WRITE)
+    ),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Apply a bulk operation to multiple policies atomically.
+
+    Supported actions: enable, disable, delete. All changes happen in
+    a single transaction — if any policy_id is invalid the entire
+    batch is rejected.
+
+    Research: adidas API guidelines (atomic bulk), CyberArk bulk API
+    patterns, OneUptime bulk design. Atomic over partial: cleaner
+    error handling, no ambiguous partial-commit states.
+    """
+    if body.action not in ("enable", "disable", "delete"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"action must be enable, disable, or delete; got {body.action!r}",
+        )
+
+    uuids = []
+    for pid in body.policy_ids:
+        try:
+            uuids.append(UUID(pid))
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"invalid policy_id: {pid!r}",
+            )
+
+    affected = 0
+    for pid in uuids:
+        if body.action == "delete":
+            deleted = await policies_repo.delete_policy(
+                session, ctx.project_id, pid
+            )
+            if deleted:
+                affected += 1
+        else:
+            new_enabled = body.action == "enable"
+            result = await policies_repo.update_policy(
+                session, ctx.project_id, pid, enabled=new_enabled
+            )
+            if result is not None:
+                affected += 1
+
+    # Emit a single audit event for the batch.
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        f"policy.batch_{body.action}",
+        CATEGORY_POLICY,
+        resource_type="policy_batch",
+        resource_id=",".join(str(u) for u in uuids),
+        after_state={"action": body.action, "affected": affected, "total": len(uuids)},
+    )
+
+    return {
+        "action": body.action,
+        "affected": affected,
+        "total": len(uuids),
+    }
