@@ -1,8 +1,12 @@
 """OpenAI SDK instrumentation for Strathon.
 
 Monkey-patches ``openai.chat.completions.create`` (sync and async)
-to emit OpenTelemetry spans with gen_ai.* attributes for every
-LLM call. Captures model, tokens, messages, and streaming responses.
+and ``openai.responses.create`` (sync and async) to emit
+OpenTelemetry spans with gen_ai.* attributes for every LLM call.
+Captures model, tokens, messages, and streaming responses.
+
+Both the Chat Completions API and the Responses API (primary since
+2025) are patched. The Assistants API sunsets August 26, 2026.
 
 This instruments the raw OpenAI Python SDK (``pip install openai``),
 not the OpenAI Agents SDK which has its own integration at
@@ -299,8 +303,13 @@ def instrument(client) -> bool:
     """Instrument the OpenAI Python SDK for trace capture.
 
     Monkey-patches ``openai.resources.chat.completions.Completions.create``
-    and the async variant to emit OpenTelemetry spans for every
-    chat completion call.
+    and the async variant, plus ``openai.resources.responses.Responses.create``
+    and its async variant, to emit OpenTelemetry spans for every
+    chat completion and response call.
+
+    The Responses API (responses.create) is now OpenAI's primary surface
+    as of 2025; the Assistants API sunsets August 26, 2026. Both paths
+    are patched to ensure full coverage.
 
     Args:
         client: Strathon Client instance.
@@ -326,13 +335,33 @@ def instrument(client) -> bool:
 
     tracer = client.tracer
 
-    # Sync patch.
+    # Sync chat completions patch.
     original_create = Completions.create
     Completions.create = _make_sync_wrapper(original_create, tracer)
 
-    # Async patch.
+    # Async chat completions patch.
     original_async_create = AsyncCompletions.create
     AsyncCompletions.create = _make_async_wrapper(original_async_create, tracer)
+
+    # Responses API patch (primary surface since 2025).
+    try:
+        from openai.resources.responses import (
+            AsyncResponses,
+            Responses,
+        )
+        original_responses_create = Responses.create
+        Responses.create = _make_sync_wrapper(original_responses_create, tracer)
+        original_async_responses_create = AsyncResponses.create
+        AsyncResponses.create = _make_async_wrapper(
+            original_async_responses_create, tracer
+        )
+        logger.debug("OpenAI Responses API instrumentation registered")
+    except (ImportError, AttributeError):
+        # Older OpenAI SDK versions may not have responses module.
+        logger.debug(
+            "OpenAI Responses API not available; "
+            "only chat.completions instrumented"
+        )
 
     _PATCHED = True
     logger.info("OpenAI instrumentation registered")

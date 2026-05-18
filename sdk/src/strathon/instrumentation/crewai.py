@@ -221,23 +221,45 @@ class StrathonCrewAIListener:
 
     def setup_listeners(self, crewai_event_bus) -> None:
         """Register handlers on the CrewAI event bus."""
-        from crewai.events import (
-            CrewKickoffStartedEvent,
-            CrewKickoffCompletedEvent,
-            CrewKickoffFailedEvent,
-            TaskStartedEvent,
-            TaskCompletedEvent,
-            TaskFailedEvent,
-            AgentExecutionStartedEvent,
-            AgentExecutionCompletedEvent,
-            AgentExecutionErrorEvent,
-            LLMCallStartedEvent,
-            LLMCallCompletedEvent,
-            LLMCallFailedEvent,
-            ToolUsageStartedEvent,
-            ToolUsageFinishedEvent,
-            ToolUsageErrorEvent,
-        )
+        # CrewAI ≥1.14 moved events from crewai.utilities.events to
+        # crewai.events (PR #3425). Try new path first, fall back to
+        # old for customers on older versions.
+        try:
+            from crewai.events import (
+                CrewKickoffStartedEvent,
+                CrewKickoffCompletedEvent,
+                CrewKickoffFailedEvent,
+                TaskStartedEvent,
+                TaskCompletedEvent,
+                TaskFailedEvent,
+                AgentExecutionStartedEvent,
+                AgentExecutionCompletedEvent,
+                AgentExecutionErrorEvent,
+                LLMCallStartedEvent,
+                LLMCallCompletedEvent,
+                LLMCallFailedEvent,
+                ToolUsageStartedEvent,
+                ToolUsageFinishedEvent,
+                ToolUsageErrorEvent,
+            )
+        except ImportError:
+            from crewai.utilities.events import (  # type: ignore[no-redef]
+                CrewKickoffStartedEvent,
+                CrewKickoffCompletedEvent,
+                CrewKickoffFailedEvent,
+                TaskStartedEvent,
+                TaskCompletedEvent,
+                TaskFailedEvent,
+                AgentExecutionStartedEvent,
+                AgentExecutionCompletedEvent,
+                AgentExecutionErrorEvent,
+                LLMCallStartedEvent,
+                LLMCallCompletedEvent,
+                LLMCallFailedEvent,
+                ToolUsageStartedEvent,
+                ToolUsageFinishedEvent,
+                ToolUsageErrorEvent,
+            )
 
         # ---- Crew ----
 

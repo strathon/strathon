@@ -4,11 +4,17 @@ Wraps the Claude Agent SDK's ``query()`` function and
 ``ClaudeSDKClient`` session methods to emit OpenTelemetry spans
 for every agent execution.
 
-The Claude Agent SDK (``pip install claude-agent-sdk``) wraps the
-Claude Code CLI, giving Python code access to file operations,
-terminal commands, and multi-step workflow chaining. This
-instrumentation captures the high-level agent session: prompt,
-response messages, tool usage, and session metadata.
+The Claude Agent SDK (``pip install claude-agent-sdk``, formerly
+``claude-code-sdk``) wraps the Claude Code CLI, giving Python code
+access to file operations, terminal commands, and multi-step
+workflow chaining. This instrumentation captures the high-level
+agent session: prompt, response messages, tool usage, and session
+metadata.
+
+Note: as of v0.1.81 (May 2026), the SDK exposes ``can_use_tool``
+and ``PreToolUse``/``PostToolUse`` hooks on ``ClaudeAgentOptions``
+for first-class tool-call interception. A future version of this
+module may use those hooks instead of monkey-patching ``query()``.
 
 For raw Anthropic API instrumentation (``anthropic.messages.create``),
 use ``strathon.instrumentation.anthropic`` instead.
