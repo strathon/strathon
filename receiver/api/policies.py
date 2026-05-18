@@ -36,6 +36,8 @@ from audit.actions import (
     CATEGORY_POLICY,
     POLICY_CREATE,
     POLICY_DELETE,
+    POLICY_EXPORT,
+    POLICY_IMPORT,
     POLICY_UPDATE,
 )
 from database import get_db_session
@@ -118,6 +120,156 @@ async def create_policy_endpoint(
         after_state=policy.model_dump(mode="json"),
     )
     return policy.model_dump(mode="json")
+
+
+# ---- Export / Import (staging -> prod promotion) -------------------------
+
+
+class PolicyExportItem(BaseModel):
+    """Single policy in the portable export format.
+
+    Excludes id, project_id, and timestamps — those are assigned fresh
+    on import into the target project.
+    """
+
+    name: str = Field(min_length=1)
+    description: str | None = None
+    match_expression: str
+    action: str
+    action_config: dict[str, Any] = Field(default_factory=dict)
+    applies_to: list[str] = Field(default_factory=list)
+    enabled: bool = True
+    priority: int = 0
+
+
+class PolicyImportResult(BaseModel):
+    created: int = 0
+    skipped: int = 0
+    errors: list[dict[str, str]] = Field(default_factory=list)
+
+
+@router.get("/export")
+async def export_policies_endpoint(
+    request: Request,
+    ctx: auth_mod.ApiKeyContext = Depends(
+        require_scope(auth_mod.SCOPE_POLICIES_READ)
+    ),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Export all policies as portable JSON for staging -> prod promotion.
+
+    Returns only the portable fields (no id, project_id, timestamps).
+    The output can be POSTed to /v1/policies/import on another instance.
+    """
+    policies = await policies_repo.list_policies(session, ctx.project_id)
+
+    items = [
+        PolicyExportItem(
+            name=p.name,
+            description=p.description,
+            match_expression=p.match_expression,
+            action=p.action,
+            action_config=p.action_config,
+            applies_to=p.applies_to,
+            enabled=p.enabled,
+            priority=p.priority,
+        ).model_dump()
+        for p in policies
+    ]
+
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        POLICY_EXPORT,
+        CATEGORY_POLICY,
+        resource_type="policy_export",
+        resource_id="all",
+        after_state={"count": len(items)},
+    )
+
+    return {"policies": items, "count": len(items)}
+
+
+@router.post("/import", response_model=PolicyImportResult)
+async def import_policies_endpoint(
+    body: dict[str, Any],
+    request: Request,
+    ctx: auth_mod.ApiKeyContext = Depends(
+        require_scope(auth_mod.SCOPE_POLICIES_WRITE)
+    ),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Bulk-create policies from a portable JSON export.
+
+    Accepts the output of GET /v1/policies/export. Skips policies
+    whose name + match_expression already exist in the target project
+    (idempotent re-import). Validates each policy individually;
+    invalid ones are reported in the errors list without blocking
+    the rest.
+    """
+    policies_data = body.get("policies")
+    if not isinstance(policies_data, list):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="request body must contain a 'policies' array",
+        )
+
+    # Load existing policy names+expressions for duplicate detection.
+    existing = await policies_repo.list_policies(session, ctx.project_id)
+    existing_signatures = {
+        (p.name, p.match_expression) for p in existing
+    }
+
+    created = 0
+    skipped = 0
+    errors: list[dict[str, str]] = []
+
+    for i, item in enumerate(policies_data):
+        try:
+            parsed = PolicyExportItem.model_validate(item)
+        except Exception as e:
+            errors.append({"index": str(i), "error": f"validation: {e}"})
+            continue
+
+        sig = (parsed.name, parsed.match_expression)
+        if sig in existing_signatures:
+            skipped += 1
+            continue
+
+        try:
+            await policies_repo.create_policy(
+                session,
+                ctx.project_id,
+                name=parsed.name,
+                match_expression=parsed.match_expression,
+                action=parsed.action,
+                description=parsed.description,
+                action_config=parsed.action_config,
+                applies_to=parsed.applies_to,
+                enabled=parsed.enabled,
+                priority=parsed.priority,
+            )
+            existing_signatures.add(sig)
+            created += 1
+        except (ValueError, PolicyExpressionError) as e:
+            errors.append({"index": str(i), "name": parsed.name, "error": str(e)})
+
+    await audit_repo.emit(
+        session,
+        build_audit_context(request, ctx),
+        POLICY_IMPORT,
+        CATEGORY_POLICY,
+        resource_type="policy_import",
+        resource_id="bulk",
+        after_state={
+            "created": created,
+            "skipped": skipped,
+            "errors": len(errors),
+            "total": len(policies_data),
+        },
+    )
+
+    return {"created": created, "skipped": skipped, "errors": errors}
 
 
 @router.get("/{policy_id}")

@@ -56,6 +56,8 @@ KNOWN_CATEGORIES: frozenset[str] = frozenset({
 POLICY_CREATE: Final[str] = "policy.create"
 POLICY_UPDATE: Final[str] = "policy.update"
 POLICY_DELETE: Final[str] = "policy.delete"
+POLICY_EXPORT: Final[str] = "policy.export"
+POLICY_IMPORT: Final[str] = "policy.import"
 
 HALT_ISSUE: Final[str] = "halt.issue"
 HALT_CLEAR: Final[str] = "halt.clear"
