@@ -159,3 +159,28 @@ async def list_traces_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+
+
+@router.get("/v1/policies/conflicts")
+async def detect_policy_conflicts(
+    ctx: auth_mod.ApiKeyContext = Depends(
+        require_scope(auth_mod.SCOPE_POLICIES_READ)
+    ),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Analyze enabled policies for contradictions and redundancies.
+
+    Heuristic analysis — detects exact expression duplicates and
+    tool name overlaps with conflicting actions. Does not perform
+    semantic CEL analysis.
+    """
+    import repositories.policies as policies_repo
+    from policy_conflicts import detect_conflicts
+
+    policies = await policies_repo.list_policies(session, ctx.project_id)
+    policy_dicts = [p.model_dump(mode="json") for p in policies]
+    conflicts = detect_conflicts(policy_dicts)
+    return {
+        "conflicts": conflicts,
+        "policies_analyzed": len(policy_dicts),
+    }
