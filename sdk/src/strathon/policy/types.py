@@ -77,12 +77,14 @@ class PolicyDecision:
     based on the configured refill rate.
     """
 
-    action: str  # 'allow' | 'block' | 'steer' | 'throttle'
+    action: str  # 'allow' | 'block' | 'steer' | 'throttle' | 'require_approval'
     policy_id: Optional[str] = None
     policy_name: Optional[str] = None
     message: Optional[str] = None
     replacement: Optional[str] = None
     retry_after_seconds: Optional[float] = None
+    approval_id: Optional[str] = None
+    timeout_seconds: Optional[int] = None
 
     @property
     def is_allow(self) -> bool:
@@ -99,6 +101,10 @@ class PolicyDecision:
     @property
     def is_throttle(self) -> bool:
         return self.action == "throttle"
+
+    @property
+    def is_require_approval(self) -> bool:
+        return self.action == "require_approval"
 
 
 # Module-level singleton for the most common case
@@ -146,6 +152,29 @@ class StrathonPolicyThrottled(StrathonPolicyBlocked):
     ) -> None:
         super().__init__(message, policy_id=policy_id, policy_name=policy_name)
         self.retry_after_seconds = retry_after_seconds
+
+
+class StrathonApprovalDenied(StrathonPolicyBlocked):
+    """Raised when a require_approval policy decision is denied or expired.
+
+    The tool call was held pending human approval, and the operator
+    either explicitly denied it or the approval timed out.
+
+    ``approval_id`` identifies the approval record on the receiver.
+    ``status`` is 'denied' or 'expired'.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        policy_id: Optional[str] = None,
+        policy_name: Optional[str] = None,
+        approval_id: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> None:
+        super().__init__(message, policy_id=policy_id, policy_name=policy_name)
+        self.approval_id = approval_id
+        self.status = status or "denied"
 
 
 # ---- Halt decisions ----------------------------------------------------

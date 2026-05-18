@@ -205,7 +205,7 @@ class PolicyEnforcer:
         for policy in policies:
             if not policy.enabled:
                 continue
-            if policy.action not in {"block", "steer", "throttle", "allow"}:
+            if policy.action not in {"block", "steer", "throttle", "allow", "require_approval"}:
                 continue
             if not _span_matches_applies_to(span_context, policy.applies_to):
                 continue
@@ -244,6 +244,20 @@ class PolicyEnforcer:
                     # restrictive block/steer further down still wins.
                     continue
                 return decision
+            if policy.action == "require_approval":
+                timeout = int(
+                    (policy.action_config or {}).get("timeout_seconds", 300)
+                )
+                return PolicyDecision(
+                    action="require_approval",
+                    policy_id=policy.id,
+                    policy_name=policy.name,
+                    message=(
+                        (policy.action_config or {}).get("message")
+                        or f"Tool call requires approval per policy '{policy.name}'"
+                    ),
+                    timeout_seconds=timeout,
+                )
             # steer
             replacement = (
                 policy.action_config.get("replacement")

@@ -78,6 +78,7 @@ import threading
 from typing import Any, Callable, Dict, Mapping, Optional, Set, Type
 
 from strathon.policy.types import (
+    StrathonApprovalDenied,
     StrathonHaltExceeded,
     StrathonPolicyBlocked,
     StrathonPolicyThrottled,
@@ -388,6 +389,40 @@ def dispatch_policy_decision(
             replacement=replacement,
         )
         return replacement
+
+    if decision.is_require_approval:
+        # Human-in-the-loop: create an approval on the receiver, then
+        # block the tool call until an operator approves or denies.
+        _emit_intervention_span(
+            client,
+            span_name=span_name,
+            attrs=attrs,
+            decision_kind="approval_requested",
+            decision=decision,
+        )
+        from strathon.policy.approval import wait_for_approval
+        # on_timeout configurable via action_config; default deny.
+        on_timeout = "deny"
+        try:
+            wait_for_approval(
+                client, decision,
+                {"name": span_name, "attrs": attrs},
+                on_timeout=on_timeout,
+            )
+        except StrathonApprovalDenied:
+            raise
+        except Exception:
+            logger.exception(
+                "approval workflow failed for %s; denying tool", tool_name
+            )
+            raise StrathonApprovalDenied(
+                f"Approval workflow failed for tool '{tool_name}'",
+                policy_id=decision.policy_id,
+                policy_name=decision.policy_name,
+                status="error",
+            )
+        # Approved — run the tool.
+        return on_allow()
 
     # is_allow: run the original tool body.
     return on_allow()
