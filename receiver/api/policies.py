@@ -24,6 +24,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+
+from schemas.responses import BatchResponse, PolicyVersionListResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
@@ -200,7 +202,7 @@ async def delete_policy_endpoint(
 # ---- Version history endpoints -----------------------------------------------
 
 
-@router.get("/{policy_id}/versions")
+@router.get("/{policy_id}/versions", response_model=PolicyVersionListResponse)
 async def list_policy_versions(
     policy_id: str,
     ctx: auth_mod.ApiKeyContext = Depends(
@@ -268,7 +270,7 @@ class BatchRequest(BaseModel):
     )
 
 
-@router.post("/batch")
+@router.post("/batch", response_model=BatchResponse)
 async def batch_policies(
     body: BatchRequest,
     request: Request,

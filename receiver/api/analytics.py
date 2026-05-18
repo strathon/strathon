@@ -18,6 +18,13 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from schemas.responses import (
+    AggregateResponse,
+    ConflictsResponse,
+    TraceListResponse,
+    TraceTreeResponse,
+)
+
 import auth as auth_mod
 import repositories.analytics as analytics_repo
 from database import get_db_session
@@ -48,7 +55,7 @@ def _parse_timestamp(value: str | None, param_name: str) -> int | None:
         ) from exc
 
 
-@router.get("/v1/spans/aggregate")
+@router.get("/v1/spans/aggregate", response_model=AggregateResponse)
 async def aggregate_spans_endpoint(
     group_by: str = Query(
         default="request_model",
@@ -97,7 +104,7 @@ async def aggregate_spans_endpoint(
     return {"data": rows, "group_by": group_by, "time_bucket": time_bucket}
 
 
-@router.get("/v1/traces/{trace_id}/tree")
+@router.get("/v1/traces/{trace_id}/tree", response_model=TraceTreeResponse)
 async def trace_tree_endpoint(
     trace_id: str,
     ctx: auth_mod.ApiKeyContext = Depends(
@@ -122,7 +129,7 @@ async def trace_tree_endpoint(
     return tree
 
 
-@router.get("/v1/traces")
+@router.get("/v1/traces", response_model=TraceListResponse)
 async def list_traces_endpoint(
     start_after: Optional[str] = Query(default=None),
     start_before: Optional[str] = Query(default=None),
@@ -161,7 +168,7 @@ async def list_traces_endpoint(
         ) from exc
 
 
-@router.get("/v1/policies/conflicts")
+@router.get("/v1/policies/conflicts", response_model=ConflictsResponse)
 async def detect_policy_conflicts(
     ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_POLICIES_READ)
