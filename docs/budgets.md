@@ -58,9 +58,7 @@ aggregation over an indexed partial range. Ingest has no contention,
 and you get per-trace/per-agent/per-model cost rollups from the
 same data without schema changes.
 
-This matches the pattern every mature LLM observability backend
-(Uptrace, Langfuse, Langwatch, Opik, Datadog LLM Observability)
-settled on.
+This follows the industry-standard pattern for LLM cost tracking.
 
 ## Configuration
 

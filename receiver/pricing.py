@@ -14,8 +14,7 @@ same project serializes on one row. At anything past a few hundred
 spans/second this becomes the bottleneck, with each writer waiting for
 the previous one's lock.
 
-The pattern every mature LLM observability backend (Uptrace, Langfuse,
-Langwatch, Opik, Datadog LLM Observability) settled on is: write the
+The industry-standard pattern for LLM cost tracking is: write the
 cost on the span itself, aggregate at read time. Spans table inserts
 don't contend with each other; the aggregation is a windowed
 ``SUM(cost_usd)`` over an indexed range, which Postgres handles in

@@ -17,8 +17,7 @@ so check_needs_rehash() will detect if parameters change in a future
 version and transparently rehash on next login.
 
 Researched: OWASP Password Storage Cheat Sheet, RFC 9106, argon2-cffi
-docs (profiles, check_needs_rehash API), Langfuse/LangSmith auth
-implementations.
+docs (profiles, check_needs_rehash API).
 """
 
 from __future__ import annotations

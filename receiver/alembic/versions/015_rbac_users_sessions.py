@@ -9,10 +9,9 @@ match the four-role RBAC model.
 Sessions table already exists from 001; we add the relationship column to
 link sessions to user email lookups.
 
-Researched: OWASP Password Storage Cheat Sheet (Argon2id params), Langfuse
-RBAC model (owner/admin/member/viewer + project-level overrides), LangSmith
-RBAC model (org-level + workspace-level + custom roles). Design: fixed
-four-role model for open-source tier; custom roles deferred to ee/.
+Researched: OWASP Password Storage Cheat Sheet (Argon2id params),
+industry-standard RBAC models for multi-tenant SaaS platforms. Design:
+fixed four-role model for open-source tier; custom roles deferred to ee/.
 
 Revision ID: 015
 Revises: 014

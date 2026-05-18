@@ -10,9 +10,9 @@ the existing scope system (what an API key can do). Session-based auth
 resolves the user's role via project_members, then maps it to scopes.
 API keys bypass the role system and use explicit scopes as before.
 
-Researched: Langfuse (owner/admin/member/viewer, project-level overrides),
-LangSmith (org admin/operator/user/viewer + workspace admin/editor/viewer),
-OWASP Agentic Top 10 for scope definitions.
+Four fixed roles (owner/admin/operator/viewer) with hierarchical
+scope mapping, following industry-standard patterns for multi-tenant
+SaaS platforms.
 """
 
 from __future__ import annotations

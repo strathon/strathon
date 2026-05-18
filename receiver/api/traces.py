@@ -176,10 +176,9 @@ async def ingest_traces(
     #
     # We DO NOT update any budget counter at ingest. The earlier counter
     # design serialized every span ingest on a single budgets row, which
-    # becomes the bottleneck at scale (the depesz/Avito pattern). The
-    # write-once-aggregate-later pattern that every mature LLM
-    # observability backend (Uptrace, Langfuse, Langwatch, Opik) uses
-    # has zero contention on the ingest path.
+    # becomes the bottleneck at scale. The write-once-aggregate-later
+    # pattern that mature LLM observability backends use has zero
+    # contention on the ingest path.
     pricing_catalog = pricing_mod.get_default_catalog()
     try:
         pricing_overrides = await pricing_mod.get_project_overrides(

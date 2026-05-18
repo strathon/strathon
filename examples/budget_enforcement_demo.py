@@ -11,8 +11,8 @@ puts a hard cap on spend:
 5. The SDK's next policy poll picks up the halt.
 6. Any subsequent tool call raises StrathonHaltExceeded — the agent stops.
 
-This is the difference between "observing that you overspent" (Langfuse) and
-"preventing the overspend from happening" (Strathon).
+This is the difference between observing that you overspent and
+preventing the overspend from happening.
 
 Prerequisites:
     pip install strathon cel-python
@@ -170,7 +170,7 @@ def main():
     print("\n=== Demo complete ===")
     print("The agent burned $0.25 against a $0.10 cap.")
     print("Strathon auto-halted the project before more damage could be done.")
-    print("Langfuse would show you a chart of the spend — after the fact.")
+    print("An observability platform would show you a chart of the spend — after the fact.")
     print("Strathon stops the bleeding.\n")
 
 
