@@ -56,6 +56,14 @@ class Policy(Base, TimestampMixin):
     )
     enabled: Mapped[bool] = mapped_column(nullable=False, server_default=text("TRUE"))
     priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    match_count: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0"),
+        comment="Cumulative count of spans this policy matched.",
+    )
+    last_matched_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True),
+        comment="Timestamp of the most recent match.",
+    )
 
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="policies")

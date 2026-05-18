@@ -116,5 +116,7 @@ class PolicyRead(BaseModel):
     applies_to: list[str] = Field(default_factory=list)
     enabled: bool
     priority: int
+    match_count: int = 0
+    last_matched_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime

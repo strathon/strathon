@@ -573,7 +573,7 @@ app.add_middleware(RateLimitMiddleware)
 # Mount routers. Import here (after `app` exists) so router modules can
 # stay decoupled from main.py and not see import-order issues.
 from api import (  # noqa: E402
-    analytics, api_keys, audit, auth_endpoints, budgets, halts, health,
+    analytics, api_keys, audit, auth_endpoints, budgets, costs, halts, health,
     intervention, members, model_prices, policies, policy_templates,
     project_settings, projects, simulate, spans, traces,
     webhook_deliveries, webhook_signing_keys,
@@ -583,6 +583,7 @@ app.include_router(health.router)
 app.include_router(traces.router)
 app.include_router(spans.router)
 app.include_router(analytics.router)
+app.include_router(costs.router)
 app.include_router(projects.router)
 app.include_router(policies.router)
 app.include_router(policy_templates.router)

@@ -228,12 +228,13 @@ async def record_match(
     action_outcome: str,
     metadata: Optional[dict[str, Any]] = None,
 ) -> None:
-    """Append a row to policy_matches for audit.
+    """Append a row to policy_matches for audit and update policy metrics.
 
-    Never raises — failure to record a match must not break ingest. The
-    surrounding caller (in main.py) already wraps this in try/except and
-    swallows errors at the logger.exception() level. We mirror that here
-    so the contract is honored regardless of which session this runs on.
+    Atomically increments match_count and sets last_matched_at on the
+    policy row so operators can see which policies fire most often
+    without querying policy_matches.
+
+    Never raises — failure to record a match must not break ingest.
     """
     try:
         stmt = insert(PolicyMatch).values(
@@ -246,6 +247,18 @@ async def record_match(
             match_metadata=metadata or {},
         )
         await session.execute(stmt)
+
+        # Update match_count + last_matched_at on the policy row.
+        # Single atomic UPDATE, no SELECT needed.
+        from sqlalchemy import func as sa_func, update
+        await session.execute(
+            update(Policy)
+            .where(Policy.id == policy_id)
+            .values(
+                match_count=Policy.match_count + 1,
+                last_matched_at=sa_func.now(),
+            )
+        )
     except Exception:
         logger.exception("failed to record policy match for policy %s", policy_id)
 
