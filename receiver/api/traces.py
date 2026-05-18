@@ -246,6 +246,7 @@ async def ingest_traces(
                                 "alert": "alert_queued",
                                 "block": "block_recorded",
                                 "steer": "steer_recorded",
+                                "require_approval": "approval_requested",
                             }.get(p["action"], "recorded")
                         span_matches.append({
                             "policy_id": p["id"],
@@ -273,6 +274,7 @@ async def ingest_traces(
 
                 if matched_policies:
                     for p in matched_policies:
+                        is_shadow = p.get("shadow", False)
                         if p["action"] == "alert":
                             webhook_url = (p.get("action_config") or {}).get("webhook_url")
                             if webhook_url:
@@ -284,6 +286,46 @@ async def ingest_traces(
                                     "span_id": span_id.hex(),
                                     "attrs": persisted_attrs,
                                 }, p["id"]))
+                        elif p["action"] == "require_approval" and not is_shadow:
+                            # Create a pending approval record.
+                            try:
+                                import repositories.approvals as approvals_repo
+                                timeout = (p.get("action_config") or {}).get(
+                                    "timeout_seconds", 300
+                                )
+                                approval = await approvals_repo.create_approval(
+                                    session,
+                                    project_id,
+                                    policy_id=UUID(p["id"]),
+                                    trace_id=trace_id,
+                                    span_id=span_id,
+                                    span_name=span.name,
+                                    tool_name=merged_attrs.get("gen_ai.tool.name"),
+                                    tool_args=merged_attrs.get("strathon.tool.args"),
+                                    policy_name=p["name"],
+                                    timeout_seconds=int(timeout),
+                                )
+                                merged_attrs["strathon.approval.id"] = str(approval.id)
+                                merged_attrs["strathon.approval.status"] = "pending"
+                                # Fire webhook if configured.
+                                webhook_url = (p.get("action_config") or {}).get("webhook_url")
+                                if webhook_url:
+                                    span_webhooks.append((webhook_url, {
+                                        "event": "approval_requested",
+                                        "approval_id": str(approval.id),
+                                        "approval_url": f"/v1/approvals/{approval.id}",
+                                        "policy_id": p["id"],
+                                        "policy_name": p["name"],
+                                        "tool_name": merged_attrs.get("gen_ai.tool.name"),
+                                        "span_name": span.name,
+                                        "trace_id": trace_id.hex(),
+                                        "span_id": span_id.hex(),
+                                        "timeout_seconds": int(timeout),
+                                    }, p["id"]))
+                            except Exception:
+                                logger.exception(
+                                    "failed to create approval for policy %s", p["id"]
+                                )
 
                 # ---- Sampling decision ----
                 # Made AFTER policy evaluation so the always-keep

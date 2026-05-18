@@ -35,6 +35,7 @@ CATEGORY_WEBHOOK_DELIVERY: Final[str] = "webhook_delivery"
 CATEGORY_MODEL_PRICE: Final[str] = "model_price"
 CATEGORY_AUDIT_STREAM: Final[str] = "audit_stream"
 CATEGORY_AUDIT: Final[str] = "audit"
+CATEGORY_APPROVAL: Final[str] = "approval"
 
 
 KNOWN_CATEGORIES: frozenset[str] = frozenset({
@@ -48,6 +49,7 @@ KNOWN_CATEGORIES: frozenset[str] = frozenset({
     CATEGORY_MODEL_PRICE,
     CATEGORY_AUDIT_STREAM,
     CATEGORY_AUDIT,
+    CATEGORY_APPROVAL,
 })
 
 
@@ -70,6 +72,9 @@ API_KEY_CREATE: Final[str] = "api_key.create"
 API_KEY_REVOKE: Final[str] = "api_key.revoke"
 API_KEY_ROTATE: Final[str] = "api_key.rotate"
 API_KEY_UPDATE: Final[str] = "api_key.update"
+
+APPROVAL_APPROVE: Final[str] = "approval.approve"
+APPROVAL_DENY: Final[str] = "approval.deny"
 
 PROJECT_SETTINGS_UPDATE: Final[str] = "project_settings.update"
 

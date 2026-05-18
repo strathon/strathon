@@ -457,6 +457,13 @@ async def lifespan(app: FastAPI):
         name="strathon.key_reaper",
     )
 
+    # Approval reaper: expires pending approvals past their timeout.
+    from approval_reaper import approval_reaper_loop
+    app.state.approval_reaper_task = asyncio.create_task(
+        approval_reaper_loop(async_session_maker),
+        name="strathon.approval_reaper",
+    )
+
     yield
 
     logger.info("Strathon receiver shutting down")
@@ -526,6 +533,13 @@ async def lifespan(app: FastAPI):
             await app.state.key_reaper_task
         except (asyncio.CancelledError, Exception):
             pass
+
+    if hasattr(app.state, "approval_reaper_task"):
+        app.state.approval_reaper_task.cancel()
+        try:
+            await app.state.approval_reaper_task
+        except (asyncio.CancelledError, Exception):
+            pass
     metrics_mod.reset_global_metrics_for_testing()
 
     # Close the SQLAlchemy engine pool.
@@ -573,10 +587,10 @@ app.add_middleware(RateLimitMiddleware)
 # Mount routers. Import here (after `app` exists) so router modules can
 # stay decoupled from main.py and not see import-order issues.
 from api import (  # noqa: E402
-    analytics, api_keys, audit, auth_endpoints, budgets, costs, halts, health,
-    intervention, members, model_prices, policies, policy_templates,
-    project_settings, projects, simulate, spans, topology, traces,
-    webhook_deliveries, webhook_signing_keys,
+    analytics, api_keys, approvals, audit, auth_endpoints, budgets, costs,
+    halts, health, intervention, members, model_prices, policies,
+    policy_templates, project_settings, projects, simulate, spans,
+    topology, traces, webhook_deliveries, webhook_signing_keys,
 )
 
 app.include_router(health.router)
@@ -596,6 +610,7 @@ app.include_router(webhook_signing_keys.router)
 app.include_router(webhook_deliveries.router)
 app.include_router(budgets.router)
 app.include_router(model_prices.router)
+app.include_router(approvals.router)
 app.include_router(project_settings.router)
 app.include_router(audit.router)
 # RBAC: auth + membership management

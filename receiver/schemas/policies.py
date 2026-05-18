@@ -9,7 +9,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
-VALID_ACTIONS = {"log", "alert", "block", "steer", "throttle", "allow"}
+VALID_ACTIONS = {"log", "alert", "block", "steer", "throttle", "allow", "require_approval"}
 
 # Scope values accepted in a throttle action_config. Determines what the
 # rate-limit counter is keyed by:
