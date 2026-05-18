@@ -1,0 +1,54 @@
+# Production stack: receiver + postgres + prometheus + grafana
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up
+#
+# This extends docker-compose.yml with Prometheus (scraping /metrics)
+# and Grafana (pre-provisioned with the Strathon dashboard).
+#
+# Grafana: http://localhost:3000 (admin/admin, change on first login)
+# Prometheus: http://localhost:9090
+# Receiver: http://localhost:4318
+#
+# Research: FastAPI + Prometheus + Grafana production patterns
+# (Kludex/fastapi-prometheus-grafana, DEV Community 2026 guides).
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: strathon-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    depends_on:
+      receiver:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: strathon-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/strathon-receiver.json:/var/lib/grafana/dashboards/strathon-receiver.json:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus_data:
+  grafana_data:
