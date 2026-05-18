@@ -227,9 +227,12 @@ def test_ready_returns_200_when_all_healthy(client):
     assert set(body["checks"].keys()) == {
         "db",
         "migrations",
+        "partitions",
         "retention_task",
         "webhook_sweeper_task",
         "budget_monitor_task",
+        "audit_partition_task",
+        "spans_partition_task",
     }
     for name, check in body["checks"].items():
         assert check["status"] == "ok", f"{name} failed: {check}"
@@ -270,13 +273,16 @@ def test_ready_returns_503_when_background_task_is_dead(client):
         assert r.status_code == 503
         body = r.json()
         assert body["status"] == "not_ready"
-        # Shape is stable: all five checks still present.
+        # Shape is stable: all checks still present.
         assert set(body["checks"].keys()) == {
             "db",
             "migrations",
+            "partitions",
             "retention_task",
             "webhook_sweeper_task",
             "budget_monitor_task",
+            "audit_partition_task",
+            "spans_partition_task",
         }
         # The dead one is flagged; the others are still ok.
         assert body["checks"]["budget_monitor_task"]["status"] == "failed"

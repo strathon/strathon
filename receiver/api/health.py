@@ -90,16 +90,22 @@ async def ready(request: Request) -> Response:
 
     db_check = await _check_db()
     migration_check = await _check_migrations()
+    partition_check = await _check_partitions()
     retention_check = _check_background_task(state, "retention_task")
     sweeper_check = _check_background_task(state, "webhook_sweeper_task")
     monitor_check = _check_background_task(state, "budget_monitor_task")
+    audit_part_check = _check_background_task(state, "audit_partition_task")
+    spans_part_check = _check_background_task(state, "spans_partition_task")
 
     checks = {
         "db": db_check,
         "migrations": migration_check,
+        "partitions": partition_check,
         "retention_task": retention_check,
         "webhook_sweeper_task": sweeper_check,
         "budget_monitor_task": monitor_check,
+        "audit_partition_task": audit_part_check,
+        "spans_partition_task": spans_part_check,
     }
 
     all_ok = all(c["status"] == "ok" for c in checks.values())
@@ -254,6 +260,50 @@ def _script_head_revision() -> str:
     if head is None:
         raise RuntimeError("alembic script directory has no head revision")
     return head
+
+
+async def _check_partitions() -> dict[str, Any]:
+    """Verify span partitions exist for the current month.
+
+    If no partition covers the current month, span inserts will fail
+    with a 'no partition' error. This catches cases where the
+    partition maintenance worker died or hasn't run yet.
+
+    Research: Kubernetes readiness probes should verify all critical
+    dependencies (BetterStack 2025, CICube 2025). Missing partitions
+    are a silent failure — the receiver appears healthy but inserts
+    fail hard.
+    """
+    from datetime import datetime, timezone
+
+    from sqlalchemy import text
+
+    from database import async_session_maker
+
+    now = datetime.now(timezone.utc)
+    suffix = f"y{now.year}m{now.month:02d}"
+
+    try:
+        async with async_session_maker() as session:
+            result = await asyncio.wait_for(
+                session.execute(text(
+                    "SELECT count(*) FROM pg_inherits "
+                    "JOIN pg_class child ON child.oid = pg_inherits.inhrelid "
+                    "JOIN pg_class parent ON parent.oid = pg_inherits.inhparent "
+                    "WHERE parent.relname = 'spans' "
+                    "AND child.relname = :expected"
+                ), {"expected": f"spans_{suffix}"}),
+                timeout=_DB_CHECK_TIMEOUT_S,
+            )
+            count = result.scalar()
+            if count and count > 0:
+                return {"status": "ok", "current_partition": f"spans_{suffix}"}
+            return {
+                "status": "failed",
+                "reason": f"no spans partition for current month ({suffix})",
+            }
+    except Exception as exc:
+        return {"status": "failed", "reason": str(exc)}
 
 
 def _check_background_task(state: Any, attr: str) -> dict[str, Any]:
