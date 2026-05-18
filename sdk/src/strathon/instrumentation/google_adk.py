@@ -38,8 +38,6 @@ Known caveats (as of google-adk 1.33.0):
   configurations (issue #4464). Tool callbacks are unaffected.
 
 Requires google-adk >= 1.7.0 (the release that shipped the plugin system).
-Reference: Cisco ai-defense-google-adk (CiscoAIDefensePlugin) uses the
-same BasePlugin pattern for tool-level policy enforcement.
 """
 
 from __future__ import annotations

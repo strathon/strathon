@@ -7,9 +7,12 @@ a template with one API call instead of writing CEL from scratch.
 Templates are a static catalog — no DB table. Applying a template
 creates a real policy via the standard create_policy path.
 
-Research: OWASP Agentic Top 10 (ASI-01 through ASI-10), Authensor
-risk-to-control mapping, Promptfoo OWASP agentic preset, Lakera
-progressive breach model.
+12 templates covering: tool misuse, data exfiltration, cost controls,
+business hours, SQL injection, prompt injection, data protection, and
+memory-poisoning attacks (MINJA-class, arXiv:2503.03704).
+
+Research: OWASP Agentic Top 10 (ASI-01 through ASI-10), MINJA memory
+injection attacks (arXiv:2503.03704).
 """
 
 from __future__ import annotations
@@ -182,6 +185,111 @@ TEMPLATES: list[PolicyTemplate] = [
             ),
         },
         tags=["compliance", "data-protection"],
+    ),
+    # ---- Memory-poisoning templates (MINJA-class, arXiv:2503.03704) ----
+    # These target attacks where adversaries inject malicious content into
+    # an agent's retrieval memory to manipulate future behavior: overwrite
+    # system instructions, inject prompt-injection payloads, or flood the
+    # memory store to dilute legitimate context.
+    PolicyTemplate(
+        id="block-memory-write-injection",
+        name="Block memory writes containing injection patterns",
+        description=(
+            "Blocks memory-write tool calls when the value being stored "
+            "contains common prompt injection patterns (IGNORE PREVIOUS, "
+            "system prompt override, role-play injection). Targets MINJA "
+            "indirect prompt injection via memory poisoning. "
+            "Covers ASI-01 (Prompt Injection), ASI-06 (Data Poisoning)."
+        ),
+        owasp_risks=["ASI-01", "ASI-06"],
+        action="block",
+        match_expression=(
+            '(attrs["gen_ai.tool.name"] in '
+            '["memory_write", "memory_store", "memory_set", "memory_add", '
+            '"upsert_memory", "add_memory", "store_memory", "save_memory", '
+            '"set_context", "update_context"]) && '
+            '(attrs["strathon.tool.args"].contains("IGNORE PREVIOUS") || '
+            'attrs["strathon.tool.args"].contains("ignore all previous") || '
+            'attrs["strathon.tool.args"].contains("disregard instructions") || '
+            'attrs["strathon.tool.args"].contains("you are now") || '
+            'attrs["strathon.tool.args"].contains("new system prompt") || '
+            'attrs["strathon.tool.args"].contains("override system") || '
+            'attrs["strathon.tool.args"].contains("forget everything"))'
+        ),
+        tags=["security", "memory-poisoning", "prompt-injection"],
+    ),
+    PolicyTemplate(
+        id="block-memory-system-key-overwrite",
+        name="Block writes to protected memory keys",
+        description=(
+            "Blocks memory-write operations targeting system-reserved key "
+            "names (system_prompt, instructions, persona, config, role). "
+            "Prevents adversaries from overwriting the agent's core "
+            "configuration via memory manipulation. "
+            "Covers ASI-06 (Data Poisoning), ASI-02 (Tool Misuse)."
+        ),
+        owasp_risks=["ASI-06", "ASI-02"],
+        action="block",
+        match_expression=(
+            '(attrs["gen_ai.tool.name"] in '
+            '["memory_write", "memory_store", "memory_set", "upsert_memory", '
+            '"set_context", "update_context"]) && '
+            '(attrs["strathon.tool.args"].contains("system_prompt") || '
+            'attrs["strathon.tool.args"].contains("system_instructions") || '
+            'attrs["strathon.tool.args"].contains("persona") || '
+            'attrs["strathon.tool.args"].contains("core_config") || '
+            'attrs["strathon.tool.args"].contains("agent_role") || '
+            'attrs["strathon.tool.args"].contains("base_instructions"))'
+        ),
+        tags=["security", "memory-poisoning", "config-protection"],
+    ),
+    PolicyTemplate(
+        id="throttle-memory-write-flood",
+        name="Rate-limit memory write operations",
+        description=(
+            "Throttles memory-write tool calls to prevent memory flooding "
+            "attacks where an adversary rapidly inserts many entries to "
+            "dilute legitimate context or push genuine memories out of "
+            "the retrieval window. "
+            "Covers ASI-06 (Data Poisoning), ASI-04 (Resource Overconsumption)."
+        ),
+        owasp_risks=["ASI-06", "ASI-04"],
+        action="throttle",
+        match_expression=(
+            'attrs["gen_ai.tool.name"] in '
+            '["memory_write", "memory_store", "memory_set", "memory_add", '
+            '"upsert_memory", "add_memory", "store_memory", "save_memory", '
+            '"set_context", "update_context"]'
+        ),
+        action_config={
+            "max_calls": 10,
+            "window_seconds": 60,
+            "scope": "agent",
+        },
+        tags=["security", "memory-poisoning", "rate-limit"],
+    ),
+    PolicyTemplate(
+        id="alert-memory-retrieval-injection",
+        name="Alert on retrieved memory containing injection patterns",
+        description=(
+            "Fires an alert webhook when a memory-retrieval tool returns "
+            "content containing prompt injection patterns. Indicates the "
+            "memory store may already be poisoned and needs review. "
+            "Covers ASI-01 (Prompt Injection), ASI-06 (Data Poisoning)."
+        ),
+        owasp_risks=["ASI-01", "ASI-06"],
+        action="alert",
+        match_expression=(
+            '(attrs["gen_ai.tool.name"] in '
+            '["memory_read", "memory_get", "memory_search", "memory_retrieve", '
+            '"get_memory", "search_memory", "recall", "get_context"]) && '
+            '(attrs["strathon.tool.result"].contains("IGNORE PREVIOUS") || '
+            'attrs["strathon.tool.result"].contains("ignore all previous") || '
+            'attrs["strathon.tool.result"].contains("disregard instructions") || '
+            'attrs["strathon.tool.result"].contains("you are now") || '
+            'attrs["strathon.tool.result"].contains("new system prompt"))'
+        ),
+        tags=["security", "memory-poisoning", "detection"],
     ),
 ]
 
