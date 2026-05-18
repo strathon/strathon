@@ -28,6 +28,7 @@ import auth as auth_mod
 from database import get_db_session
 from models import ApiKey, Project, ProjectSettings
 
+from schemas.responses import ProjectResponse, ProjectListResponse
 from ._deps import require_scope
 
 
@@ -48,7 +49,7 @@ class UpdateProjectRequest(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED, response_model=ProjectResponse)
 async def create_project(
     body: CreateProjectRequest,
     ctx: auth_mod.ApiKeyContext = Depends(
@@ -108,7 +109,7 @@ async def create_project(
     }
 
 
-@router.get("")
+@router.get("", response_model=ProjectListResponse)
 async def list_projects(
     include_deleted: bool = Query(default=False),
     ctx: auth_mod.ApiKeyContext = Depends(

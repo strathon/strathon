@@ -607,13 +607,16 @@ app.include_router(members.router)
 async def unhandled(request: Request, exc: Exception) -> JSONResponse:
     """Last-resort exception handler.
 
-    FastAPI's default would return a 500 with a generic body. We log the
-    full exception with the request path so it shows up in our structured
-    logs and return a small, opaque error body so we don't leak internals
-    to callers.
+    Returns a consistent ErrorResponse body so callers always get the
+    same shape for errors. Logs the full traceback.
     """
     logger.exception("Unhandled error processing %s %s", request.method, request.url.path)
     return JSONResponse(
         status_code=500,
-        content={"error": "internal_server_error"},
+        content={
+            "error": {
+                "code": "internal_server_error",
+                "message": "An unexpected error occurred.",
+            }
+        },
     )

@@ -227,3 +227,169 @@ class PolicyTemplateListResponse(BaseModel):
 class PolicyTemplateApplyResponse(BaseModel):
     template_id: str
     policy: dict[str, Any]
+
+
+# ---- Halt responses -------------------------------------------------------
+
+class HaltResponse(BaseModel):
+    halt: dict[str, Any]
+
+
+class HaltListResponse(BaseModel):
+    halts: list[dict[str, Any]]
+
+
+# ---- Budget responses ------------------------------------------------------
+
+class BudgetResponse(BaseModel):
+    budget: dict[str, Any]
+
+
+class BudgetListResponse(BaseModel):
+    budgets: list[dict[str, Any]]
+
+
+class BudgetSpendResponse(BaseModel):
+    budget_id: str
+    scope: str
+    scope_value: Optional[str] = None
+    metric: str
+    current_value: Any
+    threshold: Any
+    window_start: Optional[str] = None
+    window_end: Optional[str] = None
+
+
+class DeletedResponse(BaseModel):
+    deleted: bool = True
+
+
+# ---- API key responses -----------------------------------------------------
+
+class ApiKeyListResponse(BaseModel):
+    api_keys: list[dict[str, Any]]
+
+
+class ApiKeyCreatedResponse(BaseModel):
+    """Returned on create and rotate — includes the raw key shown once."""
+    model_config = {"extra": "allow"}
+    id: str
+    name: str
+    key_prefix: str
+    key: str
+    scopes: list[str]
+    project_id: str
+    created_at: str
+    expires_at: Optional[str] = None
+    rotated_from_id: Optional[str] = None
+
+
+class ApiKeyUpdatedResponse(BaseModel):
+    model_config = {"extra": "allow"}
+    id: str
+    name: str
+    key_prefix: str
+    scopes: list[str]
+    project_id: str
+    expires_at: Optional[str] = None
+
+
+# ---- Webhook responses -----------------------------------------------------
+
+class WebhookSigningKeyListResponse(BaseModel):
+    webhook_signing_keys: list[dict[str, Any]]
+
+
+class WebhookDeliveryListResponse(BaseModel):
+    deliveries: list[dict[str, Any]]
+    next_cursor: Optional[str] = None
+
+
+class WebhookDeliveryResponse(BaseModel):
+    delivery: dict[str, Any]
+
+
+class WebhookReplayResponse(BaseModel):
+    replayed: int
+    deliveries: list[dict[str, Any]]
+
+
+# ---- Model price responses -------------------------------------------------
+
+class ModelPriceResponse(BaseModel):
+    override: dict[str, Any]
+
+
+class ModelPriceListResponse(BaseModel):
+    overrides: list[dict[str, Any]]
+
+
+# ---- Member responses ------------------------------------------------------
+
+class MemberResponse(BaseModel):
+    model_config = {"extra": "allow"}
+    id: str
+    email: str
+    role: str
+    project_id: str
+
+
+class MemberListResponse(BaseModel):
+    members: list[dict[str, Any]]
+    count: int
+
+
+# ---- Cost responses --------------------------------------------------------
+
+class CostRollupItem(BaseModel):
+    model_config = {"extra": "allow"}
+    period_start: Optional[str] = None
+    span_count: int = 0
+    total_cost_usd: str = "0"
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+
+
+class CostResponse(BaseModel):
+    group_by: str
+    period: str
+    costs: list[dict[str, Any]]
+
+
+# ---- Topology responses ----------------------------------------------------
+
+class TopologyNode(BaseModel):
+    id: str
+    type: str
+    name: str
+    span_count: int = 0
+    error_count: int = 0
+
+
+class TopologyEdge(BaseModel):
+    source: str
+    target: str
+    call_count: int = 0
+    error_count: int = 0
+    avg_duration_ms: Optional[float] = None
+
+
+class TopologyResponse(BaseModel):
+    nodes: list[TopologyNode]
+    edges: list[TopologyEdge]
+    node_count: int
+    edge_count: int
+
+
+# ---- Intervention responses ------------------------------------------------
+
+class InterventionCheckResponse(BaseModel):
+    model_config = {"extra": "allow"}
+    action: str
+    policy_id: Optional[str] = None
+    policy_name: Optional[str] = None
+    message: Optional[str] = None
+
+
+class InterventionSyncResponse(BaseModel):
+    halted: bool

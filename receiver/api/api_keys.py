@@ -39,13 +39,14 @@ from audit.actions import (
 )
 from database import get_db_session
 
+from schemas.responses import ApiKeyListResponse
 from ._deps import build_audit_context, coerce_project_id, require_scope
 
 
 router = APIRouter(prefix="/v1/api_keys", tags=["api_keys"])
 
 
-@router.get("")
+@router.get("", response_model=ApiKeyListResponse)
 async def list_api_keys_endpoint(
     request: Request,
     project_id: str | None = None,

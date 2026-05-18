@@ -19,11 +19,12 @@ import auth as auth_mod
 from database import get_db_session
 
 from ._deps import require_scope
+from schemas.responses import TopologyResponse
 
 router = APIRouter(prefix="/v1/topology", tags=["topology"])
 
 
-@router.get("")
+@router.get("", response_model=TopologyResponse)
 async def get_topology(
     request: Request,
     start_after: Optional[int] = None,

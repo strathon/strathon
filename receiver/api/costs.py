@@ -21,6 +21,7 @@ import auth as auth_mod
 from database import get_db_session
 
 from ._deps import require_scope
+from schemas.responses import CostResponse
 
 router = APIRouter(prefix="/v1/costs", tags=["costs"])
 
@@ -28,7 +29,7 @@ VALID_GROUP_BY = {"agent", "model", "agent_model"}
 VALID_PERIODS = {"day", "week"}
 
 
-@router.get("")
+@router.get("", response_model=CostResponse)
 async def get_costs(
     request: Request,
     group_by: str = "model",

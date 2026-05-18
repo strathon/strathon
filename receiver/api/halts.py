@@ -57,7 +57,11 @@ class CreateHaltResponse(BaseModel):
     halt: dict[str, Any]
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+class HaltListResponse(BaseModel):
+    halts: list[dict[str, Any]]
+
+
+@router.post("", status_code=status.HTTP_201_CREATED, response_model=CreateHaltResponse)
 async def create_halt(
     body: CreateHaltRequest,
     request: Request,
@@ -102,7 +106,7 @@ async def create_halt(
     return {"halt": halt.to_json()}
 
 
-@router.get("")
+@router.get("", response_model=HaltListResponse)
 async def list_halts(
     request: Request,
     include_cleared: bool = False,
@@ -126,7 +130,7 @@ async def list_halts(
     return {"halts": [h.to_json() for h in halts]}
 
 
-@router.get("/{halt_id}")
+@router.get("/{halt_id}", response_model=CreateHaltResponse)
 async def get_halt(
     halt_id: int,
     request: Request,
@@ -147,7 +151,7 @@ async def get_halt(
     return {"halt": halt.to_json()}
 
 
-@router.delete("/{halt_id}")
+@router.delete("/{halt_id}", response_model=CreateHaltResponse)
 async def delete_halt(
     halt_id: int,
     request: Request,
