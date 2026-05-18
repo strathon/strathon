@@ -1,8 +1,8 @@
 """Framework auto-instrumentation modules.
 
-Three frameworks have full implementations: LangGraph, CrewAI, and
-OpenAI Agents SDK. Five more (Anthropic, AutoGen, Claude Agent,
-LangChain, OpenAI raw) are planned for future releases.
+Nine frameworks have full implementations: LangGraph, CrewAI,
+OpenAI Agents SDK, OpenAI (direct), Anthropic (direct), LangChain,
+AutoGen, Claude Agent SDK, and Pydantic AI. No stubs remain.
 
 Calling ``auto_instrument(client)`` discovers and instruments every
 installed framework that has a real implementation. Explicitly
@@ -27,6 +27,7 @@ SUPPORTED_FRAMEWORKS: list[str] = [
     "langchain",
     "autogen",
     "claude_agent",
+    "pydantic_ai",
 ]
 
 # No planned-but-unimplemented frameworks remain. All eight have

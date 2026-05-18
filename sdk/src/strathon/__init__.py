@@ -55,7 +55,7 @@ def instrument(client, frameworks=None):
         client: Strathon Client instance.
         frameworks: List of framework names. If None, instruments all installed frameworks.
                     Options: "openai_agents", "claude_agent", "langchain",
-                    "crewai", "autogen", "openai", "anthropic".
+                    "crewai", "autogen", "openai", "anthropic", "pydantic_ai".
 
     Returns:
         List of frameworks that were successfully instrumented.

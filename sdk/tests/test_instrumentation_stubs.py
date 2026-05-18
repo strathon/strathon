@@ -26,11 +26,11 @@ from strathon.instrumentation import (
 )
 
 
-def test_supported_frameworks_contains_all_eight():
+def test_supported_frameworks_contains_all_nine():
     expected = {
         "langgraph", "crewai", "openai_agents",
         "openai", "anthropic", "langchain",
-        "autogen", "claude_agent",
+        "autogen", "claude_agent", "pydantic_ai",
     }
     assert set(SUPPORTED_FRAMEWORKS) == expected
 
