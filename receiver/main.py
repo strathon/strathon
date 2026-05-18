@@ -449,6 +449,14 @@ async def lifespan(app: FastAPI):
     # endpoint, here's how to rotate" the moment the container starts.
     await _print_quickstart_banner()
 
+    # Key reaper: periodically revokes expired API keys and warns about
+    # keys nearing expiry. Lightweight — a single SQL UPDATE per tick.
+    from key_reaper import reaper_loop as key_reaper_loop
+    app.state.key_reaper_task = asyncio.create_task(
+        key_reaper_loop(async_session_maker),
+        name="strathon.key_reaper",
+    )
+
     yield
 
     logger.info("Strathon receiver shutting down")
@@ -510,6 +518,14 @@ async def lifespan(app: FastAPI):
 
     # Clear the metrics singleton so a subsequent import doesn't see
     # state from a previous lifespan.
+
+    # Stop the key reaper.
+    if hasattr(app.state, "key_reaper_task"):
+        app.state.key_reaper_task.cancel()
+        try:
+            await app.state.key_reaper_task
+        except (asyncio.CancelledError, Exception):
+            pass
     metrics_mod.reset_global_metrics_for_testing()
 
     # Close the SQLAlchemy engine pool.

@@ -106,20 +106,13 @@ async def create_api_key(
     project_id: UUID,
     name: str,
     scopes: Optional[list[str]] = None,
+    expires_at: Optional[object] = None,
 ) -> ApiKeyCreateResponse:
     """Create an API key. Returns the raw key ONCE — never recoverable after.
 
-    The raw key is generated and immediately discarded after returning;
-    only its prefix and SHA-256 hash get persisted. The caller (endpoint)
-    must surface raw_key in the HTTP response and instruct the user to
-    store it somewhere safe.
-
-    scopes:
-        Optional list of scope strings (see receiver/auth.py:KNOWN_SCOPES).
-        Caller is responsible for validating against KNOWN_SCOPES BEFORE
-        calling — the repository trusts the input and lets the DB CHECK
-        constraint catch only the "non-empty" case. When omitted, falls
-        through to the model's server-side default of the SDK scopes.
+    expires_at:
+        Optional datetime for hard key expiry. After this timestamp the
+        key stops authenticating. Useful for temporary keys (CI, demos).
     """
     raw, prefix, key_hash = generate_api_key()
 
@@ -131,6 +124,8 @@ async def create_api_key(
     )
     if scopes is not None:
         kwargs["scopes"] = scopes
+    if expires_at is not None:
+        kwargs["expires_at"] = expires_at
 
     api_key = ApiKey(**kwargs)
     session.add(api_key)
@@ -172,24 +167,24 @@ async def verify_token_and_touch(
 ) -> Optional[ApiKey]:
     """Resolve a bearer token to the api_keys row, updating last_used_at.
 
-    Returns None if the token doesn't match any active key. Same return
-    type for "prefix didn't match anything" and "prefix matched but hash
-    didn't" — this is intentional to avoid leaking the existence of
-    prefixes via response timing or shape.
-
-    The hmac.compare_digest call is constant-time. The DB query above it
-    is indexed, so the whole verification is roughly the same wall-time
-    regardless of whether the prefix is known.
+    Returns None if the token doesn't match any active key, or if the
+    key has expired (expires_at < now). Same return type for all failure
+    modes to avoid leaking existence via timing or shape.
     """
     from auth import KEY_PREFIX_LEN
+    from datetime import datetime, timezone
+
     prefix = token[:KEY_PREFIX_LEN]
     incoming_hash = _sha256_hex(token)
 
     keys = await find_active_keys_by_prefix(session, prefix)
+    now = datetime.now(timezone.utc)
     for key in keys:
         if hmac.compare_digest(key.key_hash, incoming_hash):
-            # Best-effort last_used_at update. Failure here mustn't deny
-            # the authentication — log and continue.
+            # Reject expired keys (treat like revoked).
+            if key.expires_at is not None and key.expires_at <= now:
+                logger.debug("key %s expired at %s", key.id, key.expires_at)
+                return None
             try:
                 await touch_last_used(session, key.id)
             except Exception:
@@ -197,3 +192,151 @@ async def verify_token_and_touch(
             return key
 
     return None
+
+
+# ---- Key rotation --------------------------------------------------------
+
+
+async def rotate_api_key(
+    session: AsyncSession,
+    key_id: UUID,
+    grace_period_hours: int = 72,
+) -> Optional[ApiKeyCreateResponse]:
+    """Rotate a key: create a replacement, deprecate the old one.
+
+    The old key gets deprecated_at=now and expires_at=now+grace_period.
+    Both old and new keys work during the grace period. After expires_at
+    the old key stops authenticating (the verify_token_and_touch check
+    rejects it, and the background reaper eventually revokes it).
+
+    Returns the new key (with raw_key shown once), or None if the
+    old key was not found or already revoked/deprecated.
+    """
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import func as sa_func
+
+    # Find the old key — must be active (not revoked, not already deprecated).
+    stmt = (
+        select(ApiKey)
+        .where(ApiKey.id == key_id)
+        .where(ApiKey.revoked_at.is_(None))
+        .where(ApiKey.deprecated_at.is_(None))
+    )
+    result = await session.execute(stmt)
+    old_key = result.scalar_one_or_none()
+    if old_key is None:
+        return None
+
+    now = datetime.now(timezone.utc)
+    grace_delta = timedelta(hours=max(grace_period_hours, 1))
+
+    # Deprecate the old key with a grace period.
+    deprecate_stmt = (
+        update(ApiKey)
+        .where(ApiKey.id == key_id)
+        .values(
+            deprecated_at=sa_func.now(),
+            expires_at=now + grace_delta,
+        )
+    )
+    await session.execute(deprecate_stmt)
+
+    # Create the replacement key, inheriting project + scopes.
+    raw, prefix, key_hash = generate_api_key()
+    new_key = ApiKey(
+        project_id=old_key.project_id,
+        name=f"{old_key.name} (rotated)",
+        key_hash=key_hash,
+        key_prefix=prefix,
+        scopes=list(old_key.scopes),
+        rotated_from_id=old_key.id,
+    )
+    session.add(new_key)
+    await session.flush()
+    await session.refresh(new_key)
+
+    return ApiKeyCreateResponse(
+        api_key=ApiKeyRead.model_validate(new_key),
+        raw_key=raw,
+    )
+
+
+# ---- Key update ----------------------------------------------------------
+
+
+async def update_api_key(
+    session: AsyncSession,
+    key_id: UUID,
+    *,
+    name: Optional[str] = None,
+    expires_at: Optional[object] = None,  # datetime or None
+) -> Optional[ApiKeyRead]:
+    """Update mutable fields on an active key.
+
+    Returns the updated key, or None if not found / already revoked.
+    """
+    stmt = (
+        select(ApiKey)
+        .where(ApiKey.id == key_id)
+        .where(ApiKey.revoked_at.is_(None))
+    )
+    result = await session.execute(stmt)
+    key = result.scalar_one_or_none()
+    if key is None:
+        return None
+
+    if name is not None:
+        key.name = name
+    if expires_at is not None:
+        key.expires_at = expires_at  # type: ignore[assignment]
+
+    await session.flush()
+    await session.refresh(key)
+    return ApiKeyRead.model_validate(key)
+
+
+# ---- Key reaper (background task) ----------------------------------------
+
+
+async def reap_expired_keys(session: AsyncSession) -> int:
+    """Revoke all keys past their expires_at. Returns count revoked."""
+    from datetime import datetime, timezone
+    from sqlalchemy import func as sa_func
+
+    now = datetime.now(timezone.utc)
+    stmt = (
+        update(ApiKey)
+        .where(ApiKey.expires_at.isnot(None))
+        .where(ApiKey.expires_at <= now)
+        .where(ApiKey.revoked_at.is_(None))
+        .values(revoked_at=sa_func.now())
+    )
+    result = await session.execute(stmt)
+    count = result.rowcount  # type: ignore[attr-defined]
+    if count:
+        logger.info("Reaped %d expired API key(s)", count)
+    return count
+
+
+async def find_keys_expiring_soon(
+    session: AsyncSession,
+    within_hours: int = 24,
+) -> list[ApiKeyRead]:
+    """Find active keys expiring within the given window.
+
+    Used by the background task to emit warning webhooks.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    threshold = now + timedelta(hours=within_hours)
+    stmt = (
+        select(ApiKey)
+        .where(ApiKey.expires_at.isnot(None))
+        .where(ApiKey.expires_at > now)
+        .where(ApiKey.expires_at <= threshold)
+        .where(ApiKey.revoked_at.is_(None))
+    )
+    result = await session.execute(stmt)
+    keys = result.scalars().all()
+    return [ApiKeyRead.model_validate(k) for k in keys]

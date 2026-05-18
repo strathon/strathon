@@ -66,6 +66,8 @@ BUDGET_DELETE: Final[str] = "budget.delete"
 
 API_KEY_CREATE: Final[str] = "api_key.create"
 API_KEY_REVOKE: Final[str] = "api_key.revoke"
+API_KEY_ROTATE: Final[str] = "api_key.rotate"
+API_KEY_UPDATE: Final[str] = "api_key.update"
 
 PROJECT_SETTINGS_UPDATE: Final[str] = "project_settings.update"
 

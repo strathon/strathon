@@ -17,10 +17,14 @@ class ApiKeyCreate(BaseModel):
     See receiver/auth.py:KNOWN_SCOPES for the full list. The wildcard
     '*' grants every scope and is intended for administrative keys
     (one-time bootstrap, CI, etc.).
+
+    expires_at: optional hard expiry. After this timestamp the key stops
+    authenticating. Useful for temporary keys (CI, demos, contractors).
     """
 
     name: str = Field(min_length=1, max_length=200)
     scopes: Optional[list[str]] = None
+    expires_at: Optional[datetime] = None
 
 
 class ApiKeyRead(BaseModel):
@@ -41,6 +45,9 @@ class ApiKeyRead(BaseModel):
     created_at: datetime
     last_used_at: Optional[datetime] = None
     revoked_at: Optional[datetime] = None
+    deprecated_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    rotated_from_id: Optional[UUID] = None
 
 
 class ApiKeyCreateResponse(BaseModel):

@@ -117,6 +117,20 @@ class ApiKey(Base):
     )
     last_used_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
     revoked_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+    deprecated_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True),
+        comment="Set on rotation. Key still works until expires_at.",
+    )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True),
+        comment="Hard expiry. Auth rejects after this timestamp.",
+    )
+    rotated_from_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("api_keys.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Links replacement key to the deprecated key it replaced.",
+    )
 
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="api_keys")
