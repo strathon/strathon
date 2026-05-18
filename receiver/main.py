@@ -519,7 +519,29 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Strathon Receiver",
-    version="0.0.1",
+    description=(
+        "An open-source firewall for AI agents. Write CEL rules, "
+        "Strathon blocks the tool call before it runs."
+    ),
+    version="0.1.0",
+    license_info={"name": "MIT", "url": "https://opensource.org/licenses/MIT"},
+    contact={"name": "Strathon", "url": "https://getstrathon.com"},
+    openapi_tags=[
+        {"name": "health", "description": "Liveness, readiness, and metrics"},
+        {"name": "traces", "description": "OTLP span ingest and trace queries"},
+        {"name": "analytics", "description": "Span aggregation, trace tree, trace list"},
+        {"name": "policies", "description": "CEL policy CRUD, versioning, batch ops"},
+        {"name": "policy-templates", "description": "OWASP-mapped pre-built policy catalog"},
+        {"name": "projects", "description": "Multi-project management"},
+        {"name": "api_keys", "description": "Capability-scoped API key management"},
+        {"name": "halts", "description": "Operator kill-switches"},
+        {"name": "budgets", "description": "Cost and iteration budget enforcement"},
+        {"name": "audit", "description": "Tamper-evident audit log"},
+        {"name": "project-settings", "description": "Per-project configuration"},
+        {"name": "webhooks", "description": "Webhook delivery and signing keys"},
+        {"name": "auth", "description": "User registration, login, sessions"},
+        {"name": "members", "description": "Project membership and role management"},
+    ],
     lifespan=lifespan,
 )
 
