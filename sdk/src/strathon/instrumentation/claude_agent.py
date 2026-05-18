@@ -1,20 +1,38 @@
 """Claude Agent SDK instrumentation for Strathon.
 
-Wraps the Claude Agent SDK's ``query()`` function and
-``ClaudeSDKClient`` session methods to emit OpenTelemetry spans
-for every agent execution.
+Two-layer instrumentation:
+
+1. **Session-level (monkey-patch)**: wraps ``query()`` and
+   ``ClaudeSDKClient.query()`` to emit OpenTelemetry spans for every
+   agent session (prompt, response, tool usage, session metadata).
+
+2. **Tool-level (hooks)**: ``create_strathon_hooks(client)`` returns a
+   hooks dict for ``ClaudeAgentOptions``. PreToolUse evaluates CEL
+   policies before each tool call (deny to block, allow to proceed).
+   PostToolUse emits per-tool OTel spans.
+
+Usage for tool-level enforcement (hooks on ClaudeSDKClient)::
+
+    from strathon import Client
+    from strathon.instrumentation.claude_agent import create_strathon_hooks
+
+    client = Client(api_key="...", endpoint="http://localhost:4318")
+    hooks = create_strathon_hooks(client)
+
+    async with ClaudeSDKClient(
+        options=ClaudeAgentOptions(hooks=hooks)
+    ) as sdk_client:
+        await sdk_client.query("...")
+
+Note: hooks require ``ClaudeSDKClient``. The module-level ``query()``
+function does not support hooks. The session-level monkey-patch on
+``query()`` still provides observability for users not using
+``ClaudeSDKClient``.
 
 The Claude Agent SDK (``pip install claude-agent-sdk``, formerly
-``claude-code-sdk``) wraps the Claude Code CLI, giving Python code
-access to file operations, terminal commands, and multi-step
-workflow chaining. This instrumentation captures the high-level
-agent session: prompt, response messages, tool usage, and session
-metadata.
-
-Note: as of v0.1.81 (May 2026), the SDK exposes ``can_use_tool``
-and ``PreToolUse``/``PostToolUse`` hooks on ``ClaudeAgentOptions``
-for first-class tool-call interception. A future version of this
-module may use those hooks instead of monkey-patching ``query()``.
+``claude-code-sdk``) wraps the Claude Code CLI. As of v0.1.81+, the
+SDK exposes PreToolUse/PostToolUse hooks on ClaudeAgentOptions for
+first-class tool-call interception.
 
 For raw Anthropic API instrumentation (``anthropic.messages.create``),
 use ``strathon.instrumentation.anthropic`` instead.
@@ -23,7 +41,9 @@ use ``strathon.instrumentation.anthropic`` instead.
 from __future__ import annotations
 
 import functools
+import json
 import logging
+import time
 from typing import Any, Dict
 
 from opentelemetry.trace import Status, StatusCode
@@ -41,6 +61,24 @@ def _truncate(value: Any, max_len: int = _MAX_ATTR_LEN) -> str:
     return s[:max_len] + f"... [truncated {len(s) - max_len} chars]"
 
 
+def _safe_str(value: Any) -> str:
+    try:
+        return str(value) if value is not None else ""
+    except Exception:
+        return "<unrepr>"
+
+
+def _json_or_str(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, default=_safe_str)
+        except Exception:
+            return _safe_str(value)
+    return _safe_str(value)
+
+
 def _extract_messages(result) -> str:
     """Best-effort extraction of messages from a query result."""
     parts = []
@@ -53,6 +91,11 @@ def _extract_messages(result) -> str:
             if text:
                 parts.append(str(text))
     return _truncate("\n".join(parts))
+
+
+# ---------------------------------------------------------------------------
+# Layer 1: Session-level monkey-patches (query + ClaudeSDKClient.query)
+# ---------------------------------------------------------------------------
 
 
 def _wrap_query(original, tracer):
@@ -90,17 +133,13 @@ def _wrap_query(original, tracer):
             span.end()
             raise
 
-        # Extract response.
         response_text = _extract_messages(result)
         if response_text:
             span.set_attribute("gen_ai.completion", response_text)
 
-        # Session metadata if available.
         session_id = getattr(result, "session_id", None)
         if session_id:
-            span.set_attribute(
-                "gen_ai.conversation.id", str(session_id)
-            )
+            span.set_attribute("gen_ai.conversation.id", str(session_id))
 
         span.set_status(Status(StatusCode.OK))
         span.end()
@@ -148,11 +187,197 @@ def _wrap_client_query(original, tracer):
     return wrapper
 
 
+# ---------------------------------------------------------------------------
+# Layer 2: Tool-level hooks (PreToolUse / PostToolUse)
+# ---------------------------------------------------------------------------
+
+# Module-level state for tool timing (keyed by tool_use_id).
+_TOOL_START_TIMES: Dict[str, float] = {}
+
+
+def _build_pre_tool_use_hook(client):
+    """Build a PreToolUse hook that evaluates Strathon policies."""
+
+    async def strathon_pre_tool_use(input_data, tool_use_id, context):
+        tool_name = input_data.get("tool_name", "unknown")
+        tool_input = input_data.get("tool_input", {})
+
+        if tool_use_id:
+            _TOOL_START_TIMES[tool_use_id] = time.monotonic()
+
+        enforcer = getattr(client, "_policy_enforcer", None)
+        if enforcer is None:
+            return {}
+
+        span_attrs: Dict[str, Any] = {
+            "strathon.framework": "claude_agent_sdk",
+            "gen_ai.tool.name": tool_name,
+            "strathon.tool.name": tool_name,
+        }
+        if tool_input:
+            span_attrs["strathon.tool.args"] = _truncate(
+                _json_or_str(tool_input)
+            )
+
+        try:
+            decision = client.check_policy({
+                "name": f"claude_agent.tool.{tool_name}",
+                "attrs": span_attrs,
+            })
+        except Exception:
+            logger.exception(
+                "Policy check failed for tool %s; allowing", tool_name
+            )
+            return {}
+
+        if decision.is_block or decision.is_throttle:
+            from strathon.policy.steer import _emit_intervention_span
+            kind = "blocked" if decision.is_block else "throttled"
+            _emit_intervention_span(
+                client,
+                span_name=f"claude_agent.tool.{tool_name}",
+                attrs=span_attrs,
+                decision_kind=kind,
+                decision=decision,
+            )
+            reason = (
+                decision.message
+                or f"Tool '{tool_name}' {kind} by Strathon policy"
+            )
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                }
+            }
+
+        if decision.is_steer:
+            from strathon.policy.steer import _emit_intervention_span
+            replacement = decision.replacement or (
+                f"[Strathon: tool '{tool_name}' redirected by policy"
+                + (f" '{decision.policy_name}'" if decision.policy_name else "")
+                + "]"
+            )
+            _emit_intervention_span(
+                client,
+                span_name=f"claude_agent.tool.{tool_name}",
+                attrs=span_attrs,
+                decision_kind="steered",
+                decision=decision,
+                replacement=replacement,
+            )
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": replacement,
+                }
+            }
+
+        return {}
+
+    return strathon_pre_tool_use
+
+
+def _build_post_tool_use_hook(client):
+    """Build a PostToolUse hook that emits OTel tool spans."""
+
+    async def strathon_post_tool_use(input_data, tool_use_id, context):
+        tool_name = input_data.get("tool_name", "unknown")
+        tool_input = input_data.get("tool_input", {})
+
+        span_attrs: Dict[str, Any] = {
+            "strathon.framework": "claude_agent_sdk",
+            "gen_ai.tool.name": tool_name,
+            "strathon.tool.name": tool_name,
+        }
+        if tool_input:
+            span_attrs["strathon.tool.args"] = _truncate(
+                _json_or_str(tool_input)
+            )
+
+        start = _TOOL_START_TIMES.pop(tool_use_id or "", None)
+        if start is not None:
+            elapsed_ms = (time.monotonic() - start) * 1000
+            span_attrs["strathon.tool.duration_ms"] = round(elapsed_ms, 2)
+
+        result = input_data.get("result")
+        if result is not None:
+            span_attrs["strathon.tool.result"] = _truncate(
+                _json_or_str(result)
+            )
+
+        tracer = client.tracer
+        span = tracer.start_span(
+            name=f"claude_agent.tool.{tool_name}",
+            attributes=span_attrs,
+        )
+        span.set_status(Status(StatusCode.OK))
+        span.end()
+
+        return {}
+
+    return strathon_post_tool_use
+
+
+def create_strathon_hooks(client) -> Dict[str, Any]:
+    """Create PreToolUse/PostToolUse hooks for ClaudeAgentOptions.
+
+    Returns a hooks dict to pass to ``ClaudeAgentOptions(hooks=...)``.
+    PreToolUse evaluates Strathon policies and denies tool calls that
+    match block/steer/throttle rules. PostToolUse emits OTel spans.
+
+    Note: hooks only work with ``ClaudeSDKClient``, not ``query()``.
+
+    Args:
+        client: Strathon Client instance.
+
+    Returns:
+        Dict suitable for ``ClaudeAgentOptions(hooks=...)``.
+
+    Example::
+
+        from strathon.instrumentation.claude_agent import create_strathon_hooks
+        hooks = create_strathon_hooks(client)
+        options = ClaudeAgentOptions(hooks=hooks)
+    """
+    try:
+        from claude_agent_sdk import HookMatcher  # type: ignore[import-not-found]
+    except ImportError:
+        return {
+            "PreToolUse": [
+                {"hooks": [_build_pre_tool_use_hook(client)]}
+            ],
+            "PostToolUse": [
+                {"hooks": [_build_post_tool_use_hook(client)]}
+            ],
+        }
+
+    return {
+        "PreToolUse": [
+            HookMatcher(hooks=[_build_pre_tool_use_hook(client)])
+        ],
+        "PostToolUse": [
+            HookMatcher(hooks=[_build_post_tool_use_hook(client)])
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# instrument() — registers session-level patches
+# ---------------------------------------------------------------------------
+
+
 def instrument(client) -> bool:
     """Instrument the Claude Agent SDK for trace capture.
 
-    Wraps ``claude_agent_sdk.query()`` and
-    ``ClaudeSDKClient.query()`` to emit OpenTelemetry spans.
+    Wraps ``claude_agent_sdk.query()`` and ``ClaudeSDKClient.query()``
+    to emit session-level OpenTelemetry spans.
+
+    For tool-level policy enforcement, also call
+    ``create_strathon_hooks(client)`` and pass the result to
+    ``ClaudeAgentOptions(hooks=...)``.
 
     Args:
         client: Strathon Client instance.
@@ -176,13 +401,11 @@ def instrument(client) -> bool:
 
     tracer = client.tracer
 
-    # Wrap module-level query().
     if hasattr(claude_agent_sdk, "query"):
         claude_agent_sdk.query = _wrap_query(
             claude_agent_sdk.query, tracer
         )
 
-    # Wrap ClaudeSDKClient.query if it exists.
     try:
         from claude_agent_sdk import ClaudeSDKClient
         if hasattr(ClaudeSDKClient, "query"):
@@ -193,5 +416,15 @@ def instrument(client) -> bool:
         logger.debug("ClaudeSDKClient not available; skipping client patch")
 
     _PATCHED = True
-    logger.info("Claude Agent SDK instrumentation registered")
+    logger.info(
+        "Claude Agent SDK instrumentation registered. "
+        "For tool-level policy enforcement, pass "
+        "create_strathon_hooks(client) to ClaudeAgentOptions."
+    )
     return True
+
+
+__all__ = [
+    "create_strathon_hooks",
+    "instrument",
+]
