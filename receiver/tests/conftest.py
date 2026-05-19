@@ -59,6 +59,9 @@ os.environ.setdefault(
 # non-routable hostnames (example.test) that would fail DNS resolution.
 os.environ.setdefault("STRATHON_WEBHOOK_SSRF_GUARD", "false")
 
+# Enable interactive docs in tests (disabled by default in production).
+os.environ.setdefault("STRATHON_DOCS_ENABLED", "true")
+
 
 @pytest_asyncio.fixture
 async def async_engine():

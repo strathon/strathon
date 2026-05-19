@@ -561,6 +561,10 @@ async def lifespan(app: FastAPI):
     await dispose_engine()
 
 
+# Production hardening: gate interactive docs behind env var.
+# Default: disabled in production, enabled in development.
+_docs_enabled = os.environ.get("STRATHON_DOCS_ENABLED", "false").lower() in ("1", "true", "yes")
+
 app = FastAPI(
     title="Strathon Receiver",
     description=(
@@ -587,7 +591,49 @@ app = FastAPI(
         {"name": "members", "description": "Project membership and role management"},
     ],
     lifespan=lifespan,
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
 )
+
+
+# ---- Security middleware ----
+
+# CORS: explicit origin allowlist. No wildcard in production.
+_cors_origins = [
+    o.strip()
+    for o in os.environ.get("STRATHON_CORS_ORIGINS", "").split(",")
+    if o.strip()
+]
+if _cors_origins:
+    from starlette.middleware.cors import CORSMiddleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
+        allow_credentials=False,
+    )
+
+
+# HTTP security headers on every response.
+from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
+from starlette.responses import Response as StarletteResponse  # noqa: E402
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response: StarletteResponse = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # Cache-Control: no-store on auth-related endpoints.
+        if request.url.path.startswith(("/v1/auth/", "/v1/api_keys")):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 # Rate-limit middleware. The actual limiter store lives on

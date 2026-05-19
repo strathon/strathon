@@ -119,7 +119,21 @@ async def ready(request: Request) -> Response:
 
 @router.get("/metrics")
 async def metrics_endpoint(request: Request) -> Response:
-    """Prometheus exposition endpoint."""
+    """Prometheus exposition endpoint.
+
+    Optionally protected by STRATHON_METRICS_AUTH_TOKEN. When set,
+    requests must include Authorization: Bearer <token>.
+    """
+    metrics_token = os.environ.get("STRATHON_METRICS_AUTH_TOKEN")
+    if metrics_token:
+        import hmac
+        auth_header = request.headers.get("authorization", "")
+        if not auth_header.lower().startswith("bearer "):
+            return Response(status_code=401, content="Unauthorized")
+        provided = auth_header[7:].strip()
+        if not hmac.compare_digest(provided, metrics_token):
+            return Response(status_code=403, content="Forbidden")
+
     state = request.app.state
     # Mirror the latest SamplingCounters snapshot into the Prom counters
     snapshot = state.sampling_counters.snapshot()
