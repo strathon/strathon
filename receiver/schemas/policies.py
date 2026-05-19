@@ -76,6 +76,8 @@ class PolicyCreate(BaseModel):
     - action_config defaults to empty dict
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(min_length=1, max_length=200)
     match_expression: str = Field(min_length=1)
     action: str = Field(pattern="^(log|alert|block|steer|throttle|allow)$")
@@ -89,6 +91,8 @@ class PolicyCreate(BaseModel):
 
 class PolicyUpdate(BaseModel):
     """PATCH /v1/policies/{id} request body. All fields optional."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
     match_expression: Optional[str] = Field(default=None, min_length=1)

@@ -119,6 +119,17 @@ async def ingest_traces(
 
     body = await request.body()
 
+    # Reject oversized payloads before parsing. 4MB is generous for OTLP
+    # batches; typical production batches are 100KB-1MB. This prevents
+    # memory exhaustion and mitigates CVE-2025-4565 (protobuf recursive
+    # parsing DoS) by limiting the input surface.
+    MAX_PAYLOAD_BYTES = 4 * 1024 * 1024  # 4MB
+    if len(body) > MAX_PAYLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Payload too large: {len(body)} bytes (max {MAX_PAYLOAD_BYTES})",
+        )
+
     req = ExportTraceServiceRequest()
     try:
         req.ParseFromString(body)

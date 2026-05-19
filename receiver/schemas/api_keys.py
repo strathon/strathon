@@ -22,6 +22,8 @@ class ApiKeyCreate(BaseModel):
     authenticating. Useful for temporary keys (CI, demos, contractors).
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(min_length=1, max_length=200)
     scopes: Optional[list[str]] = None
     expires_at: Optional[datetime] = None

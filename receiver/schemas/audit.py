@@ -126,6 +126,8 @@ class AuditVerifyResponse(BaseModel):
 class AuditStreamCreate(BaseModel):
     """Body for POST /v1/audit/streams."""
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(
         ...,
         min_length=1,

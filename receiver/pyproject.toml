@@ -6,7 +6,6 @@ requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Kavyansh Shakya" }]
-
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
@@ -20,6 +19,10 @@ dependencies = [
     "opentelemetry-proto>=1.29.0",
     "opentelemetry-api>=1.29.0",
     "opentelemetry-sdk>=1.29.0",
+    # Pin protobuf>=6.31.1 for CVE-2025-4565 (pure-Python DoS via
+    # recursive protobuf parsing). opentelemetry-proto pulls protobuf
+    # but doesn't floor the version high enough.
+    "protobuf>=6.31.1",
     "httpx>=0.28.0",
     "python-multipart>=0.0.18",
     "authlib>=1.4.0",
@@ -36,6 +39,10 @@ dependencies = [
     "dramatiq[redis]>=1.17.0",
     "standardwebhooks>=1.0.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/strathon/strathon"
+Documentation = "https://getstrathon.com"
 
 [project.optional-dependencies]
 dev = [
