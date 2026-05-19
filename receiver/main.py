@@ -464,6 +464,13 @@ async def lifespan(app: FastAPI):
         name="strathon.approval_reaper",
     )
 
+    # Incident detector: periodic check for incident-level events.
+    from incident_detector import incident_detector_loop
+    app.state.incident_detector_task = asyncio.create_task(
+        incident_detector_loop(async_session_maker),
+        name="strathon.incident_detector",
+    )
+
     yield
 
     logger.info("Strathon receiver shutting down")
@@ -540,6 +547,13 @@ async def lifespan(app: FastAPI):
             await app.state.approval_reaper_task
         except (asyncio.CancelledError, Exception):
             pass
+
+    if hasattr(app.state, "incident_detector_task"):
+        app.state.incident_detector_task.cancel()
+        try:
+            await app.state.incident_detector_task
+        except (asyncio.CancelledError, Exception):
+            pass
     metrics_mod.reset_global_metrics_for_testing()
 
     # Close the SQLAlchemy engine pool.
@@ -587,8 +601,9 @@ app.add_middleware(RateLimitMiddleware)
 # Mount routers. Import here (after `app` exists) so router modules can
 # stay decoupled from main.py and not see import-order issues.
 from api import (  # noqa: E402
-    analytics, api_keys, approvals, audit, auth_endpoints, budgets, costs,
-    halts, health, intervention, members, model_prices, policies,
+    agent_inventory, analytics, api_keys, approvals, audit, auth_endpoints,
+    budgets, compliance_export, cost_forecast, costs, halts, health,
+    intervention, members, model_prices, policies, policy_suggestions,
     policy_templates, project_settings, projects, simulate, spans,
     topology, traces, webhook_deliveries, webhook_signing_keys,
 )
@@ -597,9 +612,11 @@ app.include_router(health.router)
 app.include_router(traces.router)
 app.include_router(spans.router)
 app.include_router(analytics.router)
+app.include_router(cost_forecast.router)
 app.include_router(costs.router)
 app.include_router(topology.router)
 app.include_router(projects.router)
+app.include_router(policy_suggestions.router)
 app.include_router(policies.router)
 app.include_router(policy_templates.router)
 app.include_router(simulate.router)
@@ -611,6 +628,8 @@ app.include_router(webhook_deliveries.router)
 app.include_router(budgets.router)
 app.include_router(model_prices.router)
 app.include_router(approvals.router)
+app.include_router(agent_inventory.router)
+app.include_router(compliance_export.router)
 app.include_router(project_settings.router)
 app.include_router(audit.router)
 # RBAC: auth + membership management
