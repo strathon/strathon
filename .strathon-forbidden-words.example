@@ -1,0 +1,11 @@
+# .strathon-forbidden-words.example
+#
+# Copy this file to .strathon-forbidden-words and add your org-specific
+# patterns. One regex pattern per line. Lines starting with # are comments.
+# The pre-commit hook (scripts/check-secrets.sh) will block commits
+# containing any of these patterns in code files (not docs).
+#
+# Example patterns:
+# CompetitorName
+# InternalProjectCode
+# internal-only-domain\.com

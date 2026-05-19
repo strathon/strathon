@@ -88,3 +88,18 @@ docker-data/
 strathon.db
 *.sqlite
 *.sqlite3
+
+# Secrets and private keys — never commit these.
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+secrets/
+internal/
+notes/
+roadmap.md
+
+# Pre-commit hook config (org-specific forbidden patterns).
+.strathon-forbidden-words
