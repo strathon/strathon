@@ -125,7 +125,41 @@ async def _send_one(
     error_message: str | None = None
 
     try:
-        async with httpx.AsyncClient(timeout=request_timeout_sec) as client:
+        # SSRF protection: validate resolved IPs before connecting.
+        # This runs at delivery time (not just registration time) to
+        # defend against DNS rebinding attacks.
+        # Gated behind env var so test suites using mock transports can
+        # skip DNS resolution. Default: enabled.
+        import os
+        ssrf_enabled = os.environ.get(
+            "STRATHON_WEBHOOK_SSRF_GUARD", "true"
+        ).lower() in ("1", "true", "yes")
+        if ssrf_enabled:
+            from webhooks.ssrf_guard import validate_webhook_url, SSRFError
+            try:
+                validate_webhook_url(delivery.url)
+            except SSRFError as ssrf_exc:
+                logger.warning(
+                    "SSRF blocked for webhook %s to %s: %s",
+                    delivery.webhook_id, delivery.url, ssrf_exc,
+                )
+                error_message = f"SSRF blocked: {ssrf_exc}"
+                await session.execute(
+                    update(WebhookDelivery)
+                    .where(WebhookDelivery.id == delivery.id)
+                    .values(
+                        status="abandoned",
+                        attempts=delivery.attempts + 1,
+                        last_attempt_at=datetime.now(timezone.utc),
+                        last_error=error_message,
+                    )
+                )
+                await session.commit()
+                return "abandoned"
+
+        async with httpx.AsyncClient(
+            timeout=request_timeout_sec,
+        ) as client:
             resp = await client.post(delivery.url, content=body, headers=headers)
             response_status = resp.status_code
     except (httpx.TimeoutException, httpx.ConnectError) as exc:

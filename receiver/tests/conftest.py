@@ -55,6 +55,10 @@ os.environ.setdefault(
     "test_audit_hmac_key_do_not_use_in_production_aaaaaaaaaaaaaaaaaaaa",
 )
 
+# Disable webhook SSRF guard in tests. Tests use mock transports with
+# non-routable hostnames (example.test) that would fail DNS resolution.
+os.environ.setdefault("STRATHON_WEBHOOK_SSRF_GUARD", "false")
+
 
 @pytest_asyncio.fixture
 async def async_engine():
