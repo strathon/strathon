@@ -36,8 +36,13 @@ def get_totp_uri(secret: str, email: str) -> str:
 
 
 def verify_totp_code(secret: str, code: str) -> bool:
-    """Verify a TOTP code against a secret. Allows +-1 window for clock skew."""
-    totp = pyotp.TOTP(secret)
+    """Verify a TOTP code against a secret. Allows +-1 window for clock skew.
+
+    Automatically decrypts the secret if it's encrypted (enc: prefix).
+    """
+    from encryption import decrypt
+    decrypted = decrypt(secret)
+    totp = pyotp.TOTP(decrypted)
     return totp.verify(code, valid_window=1)
 
 
@@ -67,11 +72,14 @@ async def setup_totp(
         raise ValueError("user not found")
 
     secret = generate_totp_secret()
+    # Encrypt before storing (if STRATHON_ENCRYPTION_KEY is set).
+    from encryption import encrypt
+    encrypted_secret = encrypt(secret)
     # Store the secret but don't enable MFA yet.
     await session.execute(
         update(User)
         .where(User.id == user_id)
-        .values(totp_secret=secret)
+        .values(totp_secret=encrypted_secret)
     )
     uri = get_totp_uri(secret, user.email or str(user_id))
     return secret, uri

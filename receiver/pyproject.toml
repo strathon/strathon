@@ -36,6 +36,9 @@ dependencies = [
     # RBAC: password hashing with Argon2id (OWASP recommended).
     # argon2-cffi wraps the reference C implementation.
     "argon2-cffi>=25.1.0",
+    # cryptography: Fernet (AES-256-CBC + HMAC) for column-level
+    # encryption of sensitive data (TOTP secrets, webhook secrets).
+    "cryptography>=44.0",
     # Webhook delivery infrastructure (commit C: reliable alert webhooks).
     # dramatiq is the queue layer; redis is its broker. standardwebhooks is
     # the spec library for HMAC-SHA256 signing per the Standard Webhooks
