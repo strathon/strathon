@@ -340,3 +340,81 @@ __all__ = [
     "resolve_api_key",
     "validate_scopes",
 ]
+
+
+# ---- Re-authentication for sensitive operations ----------------------------
+
+
+async def require_reauth(
+    ctx: "ApiKeyContext",
+    session: "AsyncSession",
+    confirm_password: str | None = None,
+    confirm_mfa: str | None = None,
+) -> None:
+    """Verify current password or MFA code for sensitive operations.
+
+    Only enforced for session-based auth (dashboard users). API key
+    auth is already capability-scoped and doesn't need re-auth.
+
+    Sensitive operations: enable/disable MFA, create API keys,
+    delete projects, change password.
+
+    Research: OWASP ASVS 5.0 V3.3.4 (re-authentication before
+    sensitive transactions), NIST 800-63B reauthentication guidance.
+
+    Raises HTTPException(403) if re-auth fails.
+    """
+    from fastapi import HTTPException
+
+    # API key auth: scoped by design, no re-auth needed.
+    if ctx.auth_method != "session" or ctx.user_id is None:
+        return
+
+    if not confirm_password and not confirm_mfa:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Sensitive operation requires re-authentication. "
+                "Provide X-Confirm-Password or X-Confirm-MFA header."
+            ),
+        )
+
+    from sqlalchemy import text
+
+    if confirm_password:
+        # Verify current password.
+        result = await session.execute(
+            text("SELECT password_hash FROM users WHERE id = :uid"),
+            {"uid": ctx.user_id},
+        )
+        row = result.first()
+        if row is None:
+            raise HTTPException(status_code=403, detail="User not found")
+
+        from password import verify_password
+        if not verify_password(confirm_password, row[0]):
+            raise HTTPException(
+                status_code=403, detail="Invalid password for re-authentication"
+            )
+        return
+
+    if confirm_mfa:
+        # Verify TOTP code.
+        result = await session.execute(
+            text("SELECT totp_secret, mfa_enabled FROM users WHERE id = :uid"),
+            {"uid": ctx.user_id},
+        )
+        row = result.first()
+        if row is None or not row[1]:  # mfa_enabled
+            raise HTTPException(
+                status_code=403,
+                detail="MFA not enabled; use X-Confirm-Password instead",
+            )
+
+        import pyotp
+        totp = pyotp.TOTP(row[0])
+        if not totp.verify(confirm_mfa, valid_window=1):
+            raise HTTPException(
+                status_code=403, detail="Invalid MFA code for re-authentication"
+            )
+        return
