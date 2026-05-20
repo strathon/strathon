@@ -131,6 +131,14 @@ class ApiKey(Base):
         nullable=True,
         comment="Links replacement key to the deprecated key it replaced.",
     )
+    allowed_ips: Mapped[Optional[list[str]]] = mapped_column(
+        ARRAY(Text),
+        nullable=True,
+        comment=(
+            "Optional IP allowlist. If set, requests from IPs not "
+            "in this list are rejected. Null means allow all."
+        ),
+    )
 
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="api_keys")

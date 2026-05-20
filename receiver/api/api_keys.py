@@ -96,6 +96,7 @@ async def create_api_key_endpoint(
     response = await auth_repo.create_api_key(
         session, pid, name=name, scopes=requested_scopes,
         expires_at=payload.get("expires_at"),
+        allowed_ips=payload.get("allowed_ips"),
     )
     api_key_dict = response.api_key.model_dump(mode="json")
     await audit_repo.emit(
@@ -112,6 +113,7 @@ async def create_api_key_endpoint(
             "scopes": api_key_dict.get("scopes"),
             "project_id": api_key_dict.get("project_id"),
             "expires_at": api_key_dict.get("expires_at"),
+            "allowed_ips": api_key_dict.get("allowed_ips"),
         },
     )
     return {**api_key_dict, "key": response.raw_key}

@@ -199,6 +199,7 @@ class ApiKeyContext:
     user_id: Optional[UUID] = None
     role: Optional[str] = None
     auth_method: str = "apikey"
+    allowed_ips: Optional[list[str]] = None
 
 
 # ---- Pure helpers (no DB) ------------------------------------------------
@@ -274,6 +275,7 @@ async def resolve_api_key(
             project_id=key.project_id,
             key_prefix=key.key_prefix,
             scopes=tuple(key.scopes or ()),
+            allowed_ips=list(key.allowed_ips) if key.allowed_ips else None,
         )
 
     # Route 2: Session token (dashboard auth)

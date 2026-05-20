@@ -27,6 +27,7 @@ class ApiKeyCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     scopes: Optional[list[str]] = None
     expires_at: Optional[datetime] = None
+    allowed_ips: Optional[list[str]] = None
 
 
 class ApiKeyRead(BaseModel):
@@ -50,6 +51,7 @@ class ApiKeyRead(BaseModel):
     deprecated_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
     rotated_from_id: Optional[UUID] = None
+    allowed_ips: Optional[list[str]] = None
 
 
 class ApiKeyCreateResponse(BaseModel):

@@ -99,6 +99,16 @@ async def async_engine():
                 f"FOR VALUES FROM (0) TO (1767225600000000000)"
             ))
 
+        # Disable audit immutability triggers in the test DB so
+        # test cleanup (DELETE FROM audit.events) works. Production
+        # triggers prevent UPDATE/DELETE on audit tables.
+        await conn.execute(text(
+            "ALTER TABLE audit.events DISABLE TRIGGER trg_events_immutable"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE audit.anchors DISABLE TRIGGER trg_anchors_immutable"
+        ))
+
     try:
         yield engine
     finally:

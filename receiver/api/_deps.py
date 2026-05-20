@@ -32,6 +32,7 @@ Authentication vs authorization:
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, Request, status
@@ -39,6 +40,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth
 from database import get_db_session
+
+logger = logging.getLogger(__name__)
 
 
 async def _authenticated(
@@ -74,6 +77,22 @@ async def _authenticated(
     except HTTPException:
         metrics.auth_failures.inc()
         raise
+
+    # IP allowlist check: if the key has allowed_ips set, reject
+    # requests from IPs not in the list.
+    if ctx.allowed_ips:
+        client_ip = request.client.host if request.client else None
+        if client_ip and client_ip not in ctx.allowed_ips:
+            metrics.auth_failures.inc()
+            logger.warning(
+                "IP %s not in allowlist for key %s (project %s)",
+                client_ip, ctx.key_prefix, ctx.project_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="request IP not in key's allowed_ips",
+            )
+
     metrics.auth_successes.inc()
     return ctx
 

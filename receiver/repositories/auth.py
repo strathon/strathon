@@ -107,12 +107,16 @@ async def create_api_key(
     name: str,
     scopes: Optional[list[str]] = None,
     expires_at: Optional[object] = None,
+    allowed_ips: Optional[list[str]] = None,
 ) -> ApiKeyCreateResponse:
     """Create an API key. Returns the raw key ONCE — never recoverable after.
 
     expires_at:
         Optional datetime for hard key expiry. After this timestamp the
         key stops authenticating. Useful for temporary keys (CI, demos).
+    allowed_ips:
+        Optional IP allowlist. When set, requests from IPs not in this
+        list are rejected with 403. Null means allow all (default).
     """
     raw, prefix, key_hash = generate_api_key()
 
@@ -126,6 +130,8 @@ async def create_api_key(
         kwargs["scopes"] = scopes
     if expires_at is not None:
         kwargs["expires_at"] = expires_at
+    if allowed_ips is not None:
+        kwargs["allowed_ips"] = allowed_ips
 
     api_key = ApiKey(**kwargs)
     session.add(api_key)
