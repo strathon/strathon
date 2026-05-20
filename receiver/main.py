@@ -649,9 +649,10 @@ app.add_middleware(RateLimitMiddleware)
 from api import (  # noqa: E402
     agent_inventory, analytics, api_keys, approvals, audit, auth_endpoints,
     budgets, compliance_export, cost_forecast, costs, halts, health,
-    intervention, members, model_prices, policies, policy_suggestions,
-    policy_templates, project_settings, projects, simulate, spans,
-    topology, traces, webhook_deliveries, webhook_signing_keys,
+    intervention, members, model_prices, notification_channels, policies,
+    policy_suggestions, policy_templates, project_settings, projects,
+    simulate, spans, topology, traces, webhook_deliveries,
+    webhook_signing_keys,
 )
 
 app.include_router(health.router)
@@ -681,6 +682,7 @@ app.include_router(audit.router)
 # RBAC: auth + membership management
 app.include_router(auth_endpoints.router)
 app.include_router(members.router)
+app.include_router(notification_channels.router)
 
 
 @app.exception_handler(Exception)
