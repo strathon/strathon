@@ -23,6 +23,13 @@ argon2 are for low-entropy passwords where slow hashing matters. With 256
 bits of entropy in the key itself, a fast hash + indexed prefix lookup is
 both secure and fast.
 
+Security audit (May 2026): all secret comparisons use hmac.compare_digest:
+  - repositories/auth.py:183  API key hash verification
+  - audit/hash_chain.py:122   Audit row hash verification
+  - api/health.py:134         /metrics auth token
+  - repositories/sessions.py:86 is a SQLAlchemy WHERE clause (DB-side)
+No Python-side == on secrets anywhere in the codebase.
+
 Scopes:
     The KNOWN_SCOPES set below is the source of truth for what scopes
     exist. Adding a new scope = add an entry there and update the

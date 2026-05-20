@@ -23,6 +23,9 @@ dependencies = [
     # recursive protobuf parsing). opentelemetry-proto pulls protobuf
     # but doesn't floor the version high enough.
     "protobuf>=6.31.1",
+    # google-re2: linear-time regex engine (no backtracking). Prevents
+    # ReDoS via crafted span attribute values in PII redaction patterns.
+    "google-re2>=1.1",
     "httpx>=0.28.0",
     "python-multipart>=0.0.18",
     "authlib>=1.4.0",

@@ -35,7 +35,10 @@ LRU (which gets stale on multi-receiver deploys).
 from __future__ import annotations
 
 import logging
-import re
+try:
+    import re2 as _re_engine
+except ImportError:
+    import re as _re_engine  # type: ignore[assignment]
 from typing import Any, Tuple
 from uuid import UUID
 
@@ -50,7 +53,7 @@ logger = logging.getLogger("strathon.receiver.repositories.project_settings")
 
 def _compile_custom_patterns(
     raw_patterns: Any,
-) -> Tuple[Tuple[str, re.Pattern[str]], ...]:
+) -> Tuple[Tuple[str, Any], ...]:
     """Compile a list of operator-supplied regex strings.
 
     The DB column ``pii_redaction_patterns`` is JSONB. Two shapes are
@@ -74,7 +77,7 @@ def _compile_custom_patterns(
         )
         return ()
 
-    compiled: list[Tuple[str, re.Pattern[str]]] = []
+    compiled: list[Tuple[str, Any]] = []
     for i, entry in enumerate(raw_patterns):
         name: str
         regex: str
@@ -94,8 +97,8 @@ def _compile_custom_patterns(
         if not regex:
             continue
         try:
-            compiled.append((name, re.compile(regex)))
-        except re.error as exc:
+            compiled.append((name, _re_engine.compile(regex)))
+        except _re_engine.error as exc:
             logger.warning(
                 "pii_redaction_patterns entry %d (name=%r) has invalid regex: %s",
                 i, name, exc,

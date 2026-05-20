@@ -60,7 +60,17 @@ Performance notes
 For a 10 KB ``strathon.tool.args`` value with 6 default patterns, a
 single scan completes in well under 1 ms on modest hardware. The
 ingest path is the budget here: each span is scanned exactly once,
-and the patterns are compiled at module import (`re.compile`).
+and the patterns are compiled at module import (`re2.compile` where
+possible, Python ``re`` for patterns requiring lookaround).
+
+google-re2 guarantees linear-time matching (no backtracking), preventing
+ReDoS attacks via crafted span attribute values. The phone number pattern
+uses Python ``re`` because it requires lookbehind/lookahead which RE2
+does not support; its fixed-width quantifiers make ReDoS impractical.
+
+Input normalization: NFKC + control character stripping runs before
+regex evaluation to prevent Unicode-based evasion (homoglyphs,
+zero-width joiners, directional overrides).
 """
 
 from __future__ import annotations
@@ -68,10 +78,37 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Mapping, Pattern, Tuple
+from typing import Any, Dict, Iterable, Mapping, Tuple
+
+try:
+    import re2 as _re_engine  # Linear-time regex (no backtracking).
+except ImportError:
+    import re as _re_engine  # type: ignore[assignment]  # Fallback.
 
 logger = logging.getLogger("strathon.receiver.redaction")
+
+
+# ---- Input normalization ----------------------------------------------------
+
+
+def _normalize_text(value: str) -> str:
+    """NFKC normalization + control character stripping.
+
+    Prevents Unicode-based evasion: homoglyphs (fullwidth digits),
+    zero-width joiners, bidirectional overrides, and other control
+    characters that could make PII invisible to ASCII-based patterns.
+    """
+    # NFKC: compatibility decomposition + canonical composition.
+    # Maps fullwidth digits ＄１２３ → $123, ligatures ﬃ → ffi, etc.
+    normalized = unicodedata.normalize("NFKC", value)
+    # Strip C0/C1 control characters (except tab, newline, carriage return),
+    # zero-width joiners/non-joiners, and bidirectional overrides.
+    return "".join(
+        c for c in normalized
+        if unicodedata.category(c) != "Cc" or c in ("\t", "\n", "\r")
+    )
 
 
 # ---- Entity definitions -------------------------------------------------
@@ -108,21 +145,21 @@ def _luhn_check(s: str) -> bool:
 
 # Email: a permissive RFC-5322-ish pattern. Avoids over-matching things
 # like "foo@bar" by requiring a TLD with 2+ chars.
-_EMAIL = re.compile(
+_EMAIL = _re_engine.compile(
     r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b"
 )
 
 # US SSN: 3-2-4 with hyphens. We don't accept the no-hyphen variant
 # (9 consecutive digits) because that produces too many false positives
 # in financial and account-number contexts.
-_US_SSN = re.compile(
+_US_SSN = _re_engine.compile(
     r"\b\d{3}-\d{2}-\d{4}\b"
 )
 
 # Credit card: 13-19 digits, optionally separated by spaces or hyphens.
 # Validated with Luhn afterwards. We match the surface form first
 # because the validator needs the digit string.
-_CREDIT_CARD = re.compile(
+_CREDIT_CARD = _re_engine.compile(
     r"\b(?:\d[ \-]?){12,18}\d\b"
 )
 
@@ -143,7 +180,7 @@ _PHONE_US = re.compile(
 )
 
 # IPv4. We catch obvious things like 192.168.x.x; IPv6 deferred.
-_IPV4 = re.compile(
+_IPV4 = _re_engine.compile(
     r"\b(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)){3}\b"
 )
 
@@ -151,7 +188,7 @@ _IPV4 = re.compile(
 # well-known prefixes. This is the highest-impact pattern in practice —
 # accidentally logging an `sk_live_...` or a JWT is the #1 way LLM
 # observability tools end up with credentials in their backend.
-_API_KEY = re.compile(
+_API_KEY = _re_engine.compile(
     r"\b(?:"
     r"sk-[A-Za-z0-9]{20,}"             # OpenAI
     r"|sk_(?:live|test)_[A-Za-z0-9]{20,}"  # Stripe
@@ -177,7 +214,7 @@ class EntityDef:
     name       entity name used in placeholder and in operator config
     """
     name: str
-    pattern: Pattern[str]
+    pattern: Any  # re2.Pattern or re.Pattern
     validator: Any  # Optional[Callable[[str], bool]]
 
 
@@ -242,7 +279,7 @@ class RedactionConfig:
     strategy: Mapping[str, str]
     key_actions: Mapping[str, str]
     allowlist: Tuple[str, ...]
-    custom_patterns: Tuple[Tuple[str, Pattern[str]], ...]
+    custom_patterns: Tuple[Tuple[str, Any], ...]
 
     @classmethod
     def disabled(cls) -> "RedactionConfig":
@@ -279,7 +316,7 @@ def redact_string(
     *,
     strategy: Mapping[str, str] | None = None,
     entities: Iterable[EntityDef] = DEFAULT_ENTITIES,
-    custom_patterns: Iterable[Tuple[str, Pattern[str]]] = (),
+    custom_patterns: Iterable[Tuple[str, Any]] = (),
 ) -> str:
     """Scan ``text`` for PII and apply the per-entity action.
 
@@ -292,9 +329,11 @@ def redact_string(
         return text
     strategy = strategy or {}
 
-    out = text
+    # Normalize before scanning: NFKC + strip control characters.
+    # Prevents Unicode-based evasion (homoglyphs, zero-width joiners).
+    out = _normalize_text(text)
 
-    def _replace(m: re.Match, entity_name: str, validator) -> str:
+    def _replace(m: Any, entity_name: str, validator: Any) -> str:
         matched = m.group(0)
         if validator is not None and not validator(matched):
             return matched  # validation failed; keep original
@@ -302,16 +341,13 @@ def redact_string(
         return _apply_value_action(matched, entity_name, action)
 
     for ent in entities:
-        # Bind ``ent`` per-iteration via default arg; lambdas defer
-        # closure resolution and would otherwise all reference the
-        # final loop value. The named-arg form is mypy-typeable too.
-        def _ent_sub(m: re.Match[str], ent: EntityDef = ent) -> str:
+        def _ent_sub(m: Any, ent: EntityDef = ent) -> str:
             return _replace(m, ent.name, ent.validator)
 
         out = ent.pattern.sub(_ent_sub, out)
 
     for entity_name, pat in custom_patterns:
-        def _custom_sub(m: re.Match[str], name: str = entity_name) -> str:
+        def _custom_sub(m: Any, name: str = entity_name) -> str:
             return _replace(m, name, None)
 
         out = pat.sub(_custom_sub, out)
