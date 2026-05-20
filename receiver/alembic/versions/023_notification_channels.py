@@ -40,6 +40,11 @@ CREATE TABLE notification_channels (
 CREATE INDEX idx_notification_channels_project
     ON notification_channels (project_id, enabled)
 """)
+    # Make github_integrations.created_by_user_id nullable for API key auth.
+    op.execute(
+        "ALTER TABLE github_integrations "
+        "ALTER COLUMN created_by_user_id DROP NOT NULL"
+    )
 
 
 def downgrade() -> None:

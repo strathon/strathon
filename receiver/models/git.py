@@ -1,8 +1,8 @@
 """GitHub integration models.
 
-Schema-only today. The repo→deploy linkage feature ships post-v1; these
-tables exist so traces.git_commit_sha can FK against a real source of truth
-when that lands.
+Links agent deployments to git commits so operators can correlate
+behavior changes with code changes. API endpoints in
+api/github_integration.py.
 """
 
 from __future__ import annotations
