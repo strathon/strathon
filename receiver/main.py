@@ -173,7 +173,18 @@ async def _run_migrations() -> None:
 
         # Normal path: empty DB or already-stamped DB. Upgrade is a no-op
         # in the latter case.
-        alembic_command.upgrade(cfg, "head")
+        # Advisory lock prevents two replicas racing the same migration.
+        sync_engine_lock = create_engine(receiver_settings.sync_database_url)
+        try:
+            with sync_engine_lock.connect() as conn:
+                conn.execute(sql_text("SELECT pg_advisory_lock(42)"))
+                try:
+                    alembic_command.upgrade(cfg, "head")
+                finally:
+                    conn.execute(sql_text("SELECT pg_advisory_unlock(42)"))
+                    conn.commit()
+        finally:
+            sync_engine_lock.dispose()
 
     logger.info("Running database migrations (alembic upgrade head)...")
     await asyncio.to_thread(_migrate_sync)
@@ -471,6 +482,15 @@ async def lifespan(app: FastAPI):
         name="strathon.incident_detector",
     )
 
+    # Vigil: behavioral drift detection (EWMA/CUSUM).
+    # Auto-calibrates per-agent baselines. Does nothing until each
+    # agent has 100+ observations.
+    from vigil import vigil_loop
+    app.state.vigil_task = asyncio.create_task(
+        vigil_loop(async_session_maker),
+        name="strathon.vigil",
+    )
+
     yield
 
     logger.info("Strathon receiver shutting down")
@@ -552,6 +572,13 @@ async def lifespan(app: FastAPI):
         app.state.incident_detector_task.cancel()
         try:
             await app.state.incident_detector_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    if hasattr(app.state, "vigil_task"):
+        app.state.vigil_task.cancel()
+        try:
+            await app.state.vigil_task
         except (asyncio.CancelledError, Exception):
             pass
     metrics_mod.reset_global_metrics_for_testing()

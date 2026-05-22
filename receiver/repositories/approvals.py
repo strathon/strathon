@@ -105,12 +105,13 @@ async def resolve_approval(
     if decision not in ("approved", "denied"):
         raise ValueError(f"decision must be 'approved' or 'denied', got {decision!r}")
 
-    # Fetch the approval (must be pending).
+    # Fetch the approval (must be pending). Use SELECT FOR UPDATE to
+    # prevent concurrent approve/deny race conditions.
     stmt = select(Approval).where(
         Approval.project_id == project_id,
         Approval.id == approval_id,
         Approval.status == "pending",
-    )
+    ).with_for_update()
     result = await session.execute(stmt)
     approval = result.scalar_one_or_none()
     if approval is None:
@@ -123,10 +124,21 @@ async def resolve_approval(
         "timestamp": now.isoformat(),
     }
 
+    # Check for duplicate approver (same actor can't approve twice).
+    existing_actors = {
+        d.get("actor") for d in (approval.approval_decisions or [])
+        if d.get("decision") == "approved"
+    }
+    if decision == "approved" and resolved_by in existing_actors:
+        return None  # Duplicate vote.
+
     # Append to the decisions array.
     existing_decisions = list(approval.approval_decisions or [])
     existing_decisions.append(decision_record)
     approval.approval_decisions = existing_decisions
+
+    # Increment version for optimistic locking.
+    approval.version = (getattr(approval, "version", 1) or 1) + 1
 
     if decision == "denied":
         # Immediate veto.

@@ -213,11 +213,24 @@ async def login(
 
     email = body.email.strip().lower()
 
+    # Account lockout check (auto-activate: 5 failures → 15 min lock).
+    from security_auto import (
+        check_account_lockout, record_failed_login, reset_failed_login,
+        enforce_session_cap,
+    )
+    lockout_msg = await check_account_lockout(session, email)
+    if lockout_msg:
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail=lockout_msg,
+        )
+
     user = await users_repo.find_by_email(session, email)
 
     if user is None or not user.password_hash:
         # Dummy hash to prevent timing-based enumeration
         verify_password(hash_password("dummy"), body.password)
+        await record_failed_login(session, email)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -230,6 +243,7 @@ async def login(
         )
 
     if not verify_password(user.password_hash, body.password):
+        await record_failed_login(session, email)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
@@ -240,6 +254,12 @@ async def login(
         new_hash = hash_password(body.password)
         await users_repo.update_password_hash(session, user.id, new_hash)
         logger.info("rehashed password for user %s (params upgraded)", user.id)
+
+    # Reset lockout counter on successful login.
+    await reset_failed_login(session, email)
+
+    # Enforce concurrent session cap (evicts oldest if over limit).
+    await enforce_session_cap(session, user.id)
 
     # Update last_login_at
     await users_repo.touch_last_login(session, user.id)

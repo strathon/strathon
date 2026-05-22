@@ -311,6 +311,56 @@ def validate_key_actions(key_actions: Mapping[str, str]) -> None:
 # ---- Core redaction -----------------------------------------------------
 
 
+def _base64_decode_rescan(
+    text: str,
+    strategy: Mapping[str, str],
+    entities: Iterable["EntityDef"],
+) -> str:
+    """Find base64-encoded substrings, decode them, check for PII.
+
+    If decoded content matches any PII pattern, replace the ENCODED
+    substring with [BASE64_PII_REDACTED]. Prevents evasion via
+    base64-encoding sensitive data like SSNs or emails.
+
+    Only processes substrings that look like base64 (20+ chars,
+    valid base64 alphabet, valid padding).
+    """
+    import base64 as b64_mod
+
+    # Match potential base64 chunks: 20+ chars of [A-Za-z0-9+/=].
+    try:
+        import re2 as re_engine
+    except ImportError:
+        import re as re_engine
+
+    b64_pattern = re_engine.compile(r'[A-Za-z0-9+/]{20,}={0,2}')
+    matches = list(b64_pattern.finditer(text))
+    if not matches:
+        return text
+
+    result = text
+    for m in reversed(matches):  # Reverse to preserve offsets.
+        chunk = m.group(0)
+        try:
+            decoded = b64_mod.b64decode(chunk).decode("utf-8", errors="strict")
+        except Exception:
+            continue  # Not valid base64 or not UTF-8.
+
+        # Check if decoded content contains PII.
+        has_pii = False
+        for ent in entities:
+            if ent.pattern.search(decoded):
+                has_pii = True
+                break
+
+        if has_pii:
+            action = strategy.get("base64_pii", "redact")
+            replacement = "[BASE64_PII_REDACTED]" if action == "redact" else chunk
+            result = result[:m.start()] + replacement + result[m.end():]
+
+    return result
+
+
 def redact_string(
     text: str,
     *,
@@ -332,6 +382,11 @@ def redact_string(
     # Normalize before scanning: NFKC + strip control characters.
     # Prevents Unicode-based evasion (homoglyphs, zero-width joiners).
     out = _normalize_text(text)
+
+    # Base64 decode-rescan: detect PII hidden in base64-encoded substrings.
+    # If a base64 chunk decodes to text containing PII patterns, redact
+    # the ENCODED chunk in the original string.
+    out = _base64_decode_rescan(out, strategy, entities)
 
     def _replace(m: Any, entity_name: str, validator: Any) -> str:
         matched = m.group(0)
