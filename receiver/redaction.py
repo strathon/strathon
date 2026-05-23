@@ -388,6 +388,11 @@ def redact_string(
     # the ENCODED chunk in the original string.
     out = _base64_decode_rescan(out, strategy, entities)
 
+    # Built-in credential pattern scanning (50+ patterns for API keys,
+    # cloud credentials, private keys, database URIs, tokens).
+    from credential_patterns import redact_credentials as _redact_creds
+    out, _cred_count = _redact_creds(out)
+
     def _replace(m: Any, entity_name: str, validator: Any) -> str:
         matched = m.group(0)
         if validator is not None and not validator(matched):

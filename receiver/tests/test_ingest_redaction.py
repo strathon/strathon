@@ -227,7 +227,7 @@ def test_api_key_redacted_in_persisted_span(client):
     assert resp.status_code == 200
     persisted = _read_persisted_attrs(span_id.hex())
     args_str = persisted["strathon.tool.args"]
-    assert "[API_KEY]" in args_str
+    assert "REDACTED" in args_str
     assert "sk-abcd" not in args_str
 
 

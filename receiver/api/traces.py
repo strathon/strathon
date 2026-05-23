@@ -380,6 +380,22 @@ async def ingest_traces(
                 )
                 tool_name = span_attrs.get("gen_ai.tool.name")
                 workflow_name = span_attrs.get("gen_ai.workflow.name")
+
+                # Circuit breaker check: if the agent or tool breaker
+                # is open, mark the span as circuit-broken before policy
+                # evaluation. Auto-activates after error threshold.
+                if agent_name:
+                    from circuit_breaker import check_circuit, record_outcome
+                    cb_block = check_circuit(agent_name, tool_name)
+                    if cb_block:
+                        span_attrs["strathon.circuit_breaker.state"] = cb_block["state"]
+                        span_attrs["strathon.circuit_breaker.entity"] = cb_block["entity_id"]
+
+                    # Record outcome based on span status for future trips.
+                    span_status = span_attrs.get("status") or ""
+                    is_error = span_status in ("error", "ERROR", "2")
+                    record_outcome(agent_name, tool_name, success=not is_error)
+
                 conversation_id = span_attrs.get("gen_ai.conversation.id")
 
                 input_tokens = span_attrs.get("gen_ai.usage.input_tokens")

@@ -95,18 +95,18 @@ def test_openai_api_key_detected():
     """sk-... is the highest-impact pattern. A leaked OpenAI key in a
     trace store is a real-world security incident."""
     out = redact_string("export OPENAI_API_KEY=sk-1234567890abcdefghijklmnop")
-    assert "[API_KEY]" in out
+    assert "REDACTED" in out
     assert "sk-1234567890" not in out
 
 
 def test_stripe_secret_key_detected():
     out = redact_string("STRIPE_SECRET=sk_live_abc123def456ghi789jkl0")
-    assert "[API_KEY]" in out
+    assert "REDACTED" in out
 
 
 def test_github_pat_detected():
     out = redact_string("token ghp_abcdefghijklmnopqrstuvwxyz1234567890")
-    assert "[API_KEY]" in out
+    assert "REDACTED" in out
 
 
 def test_jwt_detected():
@@ -114,7 +114,7 @@ def test_jwt_detected():
     issue (session hijacking if not expired). Catch them."""
     jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyMTIzIn0.signature_part_here"
     out = redact_string(f"auth header Bearer {jwt}")
-    assert "[API_KEY]" in out
+    assert "REDACTED" in out
     assert "eyJhbGciOi" not in out
 
 
