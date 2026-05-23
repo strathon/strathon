@@ -91,7 +91,7 @@ PATTERNS: list[CredentialPattern] = [
        r"gho_[A-Za-z0-9]{36}",
        "high", "token"),
     _p("github-app-token", "GitHub App Token",
-       r"(?:ghs|ghr)_[A-Za-z0-9]{36}",
+       r"(?:ghs|ghr)_[A-Za-z0-9]{36,}",
        "high", "token"),
     _p("github-fine-grained", "GitHub Fine-Grained PAT",
        r"github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59}",
