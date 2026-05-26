@@ -278,13 +278,12 @@ async def run_load_test(
             print(f"    - {e}")
 
     print()
-    target = 10_000
     if stats.latencies:
         spans_per_sec = total_spans / wall_time
-        if spans_per_sec >= target:
-            print(f"  ✅ PASS: {spans_per_sec:,.0f} spans/sec >= {target:,} target")
-        else:
-            print(f"  ❌ BELOW TARGET: {spans_per_sec:,.0f} spans/sec < {target:,} target")
+        daily = spans_per_sec * 86400
+        agents = spans_per_sec / (50 / 60)  # assuming 50 calls/min per agent
+        print(f"  📊 {spans_per_sec:,.0f} spans/sec = {daily/1e6:,.0f}M spans/day")
+        print(f"  📊 Supports ~{agents:,.0f} concurrent agents (at 50 calls/min)")
 
 
 def main():

@@ -280,12 +280,14 @@ class RedactionConfig:
     key_actions: Mapping[str, str]
     allowlist: Tuple[str, ...]
     custom_patterns: Tuple[Tuple[str, Any], ...]
+    credential_scan_enabled: bool = True
 
     @classmethod
     def disabled(cls) -> "RedactionConfig":
         return cls(
             enabled=False, strategy={}, key_actions={},
             allowlist=(), custom_patterns=(),
+            credential_scan_enabled=False,
         )
 
 
@@ -367,6 +369,7 @@ def redact_string(
     strategy: Mapping[str, str] | None = None,
     entities: Iterable[EntityDef] = DEFAULT_ENTITIES,
     custom_patterns: Iterable[Tuple[str, Any]] = (),
+    credential_scan: bool = True,
 ) -> str:
     """Scan ``text`` for PII and apply the per-entity action.
 
@@ -390,8 +393,13 @@ def redact_string(
 
     # Built-in credential pattern scanning (50+ patterns for API keys,
     # cloud credentials, private keys, database URIs, tokens).
-    from credential_patterns import redact_credentials as _redact_creds
-    out, _cred_count = _redact_creds(out)
+    # Only scan strings long enough to contain credentials (20+ chars).
+    # Short strings (tool names, model names, status codes) can't contain
+    # meaningful credentials and scanning them wastes CPU.
+    # Skipped entirely when credential_scan=False (per-project toggle).
+    if credential_scan and len(out) >= 20:
+        from credential_patterns import redact_credentials as _redact_creds
+        out, _cred_count = _redact_creds(out)
 
     def _replace(m: Any, entity_name: str, validator: Any) -> str:
         matched = m.group(0)
@@ -460,6 +468,7 @@ def redact_attributes(
                 value,
                 strategy=config.strategy,
                 custom_patterns=config.custom_patterns,
+                credential_scan=config.credential_scan_enabled,
             )
         else:
             out[key] = value

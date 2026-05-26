@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import uuid
 
 import pytest
@@ -93,8 +94,8 @@ def _build_otlp_payload(
         span_id=span_id,
         name=span_name,
         kind=Span.SPAN_KIND_INTERNAL,
-        start_time_unix_nano=1_700_000_000_000_000_000,
-        end_time_unix_nano=1_700_000_001_000_000_000,
+        start_time_unix_nano=time.time_ns(),
+        end_time_unix_nano=time.time_ns() + 1_000_000_000,
         attributes=[_to_kv(k, v) for k, v in attrs.items()],
     )
     req = ExportTraceServiceRequest(

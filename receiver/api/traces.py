@@ -243,6 +243,7 @@ async def ingest_traces(
     # Collected (policy, trace_id, span_id, outcome) tuples for audit logging
     # after the main insert transaction commits. Webhooks fire after as well.
     matches_to_record: list[dict[str, Any]] = []
+    _pending_spans: list[dict[str, Any]] = []
     # (url, payload, policy_id) — policy_id needed so the durable
     # webhook_deliveries row can foreign-key to the policy that triggered it.
     webhooks_to_fire: list[tuple[str, dict[str, Any], str]] = []
@@ -515,35 +516,38 @@ async def ingest_traces(
                     )
                     trace_ids_seen.add(trace_id)
 
-                await traces_repo.upsert_span(
-                    session,
-                    trace_id=trace_id,
-                    span_id=span_id,
-                    parent_span_id=parent_span_id,
-                    project_id=project_id,
-                    name=span.name,
-                    kind=SPAN_KIND_NAMES.get(span.kind, "UNSPECIFIED"),
-                    start_time_unix_nano=span.start_time_unix_nano,
-                    end_time_unix_nano=(
+                _pending_spans.append({
+                    "trace_id": trace_id,
+                    "span_id": span_id,
+                    "parent_span_id": parent_span_id,
+                    "project_id": project_id,
+                    "name": span.name,
+                    "kind": SPAN_KIND_NAMES.get(span.kind, "UNSPECIFIED"),
+                    "start_time_unix_nano": span.start_time_unix_nano,
+                    "end_time_unix_nano": (
                         span.end_time_unix_nano if span.end_time_unix_nano else None
                     ),
-                    status_code=STATUS_CODE_NAMES.get(span.status.code, "UNSET"),
-                    status_message=span.status.message or None,
-                    operation_name=operation_name,
-                    provider_name=provider_name,
-                    request_model=request_model,
-                    response_model=response_model,
-                    agent_name=agent_name,
-                    agent_id=agent_id,
-                    tool_name=tool_name,
-                    workflow_name=workflow_name,
-                    conversation_id=conversation_id,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    cost_usd=cost_usd,
-                    attributes=persisted_attrs,
-                )
+                    "status_code": STATUS_CODE_NAMES.get(span.status.code, "UNSET"),
+                    "status_message": span.status.message or None,
+                    "operation_name": operation_name,
+                    "provider_name": provider_name,
+                    "request_model": request_model,
+                    "response_model": response_model,
+                    "agent_name": agent_name,
+                    "agent_id": agent_id,
+                    "tool_name": tool_name,
+                    "workflow_name": workflow_name,
+                    "conversation_id": conversation_id,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "cost_usd": cost_usd,
+                    "attributes": persisted_attrs,
+                })
                 span_count += 1
+
+    # Batch insert all spans in one SQL round-trip.
+    if _pending_spans:
+        await traces_repo.bulk_upsert_spans(session, _pending_spans)
 
     logger.info(
         "Ingested %d spans across %d traces",

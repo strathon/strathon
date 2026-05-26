@@ -35,6 +35,7 @@ LRU (which gets stale on multi-receiver deploys).
 from __future__ import annotations
 
 import logging
+import os
 try:
     import re2 as _re_engine
 except ImportError:
@@ -179,6 +180,9 @@ async def load_redaction_config(
         key_actions=key_actions,
         allowlist=tuple(str(x) for x in allowlist),
         custom_patterns=custom_patterns,
+        credential_scan_enabled=os.environ.get(
+            "STRATHON_CREDENTIAL_SCAN_ENABLED", "true"
+        ).lower() in ("1", "true", "yes"),
     )
 
 
