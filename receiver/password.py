@@ -54,23 +54,40 @@ def _get_hasher() -> PasswordHasher:
     )
 
 
+def _apply_pepper(password: str) -> str:
+    """Prepend pepper to password if STRATHON_PASSWORD_PEPPER is set.
+
+    A pepper is a secret value stored in an env var (not the database).
+    Even if an attacker gets the full database, they cannot verify
+    passwords without the pepper. Backward compatible: if not set,
+    returns the password unchanged.
+
+    Research: OWASP Password Storage Cheat Sheet (pepper section),
+    IETF draft-ietf-kitten-password-storage-04 Section 4.2.
+    """
+    import os
+    pepper = os.environ.get("STRATHON_PASSWORD_PEPPER", "")
+    return pepper + password if pepper else password
+
+
 def hash_password(password: str) -> str:
     """Hash a password with Argon2id. Returns the full PHC string.
 
     The returned string includes algorithm, version, parameters, salt,
     and hash — everything needed for verification and rehashing.
+    Pepper (if configured) is prepended before hashing.
     """
-    return _get_hasher().hash(password)
+    return _get_hasher().hash(_apply_pepper(password))
 
 
 def verify_password(password_hash: str, password: str) -> bool:
     """Verify a password against a stored Argon2id hash.
 
     Returns True on match, False on mismatch. Constant-time comparison
-    is handled internally by argon2-cffi.
+    is handled internally by argon2-cffi. Pepper applied automatically.
     """
     try:
-        return _get_hasher().verify(password_hash, password)
+        return _get_hasher().verify(password_hash, _apply_pepper(password))
     except VerifyMismatchError:
         return False
 

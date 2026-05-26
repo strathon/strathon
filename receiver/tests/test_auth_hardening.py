@@ -157,7 +157,7 @@ def test_require_reauth_function():
     )
     session = AsyncMock()
     # Should not raise.
-    asyncio.get_event_loop().run_until_complete(
+    asyncio.run(
         require_reauth(ctx_api, session)
     )
 
@@ -173,7 +173,7 @@ def test_require_reauth_function():
     )
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             require_reauth(ctx_session, session)
         )
     assert exc_info.value.status_code == 403

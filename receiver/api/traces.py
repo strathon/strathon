@@ -53,6 +53,42 @@ from ._deps import require_scope
 
 logger = logging.getLogger("strathon.receiver.traces")
 
+# SDK integrity: track last known code hash per agent.
+_last_code_hash: dict[str, str] = {}
+
+
+def _check_code_hash(agent_name: str, code_hash: str) -> None:
+    """Check if agent's code hash changed (possible SDK tampering)."""
+    prev = _last_code_hash.get(agent_name)
+    _last_code_hash[agent_name] = code_hash
+    if prev and prev != code_hash:
+        logger.warning(
+            "SDK integrity violation: agent '%s' code_hash changed "
+            "from %s to %s",
+            agent_name, prev[:12], code_hash[:12],
+        )
+        try:
+            import asyncio
+            from integrations.dispatcher import dispatch_event
+            # Fire alert asynchronously.
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(dispatch_event(
+                    None, None,
+                    "sdk_integrity_violation", {
+                        "agent_name": agent_name,
+                        "previous_hash": prev,
+                        "current_hash": code_hash,
+                        "severity": "critical",
+                        "message": (
+                            f"Agent '{agent_name}' code hash changed. "
+                            "This may indicate runtime code modification."
+                        ),
+                    },
+                ))
+        except Exception:
+            pass  # Best-effort alert.
+
 
 router = APIRouter(tags=["traces"])
 
@@ -223,6 +259,22 @@ async def ingest_traces(
 
                 span_attrs = attrs_to_dict(span.attributes)
                 merged_attrs = {**resource_attrs, **span_attrs}
+
+                # Heartbeat interception: record liveness, skip storage.
+                if span.name == "strathon.heartbeat":
+                    from heartbeat import record_heartbeat
+                    hb_agent = merged_attrs.get(
+                        "strathon.agent.name",
+                        merged_attrs.get("gen_ai.agent.name", "unknown"),
+                    )
+                    record_heartbeat(hb_agent, merged_attrs)
+
+                    # SDK integrity check: compare code_hash.
+                    code_hash = merged_attrs.get("strathon.sdk.code_hash")
+                    if code_hash:
+                        _check_code_hash(hb_agent, code_hash)
+
+                    continue  # Don't store heartbeat spans.
 
                 # Evaluate policies against this span. For log/alert we
                 # annotate the span attributes and record the match;

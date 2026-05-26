@@ -384,6 +384,10 @@ async def me(
 
     projects = await members_repo.get_user_projects(session, user.id)
 
+    # Get primary project + role for dashboard context.
+    primary_project = projects[0] if projects else None
+    role = primary_project.get("role") if primary_project else None
+
     return MeResponse(
         user={
             "id": str(user.id),
@@ -391,6 +395,11 @@ async def me(
             "display_name": user.display_name,
             "created_at": user.created_at.isoformat() if user.created_at else None,
             "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
+            "mfa_enabled": getattr(user, "mfa_enabled", False),
+            "force_password_change": getattr(user, "force_password_change", False),
+            "role": role,
+            "project_id": str(primary_project["id"]) if primary_project else None,
+            "project_name": primary_project.get("name") if primary_project else None,
         },
         projects=projects,
     )

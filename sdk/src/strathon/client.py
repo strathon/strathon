@@ -169,11 +169,24 @@ class Client:
                     "disabled until next refresh"
                 )
 
+        # SDK integrity check: hash the caller's source file.
+        from strathon.heartbeat import compute_code_hash, HeartbeatThread
+        self._code_hash = compute_code_hash()
+
+        # Heartbeat: daemon thread sends liveness spans every 30s.
+        self._heartbeat = HeartbeatThread(
+            tracer_provider=self._tracer_provider,
+            agent_name=service_name,
+            code_hash=self._code_hash,
+        )
+        self._heartbeat.start()
+
         logger.debug(
-            "Strathon Client initialized: endpoint=%s environment=%s service=%s",
+            "Strathon Client initialized: endpoint=%s environment=%s service=%s code_hash=%s",
             self.endpoint,
             self.environment,
             self.service_name,
+            self._code_hash[:12] + "...",
         )
 
     @property
@@ -240,6 +253,8 @@ class Client:
 
     def shutdown(self) -> None:
         """Flush pending traces and shut down the tracer provider."""
+        if hasattr(self, "_heartbeat"):
+            self._heartbeat.stop()
         if self._policy_enforcer is not None:
             try:
                 self._policy_enforcer.stop()

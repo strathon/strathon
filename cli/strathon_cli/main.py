@@ -835,3 +835,87 @@ def notifications_list(as_json):
             events[:30],
         )
     console.print(table)
+
+
+# ---- Admin commands ----------------------------------------------------------
+
+@cli.group()
+def admin():
+    """Administrative commands for self-hosted deployments."""
+    pass
+
+
+@admin.command("reset-password")
+@click.option("--email", required=True, help="User email")
+def admin_reset_password(email):
+    """Reset a user's password. Prints temporary password."""
+    data = api_post( "/v1/auth/admin-reset-password", json={"email": email})
+    if data:
+        temp = data.get("temporary_password", "")
+        console.print(f"[green]Password reset for {email}[/]")
+        console.print(f"[bold]Temporary password: {temp}[/]")
+        console.print("[yellow]User must change password on next login.[/]")
+
+
+@admin.command("create-user")
+@click.option("--email", required=True)
+@click.option("--password", required=True)
+@click.option("--display-name", default=None)
+@click.option("--role", default="member", type=click.Choice(["owner", "admin", "operator", "viewer"]))
+def admin_create_user(email, password, display_name, role):
+    """Create a new user account."""
+    data = api_post( "/v1/auth/register", json={
+        "email": email,
+        "password": password,
+        "display_name": display_name or email.split("@")[0],
+    })
+    if data:
+        console.print(f"[green]User {email} created ({role})[/]")
+
+
+@admin.command("list-users")
+def admin_list_users():
+    """List all members of the current project."""
+    data = api_get( "/v1/members")
+    items = data.get("data", []) if data else []
+    if not items:
+        console.print("[yellow]No members found.[/]")
+        return
+
+    table = Table(title="Project Members")
+    table.add_column("Email", style="bold")
+    table.add_column("Display Name")
+    table.add_column("Role", style="cyan")
+    table.add_column("MFA")
+    table.add_column("Last Active", style="dim")
+
+    for m in items:
+        mfa = "[green]yes[/]" if m.get("mfa_enabled") else "[red]no[/]"
+        table.add_row(
+            m.get("email", "-"),
+            m.get("display_name", "-"),
+            m.get("role", "-"),
+            mfa,
+            m.get("last_active", "-"),
+        )
+    console.print(table)
+
+
+@admin.command("transfer-ownership")
+@click.option("--to", "to_member", required=True, help="Member ID to transfer ownership to")
+def admin_transfer_ownership(to_member):
+    """Transfer project ownership to another admin."""
+    data = api_post( f"/v1/members/{to_member}/transfer-ownership")
+    if data:
+        console.print("[green]Ownership transferred.[/]")
+
+
+@admin.command("revoke-all-keys")
+@click.confirmation_option(prompt="This will revoke ALL API keys. Continue?")
+def admin_revoke_all_keys():
+    """Revoke all API keys for the current project."""
+    data = api_get( "/v1/api_keys")
+    keys = data.get("data", []) if data else []
+    for key in keys:
+        api_delete( f"/v1/api_keys/{key['id']}")
+    console.print(f"[green]Revoked {len(keys)} API keys.[/]")

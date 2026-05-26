@@ -277,6 +277,22 @@ async def lifespan(app: FastAPI):
 
     logger.info("Strathon receiver starting")
 
+    # Security warnings for missing env vars.
+    if not os.environ.get("STRATHON_ENCRYPTION_KEY"):
+        logger.warning(
+            "STRATHON_ENCRYPTION_KEY not set. TOTP secrets stored unencrypted."
+        )
+    if not os.environ.get("STRATHON_AUDIT_HMAC_KEY"):
+        logger.warning(
+            "STRATHON_AUDIT_HMAC_KEY not set. Audit hash chain disabled."
+        )
+    if not os.environ.get("STRATHON_PASSWORD_PEPPER"):
+        logger.warning(
+            "STRATHON_PASSWORD_PEPPER not set. Consider adding for defense-in-depth."
+        )
+    _mode = os.environ.get("STRATHON_MODE", "self-hosted")
+    logger.info("Strathon mode: %s", _mode)
+
     # Ensure the default project (and its settings row) exists so a fresh
     # deployment has somewhere to send traces before any user creates a
     # real project. Uses its own short-lived session that commits
@@ -491,6 +507,20 @@ async def lifespan(app: FastAPI):
         name="strathon.vigil",
     )
 
+    # Heartbeat monitor: detects agents that stop sending heartbeats.
+    from heartbeat import heartbeat_check_loop
+    app.state.heartbeat_task = asyncio.create_task(
+        heartbeat_check_loop(async_session_maker),
+        name="strathon.heartbeat",
+    )
+
+    # Retention cleanup: daily deletion of expired data.
+    from retention_cleanup import retention_cleanup_loop
+    app.state.retention_task = asyncio.create_task(
+        retention_cleanup_loop(async_session_maker),
+        name="strathon.retention",
+    )
+
     yield
 
     logger.info("Strathon receiver shutting down")
@@ -579,6 +609,20 @@ async def lifespan(app: FastAPI):
         app.state.vigil_task.cancel()
         try:
             await app.state.vigil_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    if hasattr(app.state, "heartbeat_task"):
+        app.state.heartbeat_task.cancel()
+        try:
+            await app.state.heartbeat_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    if hasattr(app.state, "retention_task"):
+        app.state.retention_task.cancel()
+        try:
+            await app.state.retention_task
         except (asyncio.CancelledError, Exception):
             pass
     metrics_mod.reset_global_metrics_for_testing()
@@ -675,7 +719,7 @@ app.add_middleware(RateLimitMiddleware)
 # stay decoupled from main.py and not see import-order issues.
 from api import (  # noqa: E402
     agent_inventory, analytics, api_keys, approvals, audit, auth_endpoints,
-    budgets, security_tools, compliance_export, cost_forecast, costs,
+    budgets, dashboard_convenience, security_tools, compliance_export, cost_forecast, costs,
     github_integration, halts, health, intervention, members, model_prices,
     notification_channels, policies, policy_suggestions, policy_templates,
     project_settings, projects, simulate, spans, topology, traces,
@@ -712,6 +756,7 @@ app.include_router(members.router)
 app.include_router(notification_channels.router)
 app.include_router(github_integration.router)
 app.include_router(security_tools.router)
+app.include_router(dashboard_convenience.router)
 
 
 @app.exception_handler(Exception)
