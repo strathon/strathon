@@ -15,7 +15,7 @@ import os
 import secrets
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request as FastAPIRequest, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request as FastAPIRequest, status
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +30,30 @@ router = APIRouter(tags=["dashboard"])
 
 VERSION = "0.1.0"
 API_VERSION = "v1"
+
+
+# ---- Session-only auth for user-level endpoints ----------------------------
+# Endpoints like change-password and GDPR export are user-scoped, not
+# project-scoped. They must not require X-Project-Id.
+
+async def _resolve_session_user(
+    authorization: str | None,
+    session: AsyncSession,
+) -> str:
+    """Resolve session token to user_id. Raises 401 on failure."""
+    from repositories.sessions import resolve_session_token
+
+    if not authorization:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing Authorization header")
+    parts = authorization.split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Malformed Authorization header")
+    token = parts[1].strip()
+
+    sess = await resolve_session_token(session, token)
+    if sess is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired session token")
+    return str(sess.user_id)
 
 
 # ---- Capabilities (no auth required) ----------------------------------------
@@ -66,17 +90,17 @@ class ChangePasswordBody(BaseModel):
 @router.post("/v1/auth/change-password")
 async def change_password(
     body: ChangePasswordBody,
-    ctx: auth_mod.ApiKeyContext = Depends(
-        require_scope(auth_mod.SCOPE_AUDIT_READ)
-    ),
+    authorization: str | None = Header(default=None),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Change own password. Requires current password verification."""
     from password import verify_password
 
+    user_id = await _resolve_session_user(authorization, session)
+
     result = await session.execute(
         text("SELECT password_hash FROM users WHERE id = :uid"),
-        {"uid": ctx.user_id},
+        {"uid": user_id},
     )
     row = result.first()
     if not row or not verify_password(row[0], body.current_password):
@@ -92,13 +116,13 @@ async def change_password(
             "force_password_change = false "
             "WHERE id = :uid"
         ),
-        {"h": new_hash, "uid": ctx.user_id},
+        {"h": new_hash, "uid": user_id},
     )
 
     # Invalidate all sessions (user must re-login with new password).
     await session.execute(
         text("DELETE FROM sessions WHERE user_id = :uid"),
-        {"uid": ctx.user_id},
+        {"uid": user_id},
     )
     await session.commit()
     return {"status": "password_changed"}
@@ -117,7 +141,7 @@ async def list_members_convenience(
     result = await session.execute(text("""
         SELECT u.id, u.email, u.display_name, m.role, m.created_at,
                u.last_login_at, u.mfa_enabled
-        FROM memberships m
+        FROM project_members m
         JOIN users u ON u.id = m.user_id
         WHERE m.project_id = :pid
         ORDER BY m.created_at ASC
@@ -164,7 +188,7 @@ async def invite_member(
         # Check if already a member.
         existing = await session.execute(
             text(
-                "SELECT 1 FROM memberships "
+                "SELECT 1 FROM project_members "
                 "WHERE user_id = :uid AND project_id = :pid"
             ),
             {"uid": user_row[0], "pid": ctx.project_id},
@@ -174,7 +198,7 @@ async def invite_member(
 
         await session.execute(
             text(
-                "INSERT INTO memberships (user_id, project_id, role) "
+                "INSERT INTO project_members (user_id, project_id, role) "
                 "VALUES (:uid, :pid, :role)"
             ),
             {"uid": user_row[0], "pid": ctx.project_id, "role": body.role},
@@ -212,7 +236,7 @@ async def update_member_role(
     # Check target's current role.
     result = await session.execute(
         text(
-            "SELECT role FROM memberships "
+            "SELECT role FROM project_members "
             "WHERE user_id = :uid AND project_id = :pid"
         ),
         {"uid": member_id, "pid": ctx.project_id},
@@ -227,7 +251,7 @@ async def update_member_role(
 
     await session.execute(
         text(
-            "UPDATE memberships SET role = :role "
+            "UPDATE project_members SET role = :role "
             "WHERE user_id = :uid AND project_id = :pid"
         ),
         {"uid": member_id, "pid": ctx.project_id, "role": body.role},
@@ -247,7 +271,7 @@ async def remove_member(
     """Remove a member. Cannot remove owner or self."""
     result = await session.execute(
         text(
-            "SELECT role FROM memberships "
+            "SELECT role FROM project_members "
             "WHERE user_id = :uid AND project_id = :pid"
         ),
         {"uid": member_id, "pid": ctx.project_id},
@@ -262,7 +286,7 @@ async def remove_member(
 
     await session.execute(
         text(
-            "DELETE FROM memberships "
+            "DELETE FROM project_members "
             "WHERE user_id = :uid AND project_id = :pid"
         ),
         {"uid": member_id, "pid": ctx.project_id},
@@ -339,7 +363,7 @@ async def transfer_ownership(
     # Verify caller is owner.
     caller_role = await session.execute(
         text(
-            "SELECT role FROM memberships "
+            "SELECT role FROM project_members "
             "WHERE user_id = :uid AND project_id = :pid"
         ),
         {"uid": ctx.user_id, "pid": ctx.project_id},
@@ -351,7 +375,7 @@ async def transfer_ownership(
     # Verify target is admin.
     target_role = await session.execute(
         text(
-            "SELECT role FROM memberships "
+            "SELECT role FROM project_members "
             "WHERE user_id = :uid AND project_id = :pid"
         ),
         {"uid": member_id, "pid": ctx.project_id},
@@ -365,14 +389,14 @@ async def transfer_ownership(
     # Swap roles.
     await session.execute(
         text(
-            "UPDATE memberships SET role = 'admin' "
+            "UPDATE project_members SET role = 'admin' "
             "WHERE user_id = :uid AND project_id = :pid"
         ),
         {"uid": ctx.user_id, "pid": ctx.project_id},
     )
     await session.execute(
         text(
-            "UPDATE memberships SET role = 'owner' "
+            "UPDATE project_members SET role = 'owner' "
             "WHERE user_id = :uid AND project_id = :pid"
         ),
         {"uid": member_id, "pid": ctx.project_id},
@@ -397,32 +421,36 @@ async def get_settings_convenience(
     )
     project = result.first()
 
-    # Get retention settings.
-    retention = await session.execute(
+    # Read typed columns from project_settings.
+    settings = await session.execute(
         text(
-            "SELECT key, value FROM project_settings "
-            "WHERE project_id = :pid AND key LIKE 'retention_%'"
+            "SELECT trace_retention_days, pii_redaction_enabled, "
+            "content_capture_enabled, intervention_default_action "
+            "FROM project_settings WHERE project_id = :pid"
         ),
         {"pid": ctx.project_id},
     )
-    retention_dict = {r[0]: r[1] for r in retention.all()}
+    row = settings.first()
 
     return {
         "project_name": project[0] if project else "default",
         "project_slug": project[1] if project else "default",
-        "timezone": retention_dict.get("retention_timezone", "UTC"),
         "retention": {
-            "traces_days": int(retention_dict.get("retention_traces_days", "30")),
-            "audit_days": int(retention_dict.get("retention_audit_days", "365")),
-            "spans_days": int(retention_dict.get("retention_spans_days", "30")),
+            "traces_days": row[0] if row else 30,
         },
+        "pii_redaction_enabled": row[1] if row else True,
+        "content_capture_enabled": row[2] if row else False,
+        "intervention_default_action": row[3] if row else "allow",
     }
 
 
 class UpdateSettingsBody(BaseModel):
     project_name: str | None = None
-    timezone: str | None = None
+    timezone: str | None = None  # Accepted for compat, not stored (no column).
     retention: dict[str, int] | None = None
+    pii_redaction_enabled: bool | None = None
+    content_capture_enabled: bool | None = None
+    intervention_default_action: str | None = None
     model_config = {"extra": "forbid"}
 
 
@@ -441,26 +469,33 @@ async def update_settings_convenience(
             {"name": body.project_name, "pid": ctx.project_id},
         )
 
-    if body.timezone:
-        await session.execute(
-            text(
-                "INSERT INTO project_settings (project_id, key, value) "
-                "VALUES (:pid, 'retention_timezone', :tz) "
-                "ON CONFLICT (project_id, key) DO UPDATE SET value = :tz"
-            ),
-            {"pid": ctx.project_id, "tz": body.timezone},
-        )
+    # Build SET clauses for project_settings columns.
+    set_parts: list[str] = []
+    params: dict[str, Any] = {"pid": ctx.project_id, "uid": ctx.user_id}
 
-    if body.retention:
-        for k, v in body.retention.items():
-            await session.execute(
-                text(
-                    "INSERT INTO project_settings (project_id, key, value) "
-                    "VALUES (:pid, :key, :val) "
-                    "ON CONFLICT (project_id, key) DO UPDATE SET value = :val"
-                ),
-                {"pid": ctx.project_id, "key": f"retention_{k}", "val": str(v)},
-            )
+    if body.retention and "traces_days" in body.retention:
+        set_parts.append("trace_retention_days = :traces_days")
+        params["traces_days"] = body.retention["traces_days"]
+
+    if body.pii_redaction_enabled is not None:
+        set_parts.append("pii_redaction_enabled = :pii")
+        params["pii"] = body.pii_redaction_enabled
+
+    if body.content_capture_enabled is not None:
+        set_parts.append("content_capture_enabled = :capture")
+        params["capture"] = body.content_capture_enabled
+
+    if body.intervention_default_action is not None:
+        set_parts.append("intervention_default_action = :action")
+        params["action"] = body.intervention_default_action
+
+    if set_parts:
+        set_parts.append("updated_by_user_id = :uid")
+        sql = (
+            f"UPDATE project_settings SET {', '.join(set_parts)} "
+            f"WHERE project_id = :pid"
+        )
+        await session.execute(text(sql), params)
 
     await session.commit()
     return {"status": "updated"}
@@ -470,28 +505,28 @@ async def update_settings_convenience(
 
 @router.get("/v1/auth/me/export")
 async def export_my_data(
-    ctx: auth_mod.ApiKeyContext = Depends(
-        require_scope(auth_mod.SCOPE_AUDIT_READ)
-    ),
+    authorization: str | None = Header(default=None),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """GDPR Article 20 data portability. Export all user data."""
+    user_id = await _resolve_session_user(authorization, session)
+
     user = await session.execute(
         text(
             "SELECT email, display_name, created_at, last_login_at, "
             "mfa_enabled FROM users WHERE id = :uid"
         ),
-        {"uid": ctx.user_id},
+        {"uid": user_id},
     )
     u = user.first()
 
     memberships = await session.execute(
         text(
             "SELECT p.name, p.slug, m.role, m.created_at "
-            "FROM memberships m JOIN projects p ON p.id = m.project_id "
+            "FROM project_members m JOIN projects p ON p.id = m.project_id "
             "WHERE m.user_id = :uid"
         ),
-        {"uid": ctx.user_id},
+        {"uid": user_id},
     )
 
     return {

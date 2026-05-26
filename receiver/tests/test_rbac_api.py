@@ -88,6 +88,29 @@ def _cleanup_user(email: str) -> None:
         conn.close()
 
 
+def _ensure_project_owner(email: str, project_id: str) -> None:
+    """Add user to the default project as owner via direct SQL.
+
+    Registration only auto-assigns ownership to the very first user.
+    In CI the first-user slot is taken by earlier tests, so subsequent
+    registrations leave the user with no project membership. This helper
+    ensures the test user is an owner so membership management tests work
+    regardless of test ordering.
+    """
+    import psycopg
+    db_url = os.environ["DATABASE_URL"]
+    conn = psycopg.connect(db_url, autocommit=True)
+    try:
+        conn.execute(
+            "INSERT INTO project_members (project_id, user_id, role) "
+            "SELECT %s, id, 'owner' FROM users WHERE LOWER(email) = LOWER(%s) "
+            "ON CONFLICT (project_id, user_id) DO UPDATE SET role = 'owner'",
+            (project_id, email),
+        )
+    finally:
+        conn.close()
+
+
 # ---- Registration tests ---------------------------------------------------
 
 
@@ -276,6 +299,7 @@ def test_add_and_remove_member(client):
     )
     assert reg.status_code == 201, reg.text
     owner_token = reg.json()["token"]
+    _ensure_project_owner(owner_email, project_id)
 
     # Register a second user to invite
     member_email = _unique_email()
@@ -333,6 +357,7 @@ def test_change_member_role(client):
         json={"email": owner_email, "password": "owner-password-123"},
     )
     owner_token = reg.json()["token"]
+    _ensure_project_owner(owner_email, project_id)
 
     member_email = _unique_email()
     reg2 = client.post(
@@ -372,6 +397,7 @@ def test_viewer_cannot_add_members(client):
         json={"email": owner_email, "password": "owner-password-123"},
     )
     owner_token = reg.json()["token"]
+    _ensure_project_owner(owner_email, project_id)
 
     # Register viewer
     viewer_email = _unique_email()
@@ -417,6 +443,7 @@ def test_cannot_assign_owner_role(client):
         json={"email": owner_email, "password": "owner-password-123"},
     )
     owner_token = reg.json()["token"]
+    _ensure_project_owner(owner_email, project_id)
 
     target_email = _unique_email()
     client.post(

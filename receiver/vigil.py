@@ -119,19 +119,19 @@ async def _compute_agent_metrics(
     """Query per-agent metrics for the last N seconds."""
     result = await session.execute(text("""
         SELECT
-            attrs->>'gen_ai.agent.name' AS agent_name,
+            agent_name,
             COUNT(*) AS total_spans,
             COUNT(*) FILTER (
-                WHERE attrs->>'strathon.policy.outcome' IN ('blocked', 'denied')
+                WHERE attributes->>'strathon.policy.outcome' IN ('blocked', 'denied')
             ) AS denied_spans,
             COUNT(*) FILTER (
-                WHERE status = 'error'
+                WHERE status_code = 'ERROR'
             ) AS error_spans,
-            COALESCE(SUM((attrs->>'gen_ai.usage.cost')::NUMERIC), 0) AS total_cost
+            COALESCE(SUM(cost_usd), 0) AS total_cost
         FROM spans
         WHERE start_time_unix_nano > :cutoff
-          AND attrs->>'gen_ai.agent.name' IS NOT NULL
-        GROUP BY attrs->>'gen_ai.agent.name'
+          AND agent_name IS NOT NULL
+        GROUP BY agent_name
     """), {
         "cutoff": int((time.time() - lookback_seconds) * 1e9),
     })
@@ -212,7 +212,7 @@ async def vigil_loop(session_maker) -> None:
                             # Get project_id from span data.
                             result = await session.execute(text(
                                 "SELECT DISTINCT project_id FROM spans "
-                                "WHERE attrs->>'gen_ai.agent.name' = :agent "
+                                "WHERE agent_name = :agent "
                                 "LIMIT 1"
                             ), {"agent": alert["agent_name"]})
                             row = result.first()

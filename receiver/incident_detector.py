@@ -120,7 +120,7 @@ async def _check_budget_auto_halt(
     """Check for recent budget auto-halts (actor=budget_monitor)."""
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
     sql = (
-        "SELECT id, scope, scope_value, reason FROM halt_state "
+        "SELECT id, trace_id, agent_id, budget_id, reason FROM halt_state "
         "WHERE project_id = :pid "
         "  AND actor = 'budget_monitor' "
         "  AND set_at > :cutoff "
@@ -138,8 +138,9 @@ async def _check_budget_auto_halt(
                 "halts": [
                     {
                         "id": row["id"],
-                        "scope": row["scope"],
-                        "scope_value": row["scope_value"],
+                        "trace_id": str(row["trace_id"]) if row["trace_id"] else None,
+                        "agent_id": row["agent_id"],
+                        "budget_id": str(row["budget_id"]) if row["budget_id"] else None,
                         "reason": row["reason"],
                     }
                     for row in rows

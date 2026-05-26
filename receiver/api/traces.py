@@ -70,9 +70,9 @@ def _check_code_hash(agent_name: str, code_hash: str) -> None:
         try:
             import asyncio
             from integrations.dispatcher import dispatch_event
-            # Fire alert asynchronously.
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
+            # Fire alert asynchronously if inside an event loop.
+            try:
+                loop = asyncio.get_running_loop()
                 loop.create_task(dispatch_event(
                     None, None,
                     "sdk_integrity_violation", {
@@ -86,6 +86,8 @@ def _check_code_hash(agent_name: str, code_hash: str) -> None:
                         ),
                     },
                 ))
+            except RuntimeError:
+                pass  # No running event loop (e.g., in tests).
         except Exception:
             pass  # Best-effort alert.
 

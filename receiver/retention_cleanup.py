@@ -77,12 +77,10 @@ async def _run_cleanup(session: AsyncSession) -> dict[str, int]:
     # 4. Drop old span partitions based on retention.
     # Get all projects and their retention settings.
     projects = await session.execute(text("""
-        SELECT p.id, COALESCE(
-            (SELECT value::INT FROM project_settings
-             WHERE project_id = p.id AND key = 'retention_spans_days'),
-            30
-        ) AS retention_days
-        FROM projects p WHERE p.deleted_at IS NULL
+        SELECT p.id, COALESCE(ps.trace_retention_days, 30) AS retention_days
+        FROM projects p
+        LEFT JOIN project_settings ps ON ps.project_id = p.id
+        WHERE p.deleted_at IS NULL
     """))
 
     for row in projects.all():

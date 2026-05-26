@@ -23,6 +23,9 @@ from database import get_db_session
 
 from ._deps import require_scope
 
+# In-memory store for MCP proxy configs until a migration adds a column.
+_mcp_proxy_configs: dict[str, dict[str, Any]] = {}
+
 router = APIRouter(tags=["security"])
 
 
@@ -135,10 +138,10 @@ async def get_sarif_report(
 
     # Policy violations (blocked/denied spans).
     violations_result = await session.execute(text(
-        "SELECT attrs FROM spans "
+        "SELECT attributes FROM spans "
         "WHERE project_id = :pid "
         "AND start_time_unix_nano > :cutoff "
-        "AND attrs->>'strathon.policy.outcome' IN ('blocked', 'denied') "
+        "AND attributes->>'strathon.policy.outcome' IN ('blocked', 'denied') "
         "LIMIT 1000"
     ), {"pid": ctx.project_id, "cutoff": cutoff_ns})
 
@@ -178,17 +181,17 @@ async def get_agent_inventory_bom(
     # Get agent + tool inventory.
     result = await session.execute(text("""
         SELECT
-            attrs->>'gen_ai.agent.name' AS agent_name,
-            ARRAY_AGG(DISTINCT attrs->>'gen_ai.tool.name')
-                FILTER (WHERE attrs->>'gen_ai.tool.name' IS NOT NULL) AS tools,
-            ARRAY_AGG(DISTINCT attrs->>'gen_ai.request.model')
-                FILTER (WHERE attrs->>'gen_ai.request.model' IS NOT NULL) AS models,
+            agent_name,
+            ARRAY_AGG(DISTINCT tool_name)
+                FILTER (WHERE tool_name IS NOT NULL) AS tools,
+            ARRAY_AGG(DISTINCT request_model)
+                FILTER (WHERE request_model IS NOT NULL) AS models,
             COUNT(*) AS total_spans,
             MAX(to_timestamp(start_time_unix_nano / 1e9)) AS last_active
         FROM spans
         WHERE project_id = :pid
-          AND attrs->>'gen_ai.agent.name' IS NOT NULL
-        GROUP BY attrs->>'gen_ai.agent.name'
+          AND agent_name IS NOT NULL
+        GROUP BY agent_name
     """), {"pid": ctx.project_id})
 
     agents = []
@@ -278,19 +281,14 @@ async def configure_mcp_proxy(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Configure MCP proxy for a project. Stores upstream URL and settings."""
-    await session.execute(text(
-        "INSERT INTO project_settings (project_id, key, value) "
-        "VALUES (:pid, 'mcp_proxy', :config) "
-        "ON CONFLICT (project_id, key) DO UPDATE SET value = :config"
-    ), {
-        "pid": ctx.project_id,
-        "config": json.dumps({
-            "upstream_url": body.upstream_url,
-            "blocked_tools": body.blocked_tools,
-            "scan_responses": body.scan_responses,
-        }),
-    })
-    await session.commit()
+    # MCP proxy config stored in-memory until a dedicated migration adds
+    # a column or table. project_settings is NOT a key-value store.
+    # TODO: add mcp_proxy_config column to project_settings via migration.
+    _mcp_proxy_configs[str(ctx.project_id)] = {
+        "upstream_url": body.upstream_url,
+        "blocked_tools": body.blocked_tools,
+        "scan_responses": body.scan_responses,
+    }
     return {
         "status": "configured",
         "proxy_endpoint": "/v1/mcp/proxy",
