@@ -36,7 +36,7 @@ claude-agent = ["anthropic>=0.40.0"]
 langchain = ["langchain-core>=0.3.0"]
 crewai = ["crewai>=0.80.0"]
 autogen = ["autogen-agentchat>=0.4.0"]
-pydantic-ai = ["pydantic-ai-slim>=1.80.0"]
+pydantic-ai = ["pydantic-ai-slim>=1.102.0"]
 google-adk = ["google-adk>=1.7.0"]
 all = [
     "openai-agents>=0.6.0",
@@ -44,7 +44,7 @@ all = [
     "langchain-core>=0.3.0",
     "crewai>=0.80.0",
     "autogen-agentchat>=0.4.0",
-    "pydantic-ai-slim>=1.80.0",
+    "pydantic-ai-slim>=1.102.0",
     "google-adk>=1.7.0",
 ]
 dev = [
