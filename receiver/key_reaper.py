@@ -62,15 +62,7 @@ async def _tick(session_maker, warn_hours: int = 24) -> None:
                     key.project_id,
                     key.expires_at,
                 )
-                try:
-                    from integrations.dispatcher import dispatch_event
-                    await dispatch_event(
-                        session, None, "api_key_expired", {
-                            "key_prefix": str(row[0])[:8] if row else "unknown",
-                        },
-                    )
-                except Exception:
-                    pass  # Best-effort notification.
+                # TODO: emit webhook event for key.project_id with
                 # event_type="api_key.expiring_soon" once the webhook
                 # dispatch supports non-policy event types.
         except Exception:

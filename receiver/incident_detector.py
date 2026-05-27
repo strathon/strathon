@@ -318,17 +318,7 @@ async def _tick(session_maker, thresholds: dict[str, int]) -> None:
                         payload["severity"],
                         pid,
                     )
-                    try:
-                        from integrations.dispatcher import dispatch_event
-                        await dispatch_event(
-                            session, pid, "incident_detected", {
-                                "incident_type": inc.get("type", "unknown"),
-                                "severity": inc.get("severity", "medium"),
-                                "message": inc.get("message", ""),
-                            },
-                        )
-                    except Exception:
-                        pass  # Best-effort notification.
+                    # TODO: fire webhook via the webhook dispatch system
                     # once it supports non-policy event types.
             except Exception:
                 logger.exception(

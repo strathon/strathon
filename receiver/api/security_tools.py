@@ -257,7 +257,7 @@ def _to_cyclonedx(agents: list[dict]) -> dict:
         "version": 1,
         "metadata": {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "tools": [{"name": "strathon", "version": "1.0.1"}],
+            "tools": [{"name": "strathon", "version": "0.1.0"}],
         },
         "components": components,
     }
@@ -283,7 +283,7 @@ async def configure_mcp_proxy(
     """Configure MCP proxy for a project. Stores upstream URL and settings."""
     # MCP proxy config stored in-memory until a dedicated migration adds
     # a column or table. project_settings is NOT a key-value store.
-    # Per-project MCP config stored via env vars; DB column planned.
+    # TODO: add mcp_proxy_config column to project_settings via migration.
     _mcp_proxy_configs[str(ctx.project_id)] = {
         "upstream_url": body.upstream_url,
         "blocked_tools": body.blocked_tools,

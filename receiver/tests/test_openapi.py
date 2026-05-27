@@ -30,7 +30,7 @@ def test_openapi_json_accessible(client):
     assert r.status_code == 200
     spec = r.json()
     assert spec["info"]["title"] == "Strathon Receiver"
-    assert spec["info"]["version"] == "1.0.1"
+    assert spec["info"]["version"] == "0.1.0"
     assert "paths" in spec
     # Key endpoints present.
     assert "/v1/traces" in spec["paths"]
