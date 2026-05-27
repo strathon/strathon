@@ -10,10 +10,10 @@ export default function OverviewPage() {
   const router = useRouter();
   const toast = useToast();
 
-  const { data: policiesData, loading: pLoading } = useApi<{ data: Array<{ id: string; name: string; status: string; action: string; hits7d: number[]; priority: number }> }>("/api/policies");
-  const { data: tracesData, loading: tLoading } = useApi<{ data: Array<{ id: string; shortId?: string; agent: string; operation: string; status: string; started: string }> }>("/api/traces", { limit: "6" });
-  const { data: approvalsData, loading: aLoading } = useApi<{ data: Array<{ id: string; agent: string; tool: string; expiresIn: number }> }>("/api/approvals");
-  const { data: budgetsData, loading: bLoading } = useApi<{ data: { spend_mtd?: number; daily?: number[] } }>("/api/budgets");
+  const { data: policiesData, loading: pLoading, error: pError } = useApi<{ data: Array<{ id: string; name: string; status: string; action: string; hits7d: number[]; priority: number }> }>("/api/policies");
+  const { data: tracesData, loading: tLoading, error: tError } = useApi<{ data: Array<{ id: string; shortId?: string; agent: string; operation: string; status: string; started: string }> }>("/api/traces", { limit: "6" });
+  const { data: approvalsData, loading: aLoading, error: aError } = useApi<{ data: Array<{ id: string; agent: string; tool: string; expiresIn: number }> }>("/api/approvals");
+  const { data: budgetsData, loading: bLoading, error: bError } = useApi<{ data: { spend_mtd?: number; daily?: number[] } }>("/api/budgets");
   const { data: complianceData } = useApi<{ data: Array<{ id: string; name: string; coverage: number }> }>("/api/compliance");
 
   const policies = policiesData?.data || [];
@@ -29,16 +29,24 @@ export default function OverviewPage() {
   const spendMtd = budgets?.spend_mtd || 0;
   const spendDaily = budgets?.daily || [];
 
-  // Live spans/sec ticker
-  const [spansPerSec, setSpansPerSec] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setSpansPerSec((r) => Math.max(8, Math.min(120, r + Math.round((Math.random() - 0.5) * 12)))), 1500);
-    return () => clearInterval(t);
-  }, []);
-
+  // Derive throughput from real trace data
+  const recentSpanCount = traces.reduce((a: number, t: any) => a + (t.spans || t.span_count || 0), 0);
   const topPolicies = [...policies].sort((a, b) => (b.hits7d?.reduce((x, y) => x + y, 0) || 0) - (a.hits7d?.reduce((x, y) => x + y, 0) || 0)).slice(0, 4);
 
   const allLoading = pLoading || tLoading || aLoading || bLoading;
+  const allError = !allLoading && pError && tError && aError && bError;
+
+  if (allError) return (
+    <div className="page">
+      <div className="page-header"><div><h1 className="t-h1 page-title">Overview</h1></div></div>
+      <div className="card" style={{ padding: 32, textAlign: "center" }}>
+        <Icons.AlertTriangle size={32} style={{ color: "var(--danger)", marginBottom: 12 }} />
+        <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>Cannot reach Strathon receiver</div>
+        <div className="t-sm text-secondary" style={{ marginBottom: 16 }}>Is the receiver running? Check that your server is started.</div>
+        <button className="btn" onClick={() => window.location.reload()}>Retry</button>
+      </div>
+    </div>
+  );
 
   // Welcome banner (show when no policies and no api keys, dismissible)
   const [bannerDismissed, setBannerDismissed] = useState(false);
@@ -72,9 +80,9 @@ export default function OverviewPage() {
 
       <div className="kpi-grid">
         <div className="kpi">
-          <span className="kpi-label"><span className="pulse-dot" style={{ marginRight: 6 }} />Throughput &middot; live</span>
-          <span className="kpi-value" style={{ fontVariantNumeric: "tabular-nums" }}>{spansPerSec}</span>
-          <span className="kpi-meta">spans/sec</span>
+          <span className="kpi-label">Spans &middot; recent</span>
+          <span className="kpi-value" style={{ fontVariantNumeric: "tabular-nums" }}>{allLoading ? <Skeleton width={40} height={28} /> : <CountUp to={recentSpanCount} />}</span>
+          <span className="kpi-meta">across {traces.length} traces</span>
         </div>
         <div className="kpi">
           <span className="kpi-label">Blocked &middot; today</span>

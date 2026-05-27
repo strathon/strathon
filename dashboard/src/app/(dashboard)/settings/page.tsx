@@ -12,7 +12,7 @@ export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const toast = useToast();
-  const { user: currentUser, mode, refetchUser } = useUser();
+  const { user: currentUser, mode, refetch } = useUser();
   const [section, setSection] = useState(searchParams.get("section") || "general");
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -63,7 +63,7 @@ export default function SettingsPage() {
       await api.post("/api/auth/change-password", { current_password: currentPass, new_password: newPass });
       toast.push({ tone: "success", title: "Password changed" });
       setCurrentPass(""); setNewPass(""); setConfirmPass("");
-      refetchUser();
+      refetch();
     } catch (err) {
       setPassError(err instanceof Error ? err.message : "Failed");
     } finally {
@@ -97,7 +97,7 @@ export default function SettingsPage() {
       toast.push({ tone: "success", title: "Ownership transferred" });
       setTransferTarget(null);
       refetchMembers();
-      refetchUser();
+      refetch();
     } catch (err) {
       toast.push({ tone: "danger", title: err instanceof Error ? err.message : "Failed" });
     }
@@ -238,7 +238,7 @@ export default function SettingsPage() {
                     {currentUser?.mfa_enabled ? "TOTP authenticator app" : "Add an extra layer of security to your account"}
                   </div>
                 </div>
-                <button className="btn" onClick={() => toast.push({ tone: "info", title: "MFA setup coming in a future update" })}>
+                <button className="btn" onClick={() => toast.push({ title: "MFA setup coming in a future update" })}>
                   {currentUser?.mfa_enabled ? "Manage" : "Enable MFA"}
                 </button>
               </div>
@@ -349,7 +349,7 @@ export default function SettingsPage() {
             <input className="input" value={deleteAccountText} onChange={(e) => setDeleteAccountText(e.target.value)} placeholder="DELETE" />
           </div>
         }
-        onConfirm={deleteAccountText === "DELETE" ? deleteAccount : undefined} />
+        onConfirm={() => { if (deleteAccountText === "DELETE") deleteAccount(); }} />
     </div>
   );
 }

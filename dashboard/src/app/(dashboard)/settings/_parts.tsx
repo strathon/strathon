@@ -8,7 +8,7 @@ import { useApi, api } from "@/lib/api-client";
 
 
 export function GeneralSettings() {
-  const { user: currentUser, refetchUser } = useUser();
+  const { user: currentUser, refetch } = useUser();
   const { data: settingsData, loading: sLoading } = useApi<{ project_name?: string; timezone?: string }>("/api/settings");
   const [name, setName] = useState("");
   const [avatarIdx, setAvatarIdx] = useState(0);
@@ -255,7 +255,11 @@ export function ApiKeysSection() {
         )}>
         {!createdSecret ? (
           <div className="col" style={{ gap: 16 }}>
-            <div><div className="form-label">Name</div><input className="input" value={keyName} onChange={(e) => setKeyName(e.target.value)} placeholder="e.g. prod-receiver" autoFocus /></div>
+            <div><div className="form-label">Name</div><input className="input" value={keyName} onChange={(e) => setKeyName(e.target.value)} placeholder="e.g. prod-receiver" autoFocus onKeyDown={(e) => { if (e.key === "Enter" && keyName.trim()) { e.preventDefault(); createKey(); } }} /></div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="btn ghost" onClick={() => setCreateOpen(false)}>Cancel</button>
+              <button className="btn primary" onClick={createKey} disabled={creating || !keyName.trim()}>{creating ? "Creating\u2026" : "Create key"}</button>
+            </div>
           </div>
         ) : (
           <div>

@@ -12,6 +12,8 @@ export async function proxyToReceiver(path: string, init?: RequestInit & { searc
   if (init?.searchParams) init.searchParams.forEach((v, k) => url.searchParams.set(k, v));
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (session) headers["Authorization"] = `Bearer ${session}`;
+  const projectId = cookieStore.get("strathon-project-id")?.value;
+  if (projectId) headers["X-Project-Id"] = projectId;
   try {
     const res = await fetch(url.toString(), { ...init, headers: { ...headers, ...init?.headers }, cache: "no-store" });
     const ct = res.headers.get("content-type") || "";
@@ -43,4 +45,5 @@ export async function setSessionCookie(token: string): Promise<void> {
 export async function clearSessionCookie(): Promise<void> {
   const cookieStore = await cookies();
   cookieStore.delete("strathon-session");
+  cookieStore.delete("strathon-project-id");
 }

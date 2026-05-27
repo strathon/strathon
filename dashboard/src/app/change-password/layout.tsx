@@ -1,3 +1,4 @@
-export default function Layout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+import { Suspense } from "react";
+export default function ChangePasswordLayout({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={null}>{children}</Suspense>;
 }

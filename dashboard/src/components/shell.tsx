@@ -146,13 +146,23 @@ export function Header({ breadcrumbs, onOpenCmd, cmdOpen, mobileOpen, setMobileO
 }) {
   const router = useRouter();
   const [notifOpen, setNotifOpen] = useState(false);
-  const [notifs, setNotifs] = useState([
-    { id: 1, kind: "block", title: "Blocked tool call", body: "atlas-support · tool.email.send · block-secret-leakage", time: "2m ago", unread: true },
-    { id: 2, kind: "approval", title: "Approval requested", body: "relay-ops wants to call tool.salesforce.update", time: "5m ago", unread: true },
-    { id: 3, kind: "budget", title: "Budget at 87%", body: "atlas-support · $4,348 of $5,000 / month", time: "12m ago", unread: true },
-    { id: 4, kind: "policy", title: "Policy updated", body: "block-prompt-injection threshold changed (0.7 → 0.8)", time: "1h ago", unread: false },
-    { id: 5, kind: "compliance", title: "EU AI Act recommendation", body: "Article 12 retention enforcement", time: "2h ago", unread: false },
-  ]);
+  const [notifs, setNotifs] = useState<{ id: number | string; kind: string; title: string; body: string; time: string; unread: boolean }[]>([]);
+  useEffect(() => {
+    fetch("/api/notifications", { credentials: "same-origin" })
+      .then(r => r.ok ? r.json() : { data: [] })
+      .then(d => {
+        const items = d?.data || [];
+        setNotifs(items.map((n: any, i: number) => ({
+          id: n.id || i,
+          kind: n.kind || n.type || "policy",
+          title: n.title || n.message || "",
+          body: n.body || n.detail || "",
+          time: n.time || n.created_at || "",
+          unread: n.unread ?? !n.read,
+        })));
+      })
+      .catch(() => {});
+  }, [notifOpen]);
   const unread = notifs.filter((n) => n.unread).length;
   const notifRef = useRef<HTMLDivElement>(null);
 

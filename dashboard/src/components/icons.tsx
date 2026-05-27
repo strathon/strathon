@@ -10,7 +10,7 @@ import {
   Layers, List, Lock, LogOut, Moon, MoreHorizontal, PanelLeft, Pause,
   Pin, Play, Plus, RefreshCw, RotateCw, Save, Search, Settings, Shield,
   ShieldCheck, Shuffle, Sparkles, Sun, Trash2, UserCheck, Zap,
-  Unlock, Bot, ScrollText, MessageSquare, User, CreditCard, Camera, Terminal, Menu,
+  Unlock, Bot, ScrollText, MessageSquare, User, Users, CreditCard, Camera, Terminal, Menu,
   X, ChevronUp,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -26,7 +26,7 @@ export const Icons = {
   Settings, Shield, ShieldCheck, Shuffle, Sparkles, Sun,
   Trash: Trash2, UserCheck, Zap, Unlock, Bot, ScrollText, MessageSquare,
   Slack: MessageSquare,
-  User, CreditCard, Camera, Terminal, Menu,
+  User, Users, CreditCard, Camera, Terminal, Menu,
   X, ChevronUp,
 } satisfies Record<string, LucideIcon>;
 
