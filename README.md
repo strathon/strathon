@@ -18,6 +18,7 @@
   <a href="https://github.com/strathon/strathon/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT%20%2F%20Apache%202.0-blue.svg" alt="License"></a>
   <a href="https://discord.gg/Ta9XRmh4H"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
   <a href="https://twitter.com/strathonai"><img src="https://img.shields.io/twitter/follow/strathonai?logo=X&color=%23f5f5f5" alt="X"></a>
+  <a href="https://www.linkedin.com/company/strathon"><img src="https://img.shields.io/badge/LinkedIn-0A66C2?logo=linkedin&logoColor=white" alt="LinkedIn"></a>
 </div>
 
 <br/>
