@@ -15,7 +15,7 @@ import os
 import secrets
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request as FastAPIRequest, status
+from fastapi import APIRouter, Depends, HTTPException, Request as FastAPIRequest, status
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,32 +28,8 @@ from ._deps import require_scope
 
 router = APIRouter(tags=["dashboard"])
 
-VERSION = "0.1.0"
+VERSION = "1.0.1"
 API_VERSION = "v1"
-
-
-# ---- Session-only auth for user-level endpoints ----------------------------
-# Endpoints like change-password and GDPR export are user-scoped, not
-# project-scoped. They must not require X-Project-Id.
-
-async def _resolve_session_user(
-    authorization: str | None,
-    session: AsyncSession,
-) -> str:
-    """Resolve session token to user_id. Raises 401 on failure."""
-    from repositories.sessions import resolve_session_token
-
-    if not authorization:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing Authorization header")
-    parts = authorization.split(None, 1)
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Malformed Authorization header")
-    token = parts[1].strip()
-
-    sess = await resolve_session_token(session, token)
-    if sess is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired session token")
-    return str(sess.user_id)
 
 
 # ---- Capabilities (no auth required) ----------------------------------------
@@ -90,17 +66,17 @@ class ChangePasswordBody(BaseModel):
 @router.post("/v1/auth/change-password")
 async def change_password(
     body: ChangePasswordBody,
-    authorization: str | None = Header(default=None),
+    ctx: auth_mod.ApiKeyContext = Depends(
+        require_scope(auth_mod.SCOPE_AUDIT_READ)
+    ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Change own password. Requires current password verification."""
     from password import verify_password
 
-    user_id = await _resolve_session_user(authorization, session)
-
     result = await session.execute(
         text("SELECT password_hash FROM users WHERE id = :uid"),
-        {"uid": user_id},
+        {"uid": ctx.user_id},
     )
     row = result.first()
     if not row or not verify_password(row[0], body.current_password):
@@ -116,13 +92,13 @@ async def change_password(
             "force_password_change = false "
             "WHERE id = :uid"
         ),
-        {"h": new_hash, "uid": user_id},
+        {"h": new_hash, "uid": ctx.user_id},
     )
 
     # Invalidate all sessions (user must re-login with new password).
     await session.execute(
         text("DELETE FROM sessions WHERE user_id = :uid"),
-        {"uid": user_id},
+        {"uid": ctx.user_id},
     )
     await session.commit()
     return {"status": "password_changed"}
@@ -446,7 +422,6 @@ async def get_settings_convenience(
 
 class UpdateSettingsBody(BaseModel):
     project_name: str | None = None
-    timezone: str | None = None  # Accepted for compat, not stored (no column).
     retention: dict[str, int] | None = None
     pii_redaction_enabled: bool | None = None
     content_capture_enabled: bool | None = None
@@ -505,18 +480,18 @@ async def update_settings_convenience(
 
 @router.get("/v1/auth/me/export")
 async def export_my_data(
-    authorization: str | None = Header(default=None),
+    ctx: auth_mod.ApiKeyContext = Depends(
+        require_scope(auth_mod.SCOPE_AUDIT_READ)
+    ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """GDPR Article 20 data portability. Export all user data."""
-    user_id = await _resolve_session_user(authorization, session)
-
     user = await session.execute(
         text(
             "SELECT email, display_name, created_at, last_login_at, "
             "mfa_enabled FROM users WHERE id = :uid"
         ),
-        {"uid": user_id},
+        {"uid": ctx.user_id},
     )
     u = user.first()
 
@@ -526,7 +501,7 @@ async def export_my_data(
             "FROM project_members m JOIN projects p ON p.id = m.project_id "
             "WHERE m.user_id = :uid"
         ),
-        {"uid": user_id},
+        {"uid": ctx.user_id},
     )
 
     return {

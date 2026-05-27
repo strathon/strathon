@@ -5,7 +5,7 @@
 If you discover a security vulnerability in Strathon, please report it
 responsibly. **Do not open a public GitHub issue.**
 
-Email **strathon.team@gmail.com** with:
+Email **security@getstrathon.com** with:
 
 - A description of the vulnerability and its potential impact
 - Steps to reproduce or a proof of concept
