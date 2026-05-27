@@ -223,7 +223,7 @@ Example Kubernetes pod spec:
 spec:
   containers:
   - name: receiver
-    image: strathon/receiver:latest
+    image: ghcr.io/strathon/strathon:latest
     ports:
     - containerPort: 4318
 
