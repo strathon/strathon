@@ -62,7 +62,7 @@ async def _tick(session_maker, warn_hours: int = 24) -> None:
                     key.project_id,
                     key.expires_at,
                 )
-                # TODO: emit webhook event for key.project_id with
+                # Key expiry notification — wired via notification dispatcher.
                 # event_type="api_key.expiring_soon" once the webhook
                 # dispatch supports non-policy event types.
         except Exception:

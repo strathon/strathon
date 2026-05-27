@@ -293,9 +293,3 @@ receiver at Postgres directly, or run with a single receiver replica
 (advisory locks are still useful there as a guard against startup races).
 The same caveat applies to anything else in the codebase that uses
 session-scoped state on a Postgres connection.
-
-## Dashboard
-
-After `docker compose up`, open http://localhost:3000 for the operator dashboard.
-Register the first account, create policies, and monitor your agents.
-

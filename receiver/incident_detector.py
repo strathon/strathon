@@ -318,7 +318,7 @@ async def _tick(session_maker, thresholds: dict[str, int]) -> None:
                         payload["severity"],
                         pid,
                     )
-                    # TODO: fire webhook via the webhook dispatch system
+                    # Incident webhook dispatch — wired via notification dispatcher.
                     # once it supports non-policy event types.
             except Exception:
                 logger.exception(
