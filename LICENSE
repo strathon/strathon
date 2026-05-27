@@ -1,0 +1,18 @@
+Strathon is a multi-component project with components under different
+open-source licenses. The summary:
+
+  sdk/        Apache License 2.0   (see sdk/LICENSE)
+  receiver/   MIT License          (see receiver/LICENSE)
+  examples/   MIT License          (same terms as receiver)
+  docs/       MIT License
+  tests/      MIT License
+  db/         MIT License
+
+See LICENSING.md for the rationale behind the split.
+
+When in doubt about a specific file, the license that applies is the one
+of the LICENSE file in the nearest enclosing directory; if none, the
+component's LICENSE applies; if neither, the MIT terms in receiver/LICENSE
+apply.
+
+Copyright (c) 2026 Kavyansh Shakya

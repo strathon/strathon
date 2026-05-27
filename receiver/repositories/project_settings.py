@@ -1,0 +1,309 @@
+"""Project settings repository — loads per-project knobs.
+
+Today this is single-purpose: ``load_redaction_config`` reads the
+PII redaction columns from project_settings and returns the
+``RedactionConfig`` shape the redactor wants.
+
+Why a dedicated module
+======================
+
+The redactor module (``receiver/redaction.py``) is intentionally pure:
+no DB, no SQLAlchemy, no FastAPI — just regex over strings. The
+ingest path (``api/traces.py``) needs to bridge "row from DB" to
+"redactor-ready config." That bridging belongs neither in the redactor
+(it would import DB) nor in the ingest handler (every endpoint that
+ever wants redaction would re-implement the conversion). Hence this
+module.
+
+Compilation of operator-provided regexes happens here. The DB stores
+patterns as plain strings; we compile to ``re.Pattern`` once per
+config-load and pass the compiled tuple into the redactor. A bad regex
+(syntax error in the operator's string) logs and is skipped — the
+ingest path must never fail because of a misconfigured pattern.
+
+Caching
+=======
+
+For v1 we don't cache. Each ingest request loads the row fresh. The
+project_settings table has one row per project and the typical
+read-volume is modest; the simplicity is worth the cost. If profiling
+later shows this is a hot path, the right cache layer is at the
+SQLAlchemy session-bind level with a short TTL, not an in-process
+LRU (which gets stale on multi-receiver deploys).
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+try:
+    import re2 as _re_engine
+except ImportError:
+    import re as _re_engine  # type: ignore[assignment]
+from typing import Any, Tuple
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from models.core import ProjectSettings
+from redaction import RedactionConfig, validate_key_actions, validate_strategy
+
+logger = logging.getLogger("strathon.receiver.repositories.project_settings")
+
+
+def _compile_custom_patterns(
+    raw_patterns: Any,
+) -> Tuple[Tuple[str, Any], ...]:
+    """Compile a list of operator-supplied regex strings.
+
+    The DB column ``pii_redaction_patterns`` is JSONB. Two shapes are
+    accepted:
+
+      [{"name": "ENTITY_NAME", "regex": "..."}]   — preferred
+      ["...", "...", ...]                          — legacy / shorthand;
+                                                     auto-named CUSTOM_{N}
+
+    Anything that fails to compile is logged and skipped. We never
+    raise from here: a typo in one pattern must not block ingest for
+    the whole project.
+    """
+    if not raw_patterns:
+        return ()
+
+    if not isinstance(raw_patterns, list):
+        logger.warning(
+            "pii_redaction_patterns is not a list (got %r); ignoring",
+            type(raw_patterns).__name__,
+        )
+        return ()
+
+    compiled: list[Tuple[str, Any]] = []
+    for i, entry in enumerate(raw_patterns):
+        name: str
+        regex: str
+        if isinstance(entry, dict):
+            name = str(entry.get("name") or f"CUSTOM_{i + 1}")
+            regex = str(entry.get("regex") or "")
+        elif isinstance(entry, str):
+            name = f"CUSTOM_{i + 1}"
+            regex = entry
+        else:
+            logger.warning(
+                "pii_redaction_patterns entry %d has unexpected type %r; skipping",
+                i, type(entry).__name__,
+            )
+            continue
+
+        if not regex:
+            continue
+        try:
+            compiled.append((name, _re_engine.compile(regex)))
+        except _re_engine.error as exc:
+            logger.warning(
+                "pii_redaction_patterns entry %d (name=%r) has invalid regex: %s",
+                i, name, exc,
+            )
+
+    return tuple(compiled)
+
+
+async def load_redaction_config(
+    session: AsyncSession,
+    project_id: UUID,
+) -> RedactionConfig:
+    """Load the redaction config for one project.
+
+    If the project has no settings row (shouldn't happen — migration
+    001 inserts one per project — but defensive) or redaction is
+    disabled, returns the passthrough config so the redactor short-
+    circuits to a no-op.
+
+    Validation of the strategy / key_actions JSON happens here. A
+    malformed config (unknown action name) logs and falls back to the
+    safe default of "redact" for every entity / drops the bad key
+    rule. Same principle as bad regex: ingest never fails on
+    misconfigured redaction settings.
+    """
+    row = await session.scalar(
+        select(ProjectSettings).where(ProjectSettings.project_id == project_id)
+    )
+    if row is None or not row.pii_redaction_enabled:
+        return RedactionConfig.disabled()
+
+    strategy = row.pii_redaction_strategy or {}
+    key_actions = row.pii_redaction_key_actions or {}
+    allowlist = row.pii_attribute_allowlist or []
+
+    # Defensive: the DB columns are JSONB so they could contain
+    # anything. Normalize to the shapes the redactor expects.
+    if not isinstance(strategy, dict):
+        logger.warning(
+            "project %s pii_redaction_strategy is not a dict; using {}",
+            project_id,
+        )
+        strategy = {}
+    if not isinstance(key_actions, dict):
+        logger.warning(
+            "project %s pii_redaction_key_actions is not a dict; using {}",
+            project_id,
+        )
+        key_actions = {}
+    if not isinstance(allowlist, list):
+        logger.warning(
+            "project %s pii_attribute_allowlist is not a list; using []",
+            project_id,
+        )
+        allowlist = []
+
+    # Reject bad action names but don't fail; drop the bad entries
+    # and continue with the good ones. Operators see the warning in
+    # logs and can fix at their leisure.
+    try:
+        validate_strategy(strategy)
+    except ValueError as exc:
+        logger.warning("project %s strategy invalid: %s; clearing", project_id, exc)
+        strategy = {}
+    try:
+        validate_key_actions(key_actions)
+    except ValueError as exc:
+        logger.warning(
+            "project %s key_actions invalid: %s; clearing", project_id, exc,
+        )
+        key_actions = {}
+
+    custom_patterns = _compile_custom_patterns(row.pii_redaction_patterns)
+
+    return RedactionConfig(
+        enabled=True,
+        strategy=strategy,
+        key_actions=key_actions,
+        allowlist=tuple(str(x) for x in allowlist),
+        custom_patterns=custom_patterns,
+        credential_scan_enabled=os.environ.get(
+            "STRATHON_CREDENTIAL_SCAN_ENABLED", "true"
+        ).lower() in ("1", "true", "yes"),
+    )
+
+
+# ---- Intervention default action ----------------------------------------
+#
+# The ``project_settings.intervention_default_action`` column was added
+# in migration 001 as a forward-looking slot constrained to
+# ``'allow' | 'block'`` with a default of ``'allow'``. It governs what
+# happens at the SDK's tool boundary when no policy matches the call.
+# ``'allow'`` (the historical default) is the permissive posture and
+# matches the pre-allow-list behavior. ``'block'`` flips the project
+# into allow-list mode: a call must be explicitly admitted by an
+# ``action="allow"`` policy or it is denied with a synthetic block
+# decision carrying ``policy_id=None``.
+
+VALID_INTERVENTION_DEFAULT_ACTIONS = {"allow", "block"}
+
+
+async def load_intervention_default_action(
+    session: AsyncSession, project_id: UUID,
+) -> str:
+    """Read the project's intervention default action.
+
+    Returns ``"allow"`` or ``"block"``. Falls back to ``"allow"`` when
+    no settings row exists yet (preserves the permissive historical
+    behavior) and when the stored value somehow violates the CHECK
+    constraint (defensive: the column is constrained at the DB level,
+    but we treat any unrecognized value as ``"allow"`` to avoid
+    silently denying every call in a project on a schema mismatch).
+    """
+    stmt = select(ProjectSettings.intervention_default_action).where(
+        ProjectSettings.project_id == project_id,
+    )
+    result = await session.execute(stmt)
+    value = result.scalar_one_or_none()
+    if value not in VALID_INTERVENTION_DEFAULT_ACTIONS:
+        return "allow"
+    return value
+
+
+async def update_intervention_default_action(
+    session: AsyncSession, project_id: UUID, new_value: str,
+) -> str:
+    """Set the project's intervention default action.
+
+    Raises ``ValueError`` on an unrecognized value (caller maps to 400).
+    Upserts the settings row when missing so a fresh project that has
+    never had a settings row written still gets the value persisted.
+    Returns the value that was stored.
+    """
+    if new_value not in VALID_INTERVENTION_DEFAULT_ACTIONS:
+        raise ValueError(
+            f"intervention_default_action must be one of "
+            f"{sorted(VALID_INTERVENTION_DEFAULT_ACTIONS)}, got {new_value!r}"
+        )
+
+    # Postgres-specific upsert. The migration-001 seed already creates a
+    # row for the seeded default project, but a project_settings row
+    # might not exist for projects added by future tooling, so we
+    # ON CONFLICT to handle either path.
+    from sqlalchemy import text
+    await session.execute(
+        text(
+            "INSERT INTO project_settings (project_id, intervention_default_action) "
+            "VALUES (:pid, :val) "
+            "ON CONFLICT (project_id) DO UPDATE "
+            "SET intervention_default_action = EXCLUDED.intervention_default_action"
+        ),
+        {"pid": str(project_id), "val": new_value},
+    )
+    return new_value
+
+
+# ---- Retention settings ------------------------------------------------------
+
+MIN_RETENTION_DAYS: int = 1
+MAX_RETENTION_DAYS: int = 3650  # 10 years
+
+
+async def load_trace_retention_days(
+    session: AsyncSession, project_id: UUID,
+) -> int:
+    """Read the project's trace retention days. Default 30."""
+    stmt = select(ProjectSettings.trace_retention_days).where(
+        ProjectSettings.project_id == project_id,
+    )
+    result = await session.execute(stmt)
+    value = result.scalar_one_or_none()
+    return value if value is not None else 30
+
+
+async def update_trace_retention_days(
+    session: AsyncSession, project_id: UUID, days: int,
+) -> int:
+    """Set the project's trace retention days.
+
+    Raises ValueError if out of range [1, 3650].
+    """
+    if not isinstance(days, int) or days < MIN_RETENTION_DAYS or days > MAX_RETENTION_DAYS:
+        raise ValueError(
+            f"trace_retention_days must be between "
+            f"{MIN_RETENTION_DAYS} and {MAX_RETENTION_DAYS}, got {days!r}"
+        )
+    from sqlalchemy import text
+    await session.execute(
+        text(
+            "INSERT INTO project_settings (project_id, trace_retention_days) "
+            "VALUES (:pid, :val) "
+            "ON CONFLICT (project_id) DO UPDATE "
+            "SET trace_retention_days = EXCLUDED.trace_retention_days"
+        ),
+        {"pid": str(project_id), "val": days},
+    )
+    return days
+
+
+__all__ = [
+    "VALID_INTERVENTION_DEFAULT_ACTIONS",
+    "load_intervention_default_action",
+    "load_redaction_config",
+    "load_trace_retention_days",
+    "update_intervention_default_action",
+    "update_trace_retention_days",
+]

@@ -1,0 +1,24 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build artifacts
+*.egg-info/
+build/
+dist/
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+
+# Test data we never want baked in
+tests/
+test_*.py
+
+# OS noise
+.DS_Store

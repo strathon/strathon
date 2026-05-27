@@ -1,0 +1,75 @@
+[project]
+name = "strathon-receiver"
+version = "0.0.1"
+description = "Strathon OTLP receiver and intervention API"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Kavyansh Shakya" }]
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    # psycopg3 is the single driver — used by both Alembic (sync) and the
+    # SQLAlchemy 2.0 async engine.
+    "psycopg[binary]>=3.2.0",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "alembic>=1.14.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "opentelemetry-proto>=1.29.0",
+    "opentelemetry-api>=1.29.0",
+    "opentelemetry-sdk>=1.29.0",
+    # Pin protobuf>=6.31.1 for CVE-2025-4565 (pure-Python DoS via
+    # recursive protobuf parsing). opentelemetry-proto pulls protobuf
+    # but doesn't floor the version high enough.
+    "protobuf>=6.31.1",
+    # google-re2: linear-time regex engine (no backtracking). Prevents
+    # ReDoS via crafted span attribute values in PII redaction patterns.
+    "google-re2>=1.1",
+    # pyotp: RFC 6238 TOTP implementation for MFA.
+    "pyotp>=2.9.0",
+    "httpx>=0.28.0",
+    "python-multipart>=0.0.18",
+    "authlib>=1.4.0",
+    "cel-python>=0.4.0",
+    "prometheus-client>=0.21.0",
+    # RBAC: password hashing with Argon2id (OWASP recommended).
+    # argon2-cffi wraps the reference C implementation.
+    "argon2-cffi>=25.1.0",
+    # cryptography: Fernet (AES-256-CBC + HMAC) for column-level
+    # encryption of sensitive data (TOTP secrets, webhook secrets).
+    "cryptography>=44.0",
+    # Webhook delivery infrastructure (commit C: reliable alert webhooks).
+    # dramatiq is the queue layer; redis is its broker. standardwebhooks is
+    # the spec library for HMAC-SHA256 signing per the Standard Webhooks
+    # specification (https://github.com/standard-webhooks/standard-webhooks)
+    # adopted by OpenAI, Anthropic, Google Gemini, Svix, Kong, Supabase.
+    "dramatiq[redis]>=1.17.0",
+    "standardwebhooks>=1.0.0",
+]
+
+[project.urls]
+Repository = "https://github.com/strathon/strathon"
+Documentation = "https://getstrathon.com"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
