@@ -1,0 +1,17 @@
+.git
+.github
+.env
+*.pyc
+__pycache__
+node_modules
+dashboard/node_modules
+dashboard/.next
+.venv
+*.egg-info
+dist/
+build/
+benchmarks/
+tests/
+docs/
+*.md
+!README.md

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "strathon"
-version = "0.1.0"
-description = "Open-source observability and runtime control for AI agents. Framework-agnostic SDK."
+version = "1.0.1"
+description = "Open-source AI agent firewall. CEL policies, runtime enforcement, and compliance for LLM agents."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]

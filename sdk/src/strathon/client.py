@@ -119,7 +119,7 @@ class Client:
                 trace.set_tracer_provider(self._tracer_provider)
 
         # Named tracer for instrumentations and manual span emission
-        self._tracer = self._tracer_provider.get_tracer("strathon", "0.1.0")
+        self._tracer = self._tracer_provider.get_tracer("strathon", "1.0.1")
 
         # Runtime intervention: optional policy enforcer
         self._policy_enforcer = None
