@@ -12,12 +12,20 @@ interface User {
   force_password_change: boolean;
 }
 
-interface UserCtx { user: User | null; loading: boolean; refetch: () => void; receiverVersion: { version: string } | null; mode: "self-hosted" | "cloud"; }
+export interface ProjectMembership {
+  id: string;
+  name: string;
+  slug: string;
+  role: string;
+}
 
-const UserContext = createContext<UserCtx>({ user: null, loading: true, refetch: () => {}, receiverVersion: null, mode: "self-hosted" });
+interface UserCtx { user: User | null; projects: ProjectMembership[]; loading: boolean; refetch: () => void; receiverVersion: { version: string } | null; mode: "self-hosted" | "cloud"; }
+
+const UserContext = createContext<UserCtx>({ user: null, projects: [], loading: true, refetch: () => {}, receiverVersion: null, mode: "self-hosted" });
 
 export function UserProvider({ children, mode = "self-hosted" }: { children: ReactNode; mode?: "self-hosted" | "cloud" }) {
   const [user, setUser] = useState<User | null>(null);
+  const [projects, setProjects] = useState<ProjectMembership[]>([]);
   const [loading, setLoading] = useState(true);
   const [receiverVersion, setReceiverVersion] = useState<{ version: string } | null>(null);
 
@@ -25,8 +33,10 @@ export function UserProvider({ children, mode = "self-hosted" }: { children: Rea
     try {
       const data = await api.get("/api/auth/me");
       setUser(data?.user || null);
+      setProjects(Array.isArray(data?.projects) ? data.projects : []);
     } catch {
       setUser(null);
+      setProjects([]);
     } finally {
       setLoading(false);
     }
@@ -38,7 +48,7 @@ export function UserProvider({ children, mode = "self-hosted" }: { children: Rea
 
   useEffect(() => { refetch(); }, []);
 
-  return <UserContext.Provider value={{ user, loading, refetch, receiverVersion, mode }}>{children}</UserContext.Provider>;
+  return <UserContext.Provider value={{ user, projects, loading, refetch, receiverVersion, mode }}>{children}</UserContext.Provider>;
 }
 
 export function useUser() { return useContext(UserContext); }

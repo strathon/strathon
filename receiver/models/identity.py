@@ -18,7 +18,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import TIMESTAMP, BigInteger, Boolean, CheckConstraint, ForeignKey, Index, Text, func, text
+from sqlalchemy import TIMESTAMP, BigInteger, Boolean, CheckConstraint, ForeignKey, Index, Integer, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -61,7 +61,16 @@ class User(Base):
     )
     backup_codes: Mapped[Optional[list[str]]] = mapped_column(
         ARRAY(Text), nullable=True,
-        comment="SHA-256 hashed single-use backup codes.",
+        comment="SHA-256 hashed single-use backup codes. Null when MFA not set up.",
+    )
+    failed_login_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0"),
+    )
+    locked_until: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True),
+    )
+    force_password_change: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"),
     )
 
     __table_args__ = (
@@ -145,4 +154,34 @@ class PasswordResetToken(Base):
     __table_args__ = (
         Index("idx_password_reset_tokens_user", "user_id"),
         Index("idx_password_reset_tokens_hash", "token_hash"),
+    )
+
+
+class PendingInvitation(Base):
+    """An invite to join a project, consumed when the invited email registers."""
+
+    __tablename__ = "pending_invitations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'member'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "email", "project_id",
+            name="pending_invitations_email_project_id_key",
+        ),
     )

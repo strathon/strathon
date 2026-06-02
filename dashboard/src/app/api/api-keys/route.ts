@@ -1,5 +1,7 @@
-import { proxyGet, proxyMutate, proxyToReceiver } from "@/lib/api-proxy";
-export async function GET(req: Request) { return proxyGet("/v1/api_keys", req); }
+import { proxyGetMapped, proxyMutate, proxyToReceiver } from "@/lib/api-proxy";
+import { mapApiKeys } from "@/lib/transforms";
+
+export async function GET(req: Request) { return proxyGetMapped("/v1/api_keys", req, mapApiKeys); }
 export async function POST(req: Request) { return proxyMutate("/v1/api_keys", req); }
 export async function DELETE(req: Request) {
   const url = new URL(req.url);

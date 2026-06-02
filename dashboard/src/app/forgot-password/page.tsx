@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { StrathonLogo } from "@/components/logo";
 import { api } from "@/lib/api-client";
@@ -12,6 +12,14 @@ export default function ForgotPasswordPage() {
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
   const [loading, setLoading] = useState(false);
+  // null = unknown (still loading capabilities)
+  const [smtpEnabled, setSmtpEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    api.get("/api/auth/capabilities")
+      .then((c) => setSmtpEnabled(!!c?.smtp_enabled))
+      .catch(() => setSmtpEnabled(null));
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -25,9 +33,10 @@ export default function ForgotPasswordPage() {
       setSent(true);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Request failed";
-      if (msg.includes("not configured")) {
-        setError("Email not configured. Contact your admin.");
+      if (msg.toLowerCase().includes("not configured") || msg.includes("not available")) {
+        setSmtpEnabled(false);
       } else {
+        // Always show success to avoid leaking which emails exist.
         setSent(true);
       }
     } finally {
@@ -42,7 +51,20 @@ export default function ForgotPasswordPage() {
           <div className="brand-mark" style={{ width: 36, height: 36 }}><StrathonLogo size={36} /></div>
           <span style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-0.02em" }}>Strathon</span>
         </div>
-        {sent ? (
+        {smtpEnabled === false ? (
+          <div>
+            <h1 className="t-h2" style={{ marginBottom: 6 }}>Ask an admin to reset it</h1>
+            <p className="t-sm text-secondary" style={{ marginBottom: 16 }}>
+              This instance doesn&apos;t have email sending configured, so self-service reset links aren&apos;t available.
+            </p>
+            <p className="t-sm text-secondary" style={{ marginBottom: 22 }}>
+              A project owner or admin can reset your password from <strong>Settings &rarr; Members</strong>. They&apos;ll give you a temporary password to sign in with, which you can change afterward.
+            </p>
+            <button className="btn primary" style={{ width: "100%" }} onClick={() => router.push("/login")}>
+              Back to sign in
+            </button>
+          </div>
+        ) : sent ? (
           <div>
             <h1 className="t-h2" style={{ marginBottom: 6 }}>Check your email</h1>
             <p className="t-sm text-secondary" style={{ marginBottom: 22 }}>

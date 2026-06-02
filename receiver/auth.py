@@ -80,14 +80,14 @@ SCOPE_POLICIES_READ = "policies:read"
 SCOPE_POLICIES_WRITE = "policies:write"
 SCOPE_API_KEYS_READ = "api_keys:read"
 SCOPE_API_KEYS_WRITE = "api_keys:write"
-# Webhook signing-key management (commit C2). Operators with
+# Webhook signing-key management. Operators with
 # webhook_signing_keys:write can create new signing secrets and revoke
 # existing ones; the keystore is updated accordingly so that the next
 # delivery uses the new signing material. The :read scope is enough to
 # audit which keys exist without seeing any secret material.
 SCOPE_WEBHOOK_SIGNING_KEYS_READ = "webhook_signing_keys:read"
 SCOPE_WEBHOOK_SIGNING_KEYS_WRITE = "webhook_signing_keys:write"
-# Webhook delivery inspection + replay (commit C3). The :read scope is
+# Webhook delivery inspection + replay. The :read scope is
 # enough to list and inspect deliveries (operator visibility). The
 # :write scope is needed for the replay action which re-enqueues a
 # previously-failed delivery and produces a fresh side-effect at the
@@ -112,7 +112,7 @@ SCOPE_BUDGETS_WRITE = "budgets:write"
 SCOPE_MODEL_PRICES_READ = "model_prices:read"
 SCOPE_MODEL_PRICES_WRITE = "model_prices:write"
 # Project settings — currently exposes the intervention default action
-# (allow-list mode toggle); future commits will likely surface other
+# (allow-list mode toggle); a future release will likely surface other
 # per-project knobs here too. Kept distinct from policies:* so an
 # operator can delegate policy editing without exposing the toggle that
 # flips a project into allow-list mode.
@@ -122,7 +122,7 @@ SCOPE_PROJECT_SETTINGS_WRITE = "project_settings:write"
 # write covers /v1/audit/streams (creating/managing webhook
 # destinations). admin is reserved for break-glass operations like
 # legal-hold release and partition admin; not currently used in
-# Stage 1 endpoints but the scope name is reserved.
+# Reserved scope but the scope name is reserved.
 SCOPE_AUDIT_READ = "audit:read"
 SCOPE_AUDIT_WRITE = "audit:write"
 SCOPE_AUDIT_ADMIN = "audit:admin"

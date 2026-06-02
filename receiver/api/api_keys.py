@@ -40,6 +40,7 @@ from audit.actions import (
 from database import get_db_session
 
 from schemas.responses import ApiKeyListResponse
+from schemas.api_keys import ApiKeyCreate, ApiKeyUpdate
 from ._deps import build_audit_context, coerce_project_id, require_scope
 
 
@@ -56,28 +57,26 @@ async def list_api_keys_endpoint(
     ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    pid = coerce_project_id(request, project_id)
+    pid = coerce_project_id(request, project_id, ctx)
     keys = await auth_repo.list_api_keys(session, pid, include_revoked=include_revoked)
     return {"api_keys": [k.model_dump(mode="json") for k in keys]}
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_api_key_endpoint(
-    payload: dict[str, Any],
+    payload: ApiKeyCreate,
     request: Request,
     ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_API_KEYS_WRITE)
     ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    name = payload.get("name")
-    if not name:
-        raise HTTPException(status_code=400, detail="missing required field: name")
+    name = payload.name
 
     # Validate scopes if the caller provided them. Unknown scope strings
     # silently granting nothing would be hostile to debug; reject with a
     # clear message listing what's valid.
-    requested_scopes = payload.get("scopes")
+    requested_scopes = payload.scopes
     if requested_scopes is not None:
         if not isinstance(requested_scopes, list):
             raise HTTPException(
@@ -92,11 +91,11 @@ async def create_api_key_endpoint(
                 detail=str(exc),
             )
 
-    pid = coerce_project_id(request, payload.get("project_id"))
+    pid = coerce_project_id(request, None, ctx)
     response = await auth_repo.create_api_key(
         session, pid, name=name, scopes=requested_scopes,
-        expires_at=payload.get("expires_at"),
-        allowed_ips=payload.get("allowed_ips"),
+        expires_at=payload.expires_at,
+        allowed_ips=payload.allowed_ips,
     )
     api_key_dict = response.api_key.model_dump(mode="json")
     await audit_repo.emit(
@@ -181,7 +180,7 @@ async def rotate_api_key_endpoint(
 @router.patch("/{key_id}")
 async def update_api_key_endpoint(
     key_id: str,
-    payload: dict[str, Any],
+    payload: ApiKeyUpdate,
     request: Request,
     ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_API_KEYS_WRITE)
@@ -194,8 +193,8 @@ async def update_api_key_endpoint(
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid key_id")
 
-    name = payload.get("name")
-    expires_at = payload.get("expires_at")
+    name = payload.name
+    expires_at = payload.expires_at
 
     if name is None and expires_at is None:
         raise HTTPException(

@@ -344,7 +344,9 @@ def test_create_api_key_rejects_non_list_scopes(client):
             "scopes": "traces:write",
         },
     )
-    assert resp.status_code == 400
+    # scopes is typed list[str] on the request schema, so a bare string is
+    # rejected at the validation layer with 422 (Unprocessable Entity).
+    assert resp.status_code == 422
 
 
 # ---- Auth missing vs auth lacking scope ---------------------------------
@@ -362,3 +364,46 @@ def test_invalid_token_returns_401(client):
         headers={"Authorization": "Bearer stra_not_a_real_key_at_all"},
     )
     assert resp.status_code == 401
+
+
+# ---- /v1/policies/generate auth (regression for launch-hardening) -------
+#
+# This endpoint calls a paid LLM API using the server's STRATHON_AI_API_KEY.
+# It was previously UNAUTHENTICATED, which is a credit-burn / open-LLM-proxy
+# vector. These tests lock in that it now requires policies:write.
+
+
+def test_policies_generate_unauthenticated_returns_401(client):
+    """No Authorization header must be rejected before any LLM call."""
+    resp = client.post(
+        "/v1/policies/generate",
+        json={"description": "block all outbound email"},
+    )
+    assert resp.status_code == 401
+
+
+def test_policies_generate_with_read_only_returns_403(client):
+    """policies:read is not enough; generation is a write-class action."""
+    key = _create_key(client, f"reader-{uuid.uuid4().hex[:8]}", ["policies:read"])
+    resp = client.post(
+        "/v1/policies/generate",
+        headers={"Authorization": f"Bearer {key}"},
+        json={"description": "block all outbound email"},
+    )
+    assert resp.status_code == 403
+    assert "policies:write" in resp.json()["detail"]
+
+
+def test_policies_generate_with_write_scope_passes_auth(client):
+    """With policies:write the request clears auth and reaches the endpoint.
+    Without STRATHON_AI_API_KEY configured it returns 400 (not 401/403),
+    which proves authorization succeeded."""
+    key = _create_key(client, f"writer-{uuid.uuid4().hex[:8]}", ["policies:write"])
+    resp = client.post(
+        "/v1/policies/generate",
+        headers={"Authorization": f"Bearer {key}"},
+        json={"description": "block all outbound email"},
+    )
+    # 400 = passed auth, failed because no AI key is set in the test env.
+    # (If a key were configured it would be 200/502; never 401/403 here.)
+    assert resp.status_code not in (401, 403)

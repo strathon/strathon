@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import auth as auth_mod
 from database import get_db_session
 from models import ApiKey, Project, ProjectSettings
+from repositories import members as members_repo
 
 from schemas.responses import ProjectResponse, ProjectListResponse
 from ._deps import require_scope
@@ -67,9 +68,27 @@ async def create_project(
             ),
         )
 
-    # Check uniqueness.
+    # Resolve the organization this project belongs to: the same org as the
+    # caller's current project. On self-host that is always the single
+    # default organization. (Cloud will resolve org from the authenticated
+    # organization context when org-scoped auth lands.)
+    org_row = await session.execute(
+        select(Project.org_id).where(Project.id == ctx.project_id)
+    )
+    org_id = org_row.scalar_one_or_none()
+    if org_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="could not resolve organization for the calling project",
+        )
+
+    # Check uniqueness within the organization (slug is unique per-org).
     existing = await session.execute(
-        select(Project.id).where(Project.slug == body.slug)
+        select(Project.id).where(
+            Project.slug == body.slug,
+            Project.org_id == org_id,
+            Project.deleted_at.is_(None),
+        )
     )
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(
@@ -78,7 +97,7 @@ async def create_project(
         )
 
     # Create project.
-    project = Project(name=body.name, slug=body.slug)
+    project = Project(name=body.name, slug=body.slug, org_id=org_id)
     session.add(project)
     await session.flush()
     await session.refresh(project)
@@ -99,6 +118,17 @@ async def create_project(
     )
     session.add(api_key)
     await session.flush()
+
+    # If a human (session auth) created this project, enroll them as its
+    # owner so it appears in their membership list / project switcher.
+    # API-key callers have no user_id and are skipped.
+    if ctx.user_id is not None:
+        await members_repo.add_member(
+            session,
+            project_id=project.id,
+            user_id=ctx.user_id,
+            role="owner",
+        )
 
     return {
         "id": str(project.id),
@@ -212,7 +242,19 @@ async def delete_project(
     session: AsyncSession = Depends(get_db_session),
 ):
     """Soft-delete a project."""
-    from sqlalchemy import func
+    from sqlalchemy import func, select
+    # Refuse to delete the last remaining project — an instance with zero
+    # projects has no usable context. The caller must always have at least one.
+    remaining = await session.execute(
+        select(func.count())
+        .select_from(Project)
+        .where(Project.deleted_at.is_(None))
+    )
+    if (remaining.scalar() or 0) <= 1:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete the last project. Create another project first.",
+        )
     result = await session.execute(
         update(Project)
         .where(Project.slug == slug, Project.deleted_at.is_(None))

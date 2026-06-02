@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Icons } from "@/components/icons";
 import { StrathonLogo } from "@/components/logo";
 import { api } from "@/lib/api-client";
+import { setTheme, getStoredTheme, resolveTheme } from "@/lib/theme";
 import { validateEmail, validatePassword } from "@/lib/validation";
 
 interface Capabilities {
@@ -16,6 +17,13 @@ interface Capabilities {
 
 export default function LoginPage() {
   const router = useRouter();
+  const [themeMode, setThemeMode] = useState<"light" | "dark">("dark");
+  useEffect(() => { setThemeMode(resolveTheme(getStoredTheme())); }, []);
+  function toggleTheme() {
+    const next = themeMode === "dark" ? "light" : "dark";
+    setTheme(next);
+    setThemeMode(next);
+  }
   const searchParams = useSearchParams();
   const expired = searchParams.get("expired") === "true";
   const resetDone = searchParams.get("reset") === "true";
@@ -111,6 +119,10 @@ export default function LoginPage() {
 
   return (
     <div className="login-screen">
+      <button className="btn icon ghost" onClick={toggleTheme} aria-label="Toggle theme"
+        style={{ position: "absolute", top: 20, right: 20, zIndex: 2 }}>
+        {themeMode === "dark" ? <Icons.Sun size={16} /> : <Icons.Moon size={16} />}
+      </button>
       <div className="login-card">
         <div className="login-mark">
           <div className="brand-mark" style={{ width: 36, height: 36 }}>
@@ -130,11 +142,7 @@ export default function LoginPage() {
             <div className="form-row">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                 <label className="form-label">Password</label>
-                {caps?.smtp_enabled ? (
-                  <a href="/forgot-password" className="t-sm" style={{ color: "var(--accent)" }}>Forgot?</a>
-                ) : (
-                  <span className="t-sm text-muted" title="Email not configured. Contact your admin.">Forgot?</span>
-                )}
+                <a href="/forgot-password" className="t-sm" style={{ color: "var(--accent)" }}>Forgot?</a>
               </div>
               <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
             </div>

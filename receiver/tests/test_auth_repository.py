@@ -195,7 +195,7 @@ async def test_list_scopes_to_project(session, isolated_project):
     other_id = uuid.uuid4()
     other_slug = f"test-other-{other_id.hex[:8]}"
     await session.execute(
-        insert(Project).values(id=other_id, name="Other", slug=other_slug)
+        insert(Project).values(org_id=__import__("uuid").UUID("00000000-0000-0000-0000-0000000000aa"), id=other_id, name="Other", slug=other_slug)
     )
     await session.execute(insert(ProjectSettings).values(project_id=other_id))
     await session.flush()

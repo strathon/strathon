@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { sessionCookieOptions } from "@/lib/cookies";
 
 const RECEIVER_URL = process.env.RECEIVER_URL || "http://localhost:4318";
 
@@ -16,13 +17,7 @@ export async function POST(request: Request) {
   if ((res.status === 201 || res.status === 200) && data.token) {
     const cookieStore = await cookies();
 
-    cookieStore.set("strathon-session", data.token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      path: "/",
-      maxAge: 86400,
-    });
+    cookieStore.set("strathon-session", data.token, sessionCookieOptions());
 
     // Fetch /auth/me for project_id.
     try {
@@ -33,13 +28,7 @@ export async function POST(request: Request) {
         const meData = await meRes.json();
         const projectId = meData?.user?.project_id;
         if (projectId) {
-          cookieStore.set("strathon-project-id", projectId, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "strict",
-            path: "/",
-            maxAge: 86400,
-          });
+          cookieStore.set("strathon-project-id", projectId, sessionCookieOptions());
         }
       }
     } catch {}

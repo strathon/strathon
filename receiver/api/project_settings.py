@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import Body, APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
@@ -63,8 +63,8 @@ async def get_project_settings_endpoint(
 
 @router.patch("")
 async def update_project_settings_endpoint(
-    payload: dict[str, Any],
-    request: Request,
+    payload: dict[str, Any] = Body(default={}),
+    request: Request = None,
     ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_PROJECT_SETTINGS_WRITE),
     ),

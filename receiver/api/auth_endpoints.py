@@ -78,11 +78,28 @@ def _validate_email(email: str) -> str:
 
 
 def _validate_password(password: str) -> None:
-    """Enforce minimum password requirements."""
+    """Enforce password requirements.
+
+    Matches the dashboard's client-side rules: at least 8 characters and a
+    combination of letters, numbers, and special characters. Server-side is
+    the source of truth — the client checks are only for fast feedback.
+    """
     if len(password) < _MIN_PASSWORD_LENGTH:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Password must be at least {_MIN_PASSWORD_LENGTH} characters",
+            detail=f"Password must be at least {_MIN_PASSWORD_LENGTH} characters long.",
+        )
+    if (
+        not re.search(r"[A-Za-z]", password)
+        or not re.search(r"[0-9]", password)
+        or not re.search(r"[^A-Za-z0-9]", password)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Please choose a secure password by combining letters, "
+                "numbers, and special characters."
+            ),
         )
 
 
@@ -164,6 +181,40 @@ async def register(
                 role="owner",
             )
             logger.info("first user %s auto-assigned as owner of default project", email)
+
+    # Consume any pending invitations addressed to this email. An owner or
+    # admin may have invited the user before they had an account; those
+    # invitations are stored by email and redeemed here at registration so
+    # the user lands in their project(s) immediately on first login.
+    from sqlalchemy import text as _text
+
+    invited = await session.execute(
+        _text(
+            "SELECT project_id, role FROM pending_invitations "
+            "WHERE LOWER(email) = LOWER(:email)"
+        ),
+        {"email": email},
+    )
+    for row in invited.mappings().all():
+        invited_role = row["role"]
+        # Legacy invitations stored the pre-RBAC 'member' role; map it to
+        # the current default 'operator' so the membership row is valid.
+        if invited_role == "member":
+            invited_role = "operator"
+        already = await members_repo.get_member(session, row["project_id"], user.id)
+        if already is None:
+            await members_repo.add_member(
+                session,
+                project_id=row["project_id"],
+                user_id=user.id,
+                role=invited_role,
+            )
+    await session.execute(
+        _text(
+            "DELETE FROM pending_invitations WHERE LOWER(email) = LOWER(:email)"
+        ),
+        {"email": email},
+    )
 
     # Create session token
     raw_token, _ = await sessions_repo.create_session(
@@ -635,11 +686,7 @@ async def confirm_password_reset(
     """Confirm a password reset with token + new password."""
     import repositories.password_reset as reset_repo
 
-    if len(body.new_password) < 8:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Password must be at least 8 characters",
-        )
+    _validate_password(body.new_password)
 
     user_id = await reset_repo.validate_and_consume_token(
         session, body.token,
@@ -664,24 +711,44 @@ async def admin_reset_password(
     authorization: str | None = Header(default=None),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Admin-only: reset a user's password. Returns temporary password.
+    """Admin-only: reset a user's password. Returns a temporary password.
 
-    Requires owner or admin role. No email needed.
+    Two authentication paths:
+      1. A logged-in owner/admin (session token) resetting another user.
+      2. Break-glass: a privileged API key with the projects:manage scope.
+         This is the recovery path when the sole owner is locked out — an
+         operator with server/env access can mint or use such a key via the
+         CLI to reset the owner's password without being able to log in.
     """
-    # Require session auth with admin role.
-    user_id = await _require_session_user(session, authorization)
-    # Get the admin's project context (first project they're in).
-    from sqlalchemy import text
-    result = await session.execute(
-        text("SELECT project_id, role FROM project_members WHERE user_id = :uid LIMIT 1"),
-        {"uid": user_id},
-    )
-    row = result.mappings().first()
-    if row is None or row["role"] not in ("owner", "admin"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only owners and admins can reset other users' passwords",
+    token = (authorization or "")[7:].strip() if (authorization or "").lower().startswith("bearer ") else ""
+
+    if token.startswith("stra_"):
+        # API-key break-glass path: require projects:manage (a high-privilege,
+        # out-of-band credential).
+        import auth as auth_mod
+        try:
+            ctx = await auth_mod.resolve_api_key(session, authorization, None)
+        except HTTPException:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+        if auth_mod.SCOPE_PROJECTS_MANAGE not in ctx.scopes:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="API key must have the projects:manage scope to reset passwords",
+            )
+    else:
+        # Session path: require owner/admin role.
+        user_id = await _require_session_user(session, authorization)
+        from sqlalchemy import text
+        result = await session.execute(
+            text("SELECT project_id, role FROM project_members WHERE user_id = :uid LIMIT 1"),
+            {"uid": user_id},
         )
+        row = result.mappings().first()
+        if row is None or row["role"] not in ("owner", "admin"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only owners and admins can reset other users' passwords",
+            )
 
     import repositories.password_reset as reset_repo
     target_user = await reset_repo.find_user_by_email(session, body.email)

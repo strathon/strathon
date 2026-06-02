@@ -5,10 +5,18 @@ import { useRouter } from "next/navigation";
 import { Icons } from "@/components/icons";
 import { StrathonLogo } from "@/components/logo";
 import { api } from "@/lib/api-client";
-import { validateEmail, validatePassword } from "@/lib/validation";
+import { setTheme, getStoredTheme, resolveTheme } from "@/lib/theme";
+import { validateEmail, validatePassword, passwordRules } from "@/lib/validation";
 
 export default function RegisterPage() {
   const router = useRouter();
+  const [themeMode, setThemeMode] = useState<"light" | "dark">("dark");
+  useEffect(() => { setThemeMode(resolveTheme(getStoredTheme())); }, []);
+  function toggleTheme() {
+    const next = themeMode === "dark" ? "light" : "dark";
+    setTheme(next);
+    setThemeMode(next);
+  }
   const [capsLoaded, setCapsLoaded] = useState(false);
 
   useEffect(() => {
@@ -51,6 +59,10 @@ export default function RegisterPage() {
 
   return (
     <div className="login-screen">
+      <button className="btn icon ghost" onClick={toggleTheme} aria-label="Toggle theme"
+        style={{ position: "absolute", top: 20, right: 20, zIndex: 2 }}>
+        {themeMode === "dark" ? <Icons.Sun size={16} /> : <Icons.Moon size={16} />}
+      </button>
       <div className="login-card">
         <div className="login-mark">
           <div className="brand-mark" style={{ width: 36, height: 36 }}><StrathonLogo size={36} /></div>
@@ -69,7 +81,16 @@ export default function RegisterPage() {
           </div>
           <div className="form-row">
             <label className="form-label">Password</label>
-            <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="10+ characters" autoComplete="new-password" />
+            <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 8 characters" autoComplete="new-password" />
+            {password.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px", marginTop: 8 }}>
+                {passwordRules(password).map((r) => (
+                  <span key={r.label} className="t-sm" style={{ display: "inline-flex", alignItems: "center", gap: 5, color: r.met ? "var(--success)" : "var(--text-muted)" }}>
+                    <Icons.Check size={12} style={{ opacity: r.met ? 1 : 0.35 }} /> {r.label}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
           <div className="form-row">
             <label className="form-label">Confirm password</label>

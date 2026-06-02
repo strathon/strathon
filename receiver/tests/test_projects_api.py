@@ -146,3 +146,28 @@ def test_requires_projects_manage_scope(client):
         headers={"Authorization": f"Bearer {key}"},
     )
     assert resp.status_code == 403
+
+
+def test_delete_non_last_project_succeeds(client):
+    h = {"Authorization": f"Bearer {DEV_KEY}"}
+    slug = f"del-ok-{uuid.uuid4().hex[:6]}"
+    r = client.post("/v1/projects", headers=h, json={"name": "Del OK", "slug": slug})
+    assert r.status_code == 201
+    # At least the default project plus this one exist, so deleting this is allowed.
+    r = client.delete(f"/v1/projects/{slug}", headers=h)
+    assert r.status_code == 204
+
+
+def test_cannot_delete_last_project(client):
+    h = {"Authorization": f"Bearer {DEV_KEY}"}
+    # Soft-delete every project except one, then assert the final delete is blocked.
+    active = [p["slug"] for p in client.get("/v1/projects", headers=h).json()["data"]
+              if not p.get("deleted_at")]
+    for s in active[1:]:
+        client.delete(f"/v1/projects/{s}", headers=h)
+    remaining = [p["slug"] for p in client.get("/v1/projects", headers=h).json()["data"]
+                 if not p.get("deleted_at")]
+    assert len(remaining) == 1
+    r = client.delete(f"/v1/projects/{remaining[0]}", headers=h)
+    assert r.status_code == 409
+    assert "last project" in r.json()["detail"].lower()

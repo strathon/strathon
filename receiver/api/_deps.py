@@ -152,12 +152,24 @@ def require_scope(scope: str):
     return _checker
 
 
-def coerce_project_id(request: Request, value: str | None) -> UUID:
-    """For v0 we resolve everything to the default project.
+def coerce_project_id(
+    request: Request,
+    value: str | None,
+    ctx: "auth.ApiKeyContext | None" = None,
+) -> UUID:
+    """Resolve the project context for a request.
 
-    Once per-API-key project resolution lands, this helper can be deleted
-    in favor of pulling the project_id off the ApiKeyContext directly.
+    When an authenticated context is supplied, its project_id is
+    authoritative: for session auth it is the X-Project-Id the user selected,
+    already validated against their membership; for API-key auth it is the
+    key's own project. This prevents an API key from reaching another
+    project by spoofing a header.
+
+    Falls back to an explicit value, then the app default, for callers that
+    pre-date context threading.
     """
+    if ctx is not None and ctx.project_id is not None:
+        return ctx.project_id
     if value:
         try:
             return UUID(value)
@@ -213,7 +225,7 @@ def build_audit_context(
         request_id = _uuid.uuid4()
 
     return EmitContext(
-        actor_type="user" if ctx.auth_method == "session" else "service_account",
+        actor_type="human" if ctx.auth_method == "session" else "service_account",
         actor_id=str(ctx.user_id or ctx.key_id),
         actor_display=ctx.key_prefix,
         project_id=ctx.project_id,

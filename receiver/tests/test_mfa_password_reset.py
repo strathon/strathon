@@ -160,10 +160,44 @@ def test_reset_confirm_rejects_short_password(client):
 
 
 def test_admin_reset_requires_session_auth(client):
-    """Admin reset with API key is rejected."""
+    """Admin reset rejects an API key that lacks the projects:manage scope.
+
+    The dev SDK key has only ingest scopes, so it must be refused. A
+    privileged projects:manage key is the intended break-glass path and is
+    covered by test_admin_reset_break_glass_with_privileged_key.
+    """
     resp = client.post(
         "/v1/auth/admin-reset-password",
         json={"email": "nobody@example.com"},
         headers={"Authorization": f"Bearer {DEV_KEY}"},
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 403
+
+
+def test_admin_reset_break_glass_with_privileged_key(client):
+    """A projects:manage API key can reset a user's password (owner-lockout
+    recovery), and the user can then log in with the temporary password."""
+    import uuid
+    # Mint a privileged key.
+    k = client.post(
+        "/v1/api_keys",
+        headers={"Authorization": f"Bearer {DEV_KEY}"},
+        json={"name": f"breakglass-{uuid.uuid4().hex[:6]}", "scopes": ["projects:manage"]},
+    )
+    assert k.status_code in (200, 201), k.text
+    admin_key = k.json()["key"]
+
+    email = f"lockout_{uuid.uuid4().hex[:8]}@example.com"
+    client.post("/v1/auth/register", json={"email": email, "password": "OldPass123!"})
+
+    resp = client.post(
+        "/v1/auth/admin-reset-password",
+        json={"email": email},
+        headers={"Authorization": f"Bearer {admin_key}"},
+    )
+    assert resp.status_code == 200, resp.text
+    temp = resp.json()["temporary_password"]
+    assert temp
+
+    login = client.post("/v1/auth/login", json={"email": email, "password": temp})
+    assert login.status_code == 200, login.text

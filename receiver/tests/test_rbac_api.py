@@ -138,7 +138,7 @@ def test_register_duplicate_email_returns_409(client):
 
     r2 = client.post(
         "/v1/auth/register",
-        json={"email": email, "password": "different-password"},
+        json={"email": email, "password": "different-password-9"},
     )
     assert r2.status_code == 409
     _cleanup_user(email)
@@ -515,3 +515,80 @@ def test_login_rate_limiting(client):
     # At least one should be 429 (rate limited)
     assert 429 in responses, f"Expected 429 in responses but got: {set(responses)}"
     _cleanup_user(email)  # no-op but safe
+
+
+def test_creator_becomes_owner_of_new_project(client):
+    """A session user who creates a project is enrolled as its owner, so it
+    shows up in their membership list (and thus the dashboard switcher)."""
+    email = _unique_email()
+    reg = client.post(
+        "/v1/auth/register",
+        json={"email": email, "password": "Test1234!pass", "display_name": "Creator"},
+    )
+    assert reg.status_code == 201, reg.text
+    token = reg.json()["token"]
+    default_pid = _get_default_project_id(client)
+    _ensure_project_owner(email, default_pid)
+    try:
+        slug = f"created-{uuid.uuid4().hex[:8]}"
+        r = client.post(
+            "/v1/projects",
+            headers=_session_headers(token, default_pid),
+            json={"name": "Created By Session User", "slug": slug},
+        )
+        assert r.status_code == 201, r.text
+
+        # The new project must now appear in the creator's memberships as owner.
+        me = client.get("/v1/auth/me", headers=_auth(token)).json()
+        match = [p for p in me["projects"] if p["slug"] == slug]
+        assert len(match) == 1, f"new project not in memberships: {me['projects']}"
+        assert match[0]["role"] == "owner"
+    finally:
+        _cleanup_user(email)
+
+
+def test_budgets_are_isolated_per_project(client):
+    """A budget created in one project must not appear when the same user
+    views a different project. Guards against the X-Project-Id context being
+    ignored (everything resolving to the default project)."""
+    email = _unique_email()
+    reg = client.post(
+        "/v1/auth/register",
+        json={"email": email, "password": "Test1234!pass", "display_name": "Iso"},
+    )
+    assert reg.status_code == 201, reg.text
+    token = reg.json()["token"]
+    default_pid = _get_default_project_id(client)
+    _ensure_project_owner(email, default_pid)
+    try:
+        # Create a second project and make the user its owner.
+        slug = f"iso-{uuid.uuid4().hex[:8]}"
+        cr = client.post(
+            "/v1/projects",
+            headers=_session_headers(token, default_pid),
+            json={"name": "Iso Project", "slug": slug},
+        )
+        assert cr.status_code == 201, cr.text
+        new_pid = cr.json()["id"]
+
+        # Create a budget IN the new project (X-Project-Id = new project).
+        bname = f"iso-budget-{uuid.uuid4().hex[:6]}"
+        b = client.post(
+            "/v1/budgets",
+            headers=_session_headers(token, new_pid),
+            json={"name": bname, "scope": "project", "max_spend_usd": "50.00", "budget_duration": "30d"},
+        )
+        assert b.status_code == 201, b.text
+
+        # List budgets in the DEFAULT project — the new budget must NOT show.
+        in_default = client.get("/v1/budgets", headers=_session_headers(token, default_pid))
+        assert in_default.status_code == 200, in_default.text
+        default_names = [x.get("name") for x in in_default.json()["budgets"]]
+        assert bname not in default_names, f"budget leaked into default project: {default_names}"
+
+        # And it MUST show in its own project.
+        in_new = client.get("/v1/budgets", headers=_session_headers(token, new_pid))
+        new_names = [x.get("name") for x in in_new.json()["budgets"]]
+        assert bname in new_names, f"budget missing from its own project: {new_names}"
+    finally:
+        _cleanup_user(email)
