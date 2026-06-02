@@ -21,15 +21,27 @@ export default function AuditPage() {
 
   if (error) return <div className="page"><div className="card" style={{ padding: 24, textAlign: "center" }}><div style={{ color: "var(--danger)", marginBottom: 8 }}>{error}</div><button className="btn" onClick={refetch}>Retry</button></div></div>;
 
-  async function handleExport() {
-    try {
-      const res = await fetch("/api/audit?format=csv", { credentials: "same-origin" });
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = "strathon-audit.csv"; a.click();
-      URL.revokeObjectURL(url);
-    } catch {} // silent on export fail
+  function handleExport() {
+    if (!entries.length) { return; }
+    const cols = ["timestamp", "actor", "category", "action", "resource", "outcome"];
+    const cell = (v: unknown) => {
+      const s = v == null ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const rows = entries.map((e: any) => [
+      e.ts ?? e.timestamp ?? "",
+      e.actor ?? "",
+      e.category ?? "",
+      e.action ?? "",
+      e.resource ?? "",
+      e.outcome ?? e.status ?? "",
+    ].map(cell).join(","));
+    const csv = [cols.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "strathon-audit.csv"; a.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -45,7 +57,7 @@ export default function AuditPage() {
           <Segmented value={time} onChange={setTime} options={["24h", "7d", "30d", "90d"].map((v) => ({ label: v, value: v }))} />
         </div>
       </div>
-      <div className="table-toolbar"><div className="input-wrap" style={{ width: 380 }}><Icons.Search size={14} /><input className="input search" placeholder="actor:user@example.com  category:policy  \u2026" value={q} onChange={(e) => setQ(e.target.value)} /></div><div className="grow" /><span className="t-sm text-muted">{entries.length} entries</span></div>
+      <div className="table-toolbar"><div className="input-wrap" style={{ width: 380 }}><Icons.Search size={14} /><input className="input search" placeholder="actor:user@example.com  category:policy  …" value={q} onChange={(e) => setQ(e.target.value)} /></div><div className="grow" /><span className="t-sm text-muted">{entries.length} entries</span></div>
       <div className="table-wrap">
         {loading ? <SkeletonTable rows={8} columns={[1, 2, 1, 1, 1, 1, 1]} /> : entries.length === 0 ? (
           <div style={{ padding: "48px 24px", textAlign: "center" }}>

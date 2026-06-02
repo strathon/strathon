@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icons } from "@/components/icons";
-import { Badge, Ring, Sparkline, Segmented, Empty, SkeletonCards } from "@/components/ui";
+import { Badge, Ring, Sparkline, Segmented, Empty, Splash, CopyableCode, SkeletonCards } from "@/components/ui";
 import { useApi } from "@/lib/api-client";
 
 export default function AgentsPage() {
@@ -12,6 +12,31 @@ export default function AgentsPage() {
   const agents = data?.data || [];
 
   if (error) return <div className="page"><div className="card" style={{ padding: 24, textAlign: "center" }}><div style={{ color: "var(--danger)", marginBottom: 8 }}>{error}</div><button className="btn" onClick={refetch}>Retry</button></div></div>;
+
+  if (!loading && agents.length === 0) {
+    return (
+      <div className="page">
+        <div className="page-header"><div><h1 className="t-h1 page-title">Agents</h1></div></div>
+        <Splash
+          icon={<Icons.Bot size={28} />}
+          title="No agents connected yet"
+          description="Agents register themselves automatically the first time they send a trace through the Strathon SDK. Each one gets a risk score, cost tracking, and a record of which policies cover it."
+          secondaryAction={{ label: "Read the docs", href: "https://github.com/strathon/strathon#readme" }}
+          valueProps={[
+            { icon: <Icons.Activity size={16} />, title: "Risk scoring", description: "Every agent gets a live risk score from its behavior and policy hits." },
+            { icon: <Icons.Zap size={16} />, title: "Cost tracking", description: "See per-agent model spend roll up automatically from traces." },
+            { icon: <Icons.Shield size={16} />, title: "Policy coverage", description: "Know at a glance which policies apply to each agent." },
+            { icon: <Icons.Bot size={16} />, title: "Zero config", description: "No registration step \u2014 connect the SDK and the agent shows up here." },
+          ]}
+        >
+          <CopyableCode language="python" filename="Connect your agent">{`from strathon import Client, instrument
+
+client = Client(api_key="stra_...", endpoint="http://localhost:4318")
+instrument(client, frameworks=["langgraph"])`}</CopyableCode>
+        </Splash>
+      </div>
+    );
+  }
 
   return (
     <div className="page">

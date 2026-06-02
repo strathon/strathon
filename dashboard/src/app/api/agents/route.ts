@@ -1,2 +1,6 @@
-import { proxyGet } from "@/lib/api-proxy";
-export async function GET(req: Request) { return proxyGet("/v1/agents", req); }
+import { proxyGetMapped } from "@/lib/api-proxy";
+import { mapAgents } from "@/lib/transforms";
+
+export async function GET(req: Request) {
+  return proxyGetMapped("/v1/agents", req, mapAgents);
+}

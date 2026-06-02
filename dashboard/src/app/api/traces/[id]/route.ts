@@ -1,5 +1,7 @@
-import { proxyToReceiver } from "@/lib/api-proxy";
-export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
+import { proxyGetMapped } from "@/lib/api-proxy";
+import { mapTraceTree } from "@/lib/transforms";
+
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return proxyToReceiver(`/v1/traces/${id}/tree`);
+  return proxyGetMapped(`/v1/traces/${id}/tree`, req, mapTraceTree);
 }

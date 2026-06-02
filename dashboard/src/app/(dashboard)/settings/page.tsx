@@ -3,10 +3,13 @@
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Icons } from "@/components/icons";
-import { Badge, useToast, Skeleton, Modal, Dropdown } from "@/components/ui";
+import { Badge, useToast, Skeleton, Modal, Dropdown, Empty } from "@/components/ui";
 import { GeneralSettings, RetentionSliders, ExportSection, ApiKeysSection } from "./_parts";
+import { MfaCard } from "./MfaCard";
 import { useUser } from "@/lib/user-context";
 import { useApi, api } from "@/lib/api-client";
+import { validatePassword } from "@/lib/validation";
+import { formatDate, formatRelative } from "@/lib/format";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -16,7 +19,7 @@ export default function SettingsPage() {
   const [section, setSection] = useState(searchParams.get("section") || "general");
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState("member");
+  const [inviteRole, setInviteRole] = useState("operator");
   const [removeConfirm, setRemoveConfirm] = useState<{ id: string; name: string } | null>(null);
   const [tempPassword, setTempPassword] = useState<{ name: string; password: string } | null>(null);
   const [transferTarget, setTransferTarget] = useState<{ id: string; name: string } | null>(null);
@@ -39,6 +42,8 @@ export default function SettingsPage() {
 
   const { data: membersData, loading: membersLoading, refetch: refetchMembers } = useApi<{ data: any[] }>("/api/members");
   const members = membersData?.data || [];
+  const { data: pendingData, refetch: refetchPending } = useApi<{ data: any[] }>("/api/members/pending");
+  const pending = pendingData?.data || [];
 
   const isAdmin = currentUser?.role === "owner" || currentUser?.role === "admin";
 
@@ -55,7 +60,8 @@ export default function SettingsPage() {
 
   const changePassword = async () => {
     if (!currentPass) { setPassError("Current password is required"); return; }
-    if (newPass.length < 10) { setPassError("Password must be at least 10 characters"); return; }
+    const passErr = validatePassword(newPass);
+    if (passErr) { setPassError(passErr); return; }
     if (newPass !== confirmPass) { setPassError("Passwords do not match"); return; }
     setChangingPass(true);
     setPassError(null);
@@ -151,12 +157,9 @@ export default function SettingsPage() {
               {isAdmin && <button className="btn primary" onClick={() => setInviteOpen(true)}><Icons.Plus size={13} /> Invite member</button>}
             </div>
             <div className="table-wrap">
-              {membersLoading ? <Skeleton width="100%" height={200} /> : members.length === 0 ? (
-                <div className="empty-state">
-                  <Icons.Users size={32} style={{ color: "var(--text-muted)", marginBottom: 8 }} />
-                  <div style={{ fontWeight: 600 }}>No team members yet</div>
-                  <div className="t-sm text-muted" style={{ marginTop: 4 }}>Invite people to collaborate on this workspace.</div>
-                </div>
+              {membersLoading ? <Skeleton width="100%" height={200} /> : (members.length === 0 && pending.length === 0) ? (
+                <Empty icon={<Icons.Users size={24} />} title="No team members yet"
+                  subtitle="Invite people to collaborate on this workspace." />
               ) : (
               <table className="table">
                 <thead><tr><th>Member</th><th>Role</th><th>Joined</th><th>Last active</th><th /></tr></thead>
@@ -168,7 +171,7 @@ export default function SettingsPage() {
                     <tr key={m.id || m.email}>
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: 10, height: 48 }}>
-                          <div className="avatar">{(m.display_name || m.name || m.email).split(" ").map((s: string) => s[0]).join("").slice(0, 2)}</div>
+                          <div className="avatar" style={{ width: 28, height: 28, background: "var(--accent-bg)", color: "var(--accent)", border: "1px solid var(--accent-border)" }}>{(m.display_name || m.name || m.email).split(" ").map((s: string) => s[0]).join("").slice(0, 2)}</div>
                           <div><div style={{ fontWeight: 500 }}>{m.display_name || m.name}{isSelf && <span className="text-muted"> (you)</span>}</div><div className="t-sm text-muted">{m.email}</div></div>
                         </div>
                       </td>
@@ -179,14 +182,14 @@ export default function SettingsPage() {
                             try { await api.patch(`/api/members/${m.id}`, { role: e.target.value }); toast.push({ tone: "success", title: "Role updated" }); refetchMembers(); }
                             catch (err) { toast.push({ tone: "danger", title: err instanceof Error ? err.message : "Failed" }); }
                           }}>
-                          <option value="admin">Admin</option><option value="member">Member</option><option value="viewer">Viewer</option>
+                          <option value="admin">Admin</option><option value="operator">Operator</option><option value="viewer">Viewer</option>
                         </select>
                         ) : (
-                          <Badge kind={isOwner ? "info" : "muted"}>{m.role}</Badge>
+                          <Badge kind={isOwner ? "accent" : "muted"}>{m.role}</Badge>
                         )}
                       </td>
-                      <td className="text-secondary">{m.joined_at || m.joined || ""}</td>
-                      <td className="text-secondary">{m.last_active || ""}</td>
+                      <td className="text-secondary">{m.joined_at || m.joined ? formatDate(m.joined_at || m.joined) : ""}</td>
+                      <td className="text-secondary">{m.last_active ? formatRelative(m.last_active) : ""}</td>
                       <td>
                         {isAdmin && !isSelf && (
                           <Dropdown align="right" width={200}
@@ -202,6 +205,28 @@ export default function SettingsPage() {
                     </tr>
                     );
                   })}
+                  {pending.map((p: any) => (
+                    <tr key={`pending-${p.email}`} style={{ opacity: 0.75 }}>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, height: 48 }}>
+                          <div className="avatar" style={{ width: 28, height: 28, background: "var(--text-muted)", color: "#fff" }}>{p.email.slice(0, 2).toUpperCase()}</div>
+                          <div><div style={{ fontWeight: 500 }}>{p.email}</div><div className="t-sm text-muted">Invitation not yet accepted</div></div>
+                        </div>
+                      </td>
+                      <td><Badge kind="muted">{p.role}</Badge></td>
+                      <td><Badge kind="warning">pending</Badge></td>
+                      <td className="text-secondary">{p.invited_at ? formatDate(p.invited_at) : ""}</td>
+                      <td>
+                        {isAdmin && (
+                          <button className="btn icon ghost sm" title="Revoke invitation"
+                            onClick={async () => {
+                              try { await api.del(`/api/members/pending/${encodeURIComponent(p.email)}`); toast.push({ tone: "success", title: "Invitation revoked" }); refetchPending(); }
+                              catch (err) { toast.push({ tone: "danger", title: err instanceof Error ? err.message : "Failed" }); }
+                            }}><Icons.Trash size={14} /></button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
               )}
@@ -211,9 +236,9 @@ export default function SettingsPage() {
                 <div className="card-header"><span className="card-title">Invite member</span></div>
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
                   <div style={{ flex: 1 }}><div className="form-label">Email</div><input className="input" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="name@company.com" /></div>
-                  <div><div className="form-label">Role</div><select className="select" value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} style={{ width: 130 }}><option value="admin">Admin</option><option value="member">Member</option><option value="viewer">Viewer</option></select></div>
+                  <div><div className="form-label">Role</div><select className="select" value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} style={{ width: 130 }}><option value="admin">Admin</option><option value="operator">Operator</option><option value="viewer">Viewer</option></select></div>
                   <button className="btn primary" onClick={async () => {
-                    try { await api.post("/api/members", { email: inviteEmail, role: inviteRole }); toast.push({ tone: "success", title: "Invitation sent" }); setInviteOpen(false); setInviteEmail(""); refetchMembers(); }
+                    try { await api.post("/api/members", { email: inviteEmail, role: inviteRole }); toast.push({ tone: "success", title: "Invitation sent" }); setInviteOpen(false); setInviteEmail(""); refetchMembers(); refetchPending(); }
                     catch (err) { toast.push({ tone: "danger", title: err instanceof Error ? err.message : "Failed" }); }
                   }}>Invite</button>
                   <button className="btn ghost" onClick={() => setInviteOpen(false)}>Cancel</button>
@@ -227,27 +252,12 @@ export default function SettingsPage() {
           <>
             <h2 className="t-h2" style={{ marginBottom: 4 }}>Authentication</h2>
             <p className="text-secondary" style={{ marginBottom: 24 }}>Manage your sign-in methods.</p>
-            <div className="card" style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div>
-                  <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
-                    Multi-factor authentication
-                    {currentUser?.mfa_enabled ? <Badge kind="success" dot>enabled</Badge> : <Badge kind="muted">disabled</Badge>}
-                  </div>
-                  <div className="t-sm text-secondary" style={{ marginTop: 4 }}>
-                    {currentUser?.mfa_enabled ? "TOTP authenticator app" : "Add an extra layer of security to your account"}
-                  </div>
-                </div>
-                <button className="btn" onClick={() => toast.push({ title: "MFA setup coming in a future update" })}>
-                  {currentUser?.mfa_enabled ? "Manage" : "Enable MFA"}
-                </button>
-              </div>
-            </div>
+            <MfaCard />
             <div className="card">
               <div className="card-header"><span className="card-title">Change password</span></div>
               <div className="col" style={{ gap: 12, maxWidth: 360 }}>
                 <input className="input" type="password" placeholder="Current password" value={currentPass} onChange={(e) => setCurrentPass(e.target.value)} autoComplete="current-password" />
-                <input className="input" type="password" placeholder="New password (10+ characters)" value={newPass} onChange={(e) => setNewPass(e.target.value)} autoComplete="new-password" />
+                <input className="input" type="password" placeholder="New password" value={newPass} onChange={(e) => setNewPass(e.target.value)} autoComplete="new-password" />
                 <input className="input" type="password" placeholder="Confirm new password" value={confirmPass} onChange={(e) => setConfirmPass(e.target.value)} autoComplete="new-password" />
                 {passError && <div className="t-sm" style={{ color: "var(--danger)" }}>{passError}</div>}
                 <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -345,11 +355,11 @@ export default function SettingsPage() {
         body={
           <div>
             <p className="text-secondary" style={{ marginBottom: 12 }}>This permanently deletes your account and anonymizes your audit log entries. This cannot be undone.</p>
-            <div className="form-label">Type DELETE to confirm</div>
-            <input className="input" value={deleteAccountText} onChange={(e) => setDeleteAccountText(e.target.value)} placeholder="DELETE" />
+            <div className="form-label">Type <b>{currentUser?.email}</b> to confirm</div>
+            <input className="input" value={deleteAccountText} onChange={(e) => setDeleteAccountText(e.target.value)} placeholder={currentUser?.email || ""} />
           </div>
         }
-        onConfirm={() => { if (deleteAccountText === "DELETE") deleteAccount(); }} />
+        onConfirm={() => { if (deleteAccountText === (currentUser?.email || "")) deleteAccount(); }} />
     </div>
   );
 }

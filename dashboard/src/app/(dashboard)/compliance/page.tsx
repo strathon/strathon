@@ -16,9 +16,11 @@ export default function CompliancePage() {
   async function handleExport(format: string) {
     try {
       const res = await fetch("/api/compliance", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ format }) });
+      if (!res.ok) { toast.push({ tone: "danger", title: "Export failed" }); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = `strathon-compliance.${format}`; a.click();
+      const ext = format === "sarif" ? "sarif" : "json";
+      const a = document.createElement("a"); a.href = url; a.download = `strathon-compliance.${ext}`; a.click();
       URL.revokeObjectURL(url);
     } catch { toast.push({ tone: "danger", title: "Export failed" }); }
   }

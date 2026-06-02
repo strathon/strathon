@@ -1,5 +1,5 @@
 /**
- * Next.js middleware — runs before every request.
+ * Next.js proxy (formerly "middleware") - runs before every request.
  *
  * 1. Gates all dashboard routes behind session cookie
  * 2. Blocks CVE-2025-29927 (x-middleware-subrequest bypass)
@@ -18,7 +18,7 @@ const PUBLIC_PATHS = [
   "/api/version", "/favicon.ico",
 ];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Block CVE-2025-29927: middleware bypass via x-middleware-subrequest.

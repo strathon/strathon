@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useMemo, useCallback, createContext, useContext } from "react";
+import { createPortal } from "react-dom";
 import { Icons } from "./icons";
+import { formatRelative } from "@/lib/format";
 
 /* ════════════ Badge ════════════ */
 export function Badge({ kind = "muted", dot = false, mono = false, children }: {
@@ -344,55 +346,83 @@ export function Modal({ open, onClose, title, body, danger, confirmLabel = "Conf
   open: boolean; onClose: () => void; title: React.ReactNode; body: React.ReactNode; danger?: boolean; confirmLabel?: string; onConfirm: () => void;
 }) {
   if (!open) return null;
-  return (
+  if (typeof document === "undefined") return null;
+  return createPortal(
     <div className="sheet-backdrop" onClick={onClose} style={{ display: "grid", placeItems: "center" }}>
       <div onClick={(e) => e.stopPropagation()} style={{
-        width: 420, maxWidth: "92vw", background: "color-mix(in oklab, var(--bg-elevated) 90%, transparent)",
+        width: 460, maxWidth: "92vw", background: "color-mix(in oklab, var(--bg-elevated) 92%, transparent)",
         backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)", border: "1px solid var(--border)",
-        borderRadius: 12, padding: 20, boxShadow: "var(--shadow-glass)", animation: "scale-fade 150ms ease-out",
+        borderRadius: 14, padding: 24, boxShadow: "var(--shadow-glass)", animation: "scale-fade 150ms ease-out",
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 999, display: "grid", placeItems: "center",
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 999, display: "grid", placeItems: "center", flexShrink: 0,
             background: danger ? "var(--danger-bg)" : "var(--accent-bg)", color: danger ? "var(--danger)" : "var(--accent)" }}>
-            {danger ? <Icons.AlertTriangle size={16} /> : <Icons.Shield size={16} />}
+            {danger ? <Icons.AlertTriangle size={18} /> : <Icons.Shield size={18} />}
           </div>
-          <div style={{ fontSize: 15, fontWeight: 600 }}>{title}</div>
+          <div style={{ fontSize: 16, fontWeight: 600 }}>{title}</div>
         </div>
-        <div className="t-sm text-secondary" style={{ marginBottom: 18, marginLeft: 44 }}>{body}</div>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <div className="t-sm text-secondary" style={{ marginBottom: 24, marginLeft: 48, lineHeight: 1.5 }}>{body}</div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
           <button className="btn ghost" onClick={onClose}>Cancel</button>
           <button className={`btn ${danger ? "danger solid" : "primary"}`} onClick={() => { onConfirm(); onClose(); }}>{confirmLabel}</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
 /* ════════════ Dropdown ════════════ */
 interface DropdownItem { divider?: boolean; icon?: React.ReactNode; label?: React.ReactNode; kbd?: string; danger?: boolean; onClick?: () => void; }
-export function Dropdown({ trigger, items, align = "left", width = 200 }: {
-  trigger: (s: { open: boolean; toggle: () => void }) => React.ReactNode; items: DropdownItem[]; align?: "left" | "right"; width?: number;
+export function Dropdown({ trigger, items, align = "left", width = 200, side = "bottom" }: {
+  trigger: (s: { open: boolean; toggle: () => void }) => React.ReactNode; items: DropdownItem[]; align?: "left" | "right"; width?: number; side?: "bottom" | "right";
 }) {
   const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      // Ignore clicks inside the trigger OR inside the portaled menu (which
+      // lives in document.body, outside ref). Without the menuRef check the
+      // menu closes before an item's onClick fires.
+      if (ref.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
+  useEffect(() => {
+    if (open && triggerRef.current) {
+      const r = triggerRef.current.getBoundingClientRect();
+      if (side === "right") {
+        // Open beside the trigger (used in the narrow sidebar so the menu
+        // doesn't cover the nav). Clamp to the viewport bottom.
+        const top = Math.min(r.top, window.innerHeight - 8 - items.length * 34);
+        setCoords({ top: Math.max(8, top), left: r.right + 6 });
+      } else {
+        const left = align === "right" ? r.right - width : r.left;
+        setCoords({ top: r.bottom + 4, left });
+      }
+    }
+  }, [open, align, width, side, items.length]);
   return (
     <div ref={ref} style={{ position: "relative" }}>
-      {trigger({ open, toggle: () => setOpen(!open) })}
-      {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 4px)", [align]: 0, width, background: "var(--bg-elevated)",
-          border: "1px solid var(--border)", borderRadius: 8, padding: 4, boxShadow: "var(--shadow-lg)", zIndex: 60, animation: "scale-fade 120ms ease-out" }}>
+      <div ref={triggerRef}>{trigger({ open, toggle: () => setOpen(!open) })}</div>
+      {open && coords && typeof document !== "undefined" && createPortal(
+        <div ref={menuRef} style={{ position: "fixed", top: coords.top, left: coords.left, width, background: "var(--bg-elevated)",
+          border: "1px solid var(--border)", borderRadius: 8, padding: 4, boxShadow: "var(--shadow-lg)", zIndex: 1000, animation: "scale-fade 120ms ease-out" }}>
           {items.map((it, i) => it.divider
             ? <div key={i} style={{ height: 1, background: "var(--border-subtle)", margin: "4px 0" }} />
             : <button key={i} className="user-menu-item" onClick={() => { it.onClick?.(); setOpen(false); }} style={it.danger ? { color: "var(--danger)" } : undefined}>
                 {it.icon}<span style={{ flex: 1 }}>{it.label}</span>{it.kbd && <Kbd>{it.kbd}</Kbd>}
               </button>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -406,6 +436,52 @@ export function Empty({ icon, title, subtitle, action }: { icon: React.ReactNode
       <div style={{ fontSize: 16, fontWeight: 600 }}>{title}</div>
       {subtitle && <div className="t-sm text-secondary" style={{ maxWidth: 380 }}>{subtitle}</div>}
       {action && <div style={{ marginTop: 8 }}>{action}</div>}
+    </div>
+  );
+}
+
+/* ════════════ Splash (onboarding empty state) ════════════
+   A richer empty state for pages a new user lands on first. Inspired by the
+   onboarding-splash pattern: explain what the feature is and why it matters,
+   show concrete value, and offer a clear next action. Use Empty for ordinary
+   "no rows" states; use Splash for first-run / zero-state onboarding. */
+export interface SplashValueProp { icon: React.ReactNode; title: string; description: string; }
+export function Splash({ icon, title, description, valueProps, primaryAction, secondaryAction, children }: {
+  icon?: React.ReactNode;
+  title: string;
+  description: string;
+  valueProps?: SplashValueProp[];
+  primaryAction?: React.ReactNode;
+  secondaryAction?: { label: string; href: string };
+  children?: React.ReactNode;
+}) {
+  return (
+    <div style={{ maxWidth: 760, margin: "0 auto", padding: "40px 24px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
+      {icon && <div className="empty-icon" style={{ marginBottom: 16 }}>{icon}</div>}
+      <h2 className="t-h2" style={{ marginBottom: 8 }}>{title}</h2>
+      <p className="text-secondary" style={{ maxWidth: 560, marginBottom: 24, lineHeight: 1.55 }}>{description}</p>
+      {(primaryAction || secondaryAction) && (
+        <div style={{ display: "flex", gap: 10, marginBottom: children || valueProps ? 32 : 0, flexWrap: "wrap", justifyContent: "center" }}>
+          {primaryAction}
+          {secondaryAction && (
+            <a className="btn ghost" href={secondaryAction.href} target="_blank" rel="noopener noreferrer">{secondaryAction.label}</a>
+          )}
+        </div>
+      )}
+      {children && <div style={{ width: "100%", marginBottom: valueProps ? 32 : 0 }}>{children}</div>}
+      {valueProps && valueProps.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16, width: "100%", textAlign: "left" }}>
+          {valueProps.map((v) => (
+            <div key={v.title} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--bg-input)", display: "grid", placeItems: "center", flexShrink: 0, color: "var(--accent)" }}>{v.icon}</div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>{v.title}</div>
+                <div className="t-sm text-secondary" style={{ lineHeight: 1.45 }}>{v.description}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -635,7 +711,7 @@ export function fmtExactTime(d: Date): string {
 }
 export function Time({ ago, className = "" }: { ago?: string; className?: string }) {
   const d = useMemo(() => parseAgo(ago), [ago]);
-  return <Tooltip content={fmtExactTime(d)}><span className={className}>{ago}</span></Tooltip>;
+  return <Tooltip content={fmtExactTime(d)}><span className={className}>{d ? formatRelative(d) : (ago || "")}</span></Tooltip>;
 }
 
 /* ════════════ CopyableCode ════════════ */

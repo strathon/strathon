@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback, use } from "react";
 import { useRouter } from "next/navigation";
 import { Icons } from "@/components/icons";
-import { Badge, StatusBadge, Sparkline, Heatmap, Dropdown, Sheet, InlineEdit, HighlightedCEL, Kbd, Skeleton, fireConfetti, useToast } from "@/components/ui";
+import { Badge, StatusBadge, Sparkline, Heatmap, Dropdown, Sheet, InlineEdit, HighlightedCEL, Kbd, Skeleton, Modal, useToast } from "@/components/ui";
 import { useApi, api } from "@/lib/api-client";
 import { validatePolicyName, validateCEL } from "@/lib/validation";
 
@@ -24,6 +24,8 @@ export default function PolicyDetailPage({ params }: { params: Promise<{ id: str
   const [cel, setCel] = useState("");
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [simRunning, setSimRunning] = useState(false);
   const [simResult, setSimResult] = useState<any>(null);
   const [diffVersion, setDiffVersion] = useState<any>(null);
@@ -61,8 +63,7 @@ export default function PolicyDetailPage({ params }: { params: Promise<{ id: str
       await api.patch(`/api/policies/${id}`, { name, status, action, priority, cel });
       setDirty(false);
       toast.push({ tone: "success", title: "Policy saved" });
-      fireConfetti();
-      refetch();
+      router.push("/policies");
     } catch (e) {
       toast.push({ tone: "danger", title: "Save failed", body: e instanceof Error ? e.message : "Unknown error" });
     } finally {
@@ -70,11 +71,23 @@ export default function PolicyDetailPage({ params }: { params: Promise<{ id: str
     }
   }
 
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await api.del(`/api/policies/${id}`);
+      toast.push({ tone: "success", title: "Policy deleted" });
+      router.push("/policies");
+    } catch (e) {
+      toast.push({ tone: "danger", title: "Delete failed", body: e instanceof Error ? e.message : "Unknown error" });
+      setDeleting(false);
+    }
+  }
+
   async function runSimulation() {
     setSimRunning(true);
     setSimResult(null);
     try {
-      const res = await api.post(`/api/policies/${id}`, { action: "simulate", cel });
+      const res = await api.post(`/api/simulate`, { cel });
       setSimResult(res?.data || res);
     } catch (e) {
       toast.push({ tone: "danger", title: "Simulation failed", body: e instanceof Error ? e.message : "Unknown error" });
@@ -105,8 +118,11 @@ export default function PolicyDetailPage({ params }: { params: Promise<{ id: str
         </div>
         <div className="policy-detail-actions">
           <button className="btn ghost" onClick={() => router.push("/policies")} disabled={saving}>Discard</button>
+          <button className="btn ghost" onClick={() => setConfirmDelete(true)} disabled={saving} style={{ color: "var(--danger)" }}>
+            <Icons.Trash size={13} /> Delete
+          </button>
           <button className="btn primary" onClick={handleSave} disabled={saving}>
-            {saving ? "Saving\u2026" : <><Icons.Save size={13} /> Save</>}
+            {saving ? "Saving…" : <><Icons.Save size={13} /> Save</>}
             {dirty && <span className="dot" style={{ background: "white", width: 6, height: 6, borderRadius: 999 }} />}
           </button>
         </div>
@@ -216,6 +232,10 @@ export default function PolicyDetailPage({ params }: { params: Promise<{ id: str
         footer={<><button className="btn ghost" onClick={() => setDiffVersion(null)}>Close</button><button className="btn" onClick={() => { setDiffVersion(null); toast.push({ tone: "warning", title: "Restored" }); }}><Icons.RotateCw size={13} /> Restore</button></>}>
         {diffVersion && <div className="code" style={{ fontSize: 12 }}><div className="t-sm text-secondary">{diffVersion.note}</div></div>}
       </Sheet>
+      <Modal open={confirmDelete} onClose={() => setConfirmDelete(false)} danger
+        title="Delete this policy?" confirmLabel={deleting ? "Deleting…" : "Delete policy"}
+        onConfirm={handleDelete}
+        body={<p className="text-secondary">This permanently removes the policy <b>{name}</b> and stops it from being enforced. This cannot be undone.</p>} />
     </div>
   );
 }

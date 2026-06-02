@@ -6,6 +6,7 @@ import { Icons } from "./icons";
 import { Badge, Kbd, Highlight } from "./ui";
 import { StrathonLogo } from "./logo";
 import { useUser } from "@/lib/user-context";
+import { ProjectSwitcher } from "./project-switcher";
 
 const COMMAND_ITEMS = [
   { section: "Navigation", icon: "Grid", label: "Go to Overview", to: "overview", kbd: "G O" },
@@ -84,18 +85,29 @@ export function Sidebar({ collapsed, setCollapsed, pendingCount, isMobile, setMo
   return (
     <aside className="sidebar">
       <div className="sidebar-top">
-        <div className="brand">
+        {/* When expanded: logo + name on left, panel-toggle on right.
+            When collapsed: entire sidebar-top acts as expand button (Langfuse pattern).
+            CSS hides the toggle button when collapsed and shows a pointer cursor. */}
+        <div
+          className="brand"
+          onClick={() => { if (collapsed && !isMobile) setCollapsed(false); }}
+          style={collapsed && !isMobile ? { cursor: "pointer" } : undefined}
+          title={collapsed && !isMobile ? "Open sidebar  ⌘." : undefined}
+          aria-label={collapsed && !isMobile ? "Open sidebar" : undefined}
+        >
           <div className="brand-mark">
             <StrathonLogo size={28} />
           </div>
           <span className="brand-name">Strathon</span>
         </div>
-        <button className="sidebar-toggle" data-tooltip="Open sidebar  ⌘."
+        {/* Toggle button — visible only when expanded (hidden by CSS when collapsed) */}
+        <button className="sidebar-toggle" data-tooltip="Close sidebar  ⌘."
           onClick={() => isMobile ? setMobileOpen(false) : setCollapsed(!collapsed)}
-          title={isMobile ? "Close sidebar" : collapsed ? "Open sidebar  ⌘." : "Close sidebar  ⌘."} aria-label="Toggle sidebar">
+          title={isMobile ? "Close sidebar" : "Close sidebar  ⌘."} aria-label="Toggle sidebar">
           <Icons.PanelLeft size={17} />
         </button>
       </div>
+      <ProjectSwitcher collapsed={collapsed && !isMobile} />
       <nav className="sidebar-nav">
         {NAV.map((it) => {
           const Icon = Icons[it.icon as keyof typeof Icons];
@@ -146,22 +158,26 @@ export function Header({ breadcrumbs, onOpenCmd, cmdOpen, mobileOpen, setMobileO
 }) {
   const router = useRouter();
   const [notifOpen, setNotifOpen] = useState(false);
-  const [notifs, setNotifs] = useState<{ id: number | string; kind: string; title: string; body: string; time: string; unread: boolean }[]>([]);
+  const [notifs, setNotifs] = useState<{ id: number | string; kind: string; title: string; body: string; time: string; unread: boolean; href?: string }[]>([]);
   useEffect(() => {
-    fetch("/api/notifications", { credentials: "same-origin" })
+    // Real, actionable feed: pending human-approval requests. (There is no
+    // generic events endpoint; approvals are the genuine "needs attention"
+    // signal. Notification *channels* are delivery config, not a feed.)
+    fetch("/api/approvals?status=pending", { credentials: "same-origin" })
       .then(r => r.ok ? r.json() : { data: [] })
       .then(d => {
-        const items = d?.data || [];
-        setNotifs(items.map((n: any, i: number) => ({
-          id: n.id || i,
-          kind: n.kind || n.type || "policy",
-          title: n.title || n.message || "",
-          body: n.body || n.detail || "",
-          time: n.time || n.created_at || "",
-          unread: n.unread ?? !n.read,
+        const items = (d?.data || []).slice(0, 8);
+        setNotifs(items.map((a: any, i: number) => ({
+          id: a.id || i,
+          kind: "approval",
+          title: "Approval needed",
+          body: `${a.agent || "An agent"} wants to run ${a.tool || "a tool"}${a.policy ? ` (${a.policy})` : ""}`,
+          time: "",
+          unread: true,
+          href: "/approvals",
         })));
       })
-      .catch(() => {});
+      .catch(() => setNotifs([]));
   }, [notifOpen]);
   const unread = notifs.filter((n) => n.unread).length;
   const notifRef = useRef<HTMLDivElement>(null);
@@ -223,15 +239,19 @@ export function Header({ breadcrumbs, onOpenCmd, cmdOpen, mobileOpen, setMobileO
             <button className="t-sm" style={{ color: "var(--accent)" }} onClick={() => setNotifs((ns) => ns.map((n) => ({ ...n, unread: false })))}>Mark all read</button>
           </div>
           <div className="notif-body">
-            {notifs.map((n) => {
+            {notifs.length === 0 ? (
+              <div className="t-sm text-secondary" style={{ padding: "24px 16px", textAlign: "center" }}>
+                You&apos;re all caught up. Pending approvals show up here.
+              </div>
+            ) : notifs.map((n) => {
               const { Icon, color, bg } = kindIcon(n.kind);
               return (
-                <div key={n.id} className={`notif-item ${n.unread ? "unread" : "read"}`} onClick={() => setNotifs((ns) => ns.map((x) => x.id === n.id ? { ...x, unread: false } : x))}>
+                <div key={n.id} className={`notif-item ${n.unread ? "unread" : "read"}`} onClick={() => { if (n.href) { setNotifOpen(false); router.push(n.href); } }} style={{ cursor: n.href ? "pointer" : "default" }}>
                   <div className="notif-icon" style={{ background: bg, color }}><Icon size={14} /></div>
                   <div className="notif-text">
                     <div className="notif-title">{n.title}</div>
                     <div className="notif-body-text">{n.body}</div>
-                    <div className="notif-time">{n.time}</div>
+                    {n.time && <div className="notif-time">{n.time}</div>}
                   </div>
                 </div>
               );
@@ -286,7 +306,7 @@ export function UserMenu({ open, onClose, user }: { open: boolean; onClose: () =
       <button className="user-menu-item" onClick={() => { onClose(); router.push("/settings?section=apikeys"); }}><Icons.Key size={14} /> API keys</button>
       <button className="user-menu-item" onClick={() => { onClose(); window.open("https://getstrathon.com/docs", "_blank", "noopener"); }}><Icons.Book size={14} /> Documentation<Icons.ExternalLink size={12} style={{ marginLeft: "auto", color: "var(--text-muted)" }} /></button>
       <button className="user-menu-item" onClick={() => { onClose(); window.open("https://github.com/strathon/strathon/issues/new", "_blank", "noopener noreferrer"); }}><Icons.AlertTriangle size={14} /> Report bug<Icons.ExternalLink size={12} style={{ marginLeft: "auto", color: "var(--text-muted)" }} /></button>
-      <button className="user-menu-item" onClick={() => { onClose(); window.open("https://discord.gg/strathon", "_blank", "noopener noreferrer"); }}><Icons.Globe size={14} /> Join Discord<Icons.ExternalLink size={12} style={{ marginLeft: "auto", color: "var(--text-muted)" }} /></button>
+      <button className="user-menu-item" onClick={() => { onClose(); window.open("https://discord.gg/Ta9XRmh4H", "_blank", "noopener noreferrer"); }}><Icons.Globe size={14} /> Join Discord<Icons.ExternalLink size={12} style={{ marginLeft: "auto", color: "var(--text-muted)" }} /></button>
       <div className="user-menu-divider" />
       {mode === "cloud" && (
       <button className="user-menu-upgrade user-menu-item" onClick={() => { onClose(); router.push("/settings?section=billing"); }}>

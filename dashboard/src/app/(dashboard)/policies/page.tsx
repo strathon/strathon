@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import { Icons } from "@/components/icons";
 import { Badge, StatusBadge, Sparkline, Checkbox, Dropdown, Pagination, Modal, Sheet, Segmented, Empty, Time, Kbd, SkeletonTable, useToast } from "@/components/ui";
 import { useApi, api } from "@/lib/api-client";
+import { usePermissions } from "@/lib/permissions";
 
 const ACTION_COLOR: Record<string, string> = { block: "danger", steer: "warning", throttle: "warning", log: "muted", alert: "info", require_approval: "info" };
 
 export default function PoliciesPage() {
   const router = useRouter();
   const toast = useToast();
+  const perms = usePermissions();
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(1);
@@ -67,7 +69,7 @@ export default function PoliciesPage() {
           <h1 className="t-h1 page-title">Policies</h1>
           <div className="page-subtitle">{total} {total === 1 ? "policy" : "policies"}</div>
         </div>
-        <button className="btn primary" onClick={() => router.push("/policies/new")}><Icons.Plus size={13} /> New policy</button>
+        {perms.canWritePolicies && <button className="btn primary" onClick={() => router.push("/policies/new")}><Icons.Plus size={13} /> New policy</button>}
       </div>
 
       <div className="table-toolbar">
@@ -99,7 +101,7 @@ export default function PoliciesPage() {
       <div className="table-wrap">
         {loading ? <SkeletonTable rows={6} columns={[3, 1, 1, 1, 1.5, 1]} /> : policies.length === 0 ? (
           <Empty icon={<Icons.Shield size={24} />} title="No policies yet" subtitle="Create your first policy to start enforcing rules on agent behavior."
-            action={<button className="btn primary" onClick={() => router.push("/policies/new")}><Icons.Plus size={13} /> New policy</button>} />
+            action={perms.canWritePolicies ? <button className="btn primary" onClick={() => router.push("/policies/new")}><Icons.Plus size={13} /> New policy</button> : undefined} />
         ) : (
           <>
             <table className="table">

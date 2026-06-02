@@ -36,6 +36,11 @@ export default function OverviewPage() {
   const allLoading = pLoading || tLoading || aLoading || bLoading;
   const allError = !allLoading && pError && tError && aError && bError;
 
+  // Welcome banner (show when no policies and no api keys, dismissible)
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  useEffect(() => { try { if (localStorage.getItem("strathon-welcome-dismissed") === "1") setBannerDismissed(true); } catch {} }, []);
+  const showWelcome = !bannerDismissed && !pLoading && policies.length === 0;
+
   if (allError) return (
     <div className="page">
       <div className="page-header"><div><h1 className="t-h1 page-title">Overview</h1></div></div>
@@ -47,11 +52,6 @@ export default function OverviewPage() {
       </div>
     </div>
   );
-
-  // Welcome banner (show when no policies and no api keys, dismissible)
-  const [bannerDismissed, setBannerDismissed] = useState(false);
-  useEffect(() => { try { if (localStorage.getItem("strathon-welcome-dismissed") === "1") setBannerDismissed(true); } catch {} }, []);
-  const showWelcome = !bannerDismissed && !pLoading && policies.length === 0;
 
   return (
     <div className="page">

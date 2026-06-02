@@ -3,13 +3,20 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { Icons } from "@/components/icons";
 import { useUser } from "@/lib/user-context";
-import { Badge, Segmented, Checkbox, Switch, Dropdown, Sheet, useToast, Skeleton } from "@/components/ui";
+import { Badge, Segmented, Checkbox, Switch, Dropdown, Sheet, useToast, Skeleton, Empty, Modal } from "@/components/ui";
 import { useApi, api } from "@/lib/api-client";
+import { setTheme as persistTheme, getStoredTheme } from "@/lib/theme";
+import { usePermissions } from "@/lib/permissions";
+import { formatDate, formatRelative } from "@/lib/format";
 
 
 export function GeneralSettings() {
   const { user: currentUser, refetch } = useUser();
-  const { data: settingsData, loading: sLoading } = useApi<{ project_name?: string; timezone?: string }>("/api/settings");
+  const perms = usePermissions();
+  const [confirmDeleteProject, setConfirmDeleteProject] = useState(false);
+  const [deleteProjectText, setDeleteProjectText] = useState("");
+  const [deletingProject, setDeletingProject] = useState(false);
+  const { data: settingsData, loading: sLoading } = useApi<{ project_name?: string; project_slug?: string; timezone?: string }>("/api/settings");
   const [name, setName] = useState("");
   const [avatarIdx, setAvatarIdx] = useState(0);
   const [projectName, setProjectName] = useState("");
@@ -25,9 +32,9 @@ export function GeneralSettings() {
     }
   }, [settingsData]);
   useEffect(() => { try { const s = parseInt(localStorage.getItem("strathon-avatar-idx") || "0", 10); if (s >= 0 && s < 7) setAvatarIdx(s); } catch {} }, []);
-  const [theme, setTheme] = useState("dark");
+  const [theme, setTheme] = useState<string>("system");
   const [isDark, setIsDark] = useState(true);
-  useEffect(() => { setIsDark(document.documentElement.dataset.theme !== "light"); setTheme(document.documentElement.dataset.theme || "dark"); }, []);
+  useEffect(() => { setTheme(getStoredTheme()); setIsDark(document.documentElement.dataset.theme !== "light"); }, []);
 
   const AVATARS = [
     { bg: isDark ? "#2a2a2a" : "#e8e6e1", icon: null as React.ReactNode },
@@ -50,6 +57,23 @@ export function GeneralSettings() {
       toast.push({ tone: "danger", title: err instanceof Error ? err.message : "Failed to save" });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const deleteProject = async () => {
+    const slug = settingsData?.project_slug;
+    if (!slug) { toast.push({ tone: "danger", title: "Could not determine the project to delete" }); return; }
+    setDeletingProject(true);
+    try {
+      await api.del(`/api/projects/${encodeURIComponent(slug)}`);
+      toast.push({ tone: "success", title: "Project deleted" });
+      // The BFF cleared the project cookie; a full reload re-heals to a
+      // remaining project (or shows the no-project gate).
+      window.location.href = "/";
+    } catch (err) {
+      // The receiver returns 409 when this is the last project.
+      toast.push({ tone: "danger", title: err instanceof Error ? err.message : "Failed to delete project" });
+      setDeletingProject(false);
     }
   };
 
@@ -76,7 +100,7 @@ export function GeneralSettings() {
       <Row label="Appearance">
         <div className="theme-picker">
           {[{ v: "dark", Icon: Icons.Moon }, { v: "light", Icon: Icons.Sun }, { v: "system", Icon: Icons.Cpu }].map((opt) => (
-            <button key={opt.v} className="theme-opt" data-active={theme === opt.v} onClick={() => { setTheme(opt.v); if (opt.v === "system") { document.documentElement.dataset.theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"; } else document.documentElement.dataset.theme = opt.v; }} title={opt.v}>
+            <button key={opt.v} className="theme-opt" data-active={theme === opt.v} onClick={() => { persistTheme(opt.v as "light" | "dark" | "system"); setTheme(opt.v); setIsDark(document.documentElement.dataset.theme !== "light"); }} title={opt.v}>
               <opt.Icon size={14} />
             </button>
           ))}
@@ -99,6 +123,32 @@ export function GeneralSettings() {
           {saving ? <><span className="spinner" /> Saving&hellip;</> : "Save changes"}
         </button>
       </div>
+
+      {perms.isOwner && (
+        <>
+          <div className="settings-section-title" style={{ marginTop: 24 }}>Danger zone</div>
+          <div style={{ border: "1px solid color-mix(in oklab, var(--danger) 38%, transparent)", borderRadius: 8, overflow: "hidden", background: "var(--bg-deep)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 18px", gap: 16 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontWeight: 600, fontSize: 13.5, marginBottom: 2 }}>Delete this project</div>
+                <div className="t-sm text-secondary">Permanently removes this project and all its policies, traces, and audit data. This cannot be undone. You must have another project to switch to.</div>
+              </div>
+              <button className="btn danger" style={{ flexShrink: 0 }} onClick={() => { setConfirmDeleteProject(true); setDeleteProjectText(""); }}>Delete project</button>
+            </div>
+          </div>
+        </>
+      )}
+
+      <Modal open={confirmDeleteProject} onClose={() => { setConfirmDeleteProject(false); setDeleteProjectText(""); }} danger
+        title="Delete this project?" confirmLabel={deletingProject ? "Deleting…" : "Delete project"}
+        onConfirm={() => { if (deleteProjectText === (settingsData?.project_name || "")) deleteProject(); else toast.push({ tone: "danger", title: "Project name doesn't match" }); }}
+        body={
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <span>This permanently deletes <b>{settingsData?.project_name || "this project"}</b> and all its data. This cannot be undone.</span>
+            <span className="t-sm text-muted">Type <b>{settingsData?.project_name}</b> to confirm:</span>
+            <input className="input" value={deleteProjectText} onChange={(e) => setDeleteProjectText(e.target.value)} placeholder={settingsData?.project_name || ""} />
+          </div>
+        } />
     </div>
   );
 }
@@ -164,6 +214,7 @@ export function RetentionSliders() {
 
 
 export function ApiKeysSection() {
+  const perms = usePermissions();
   const { data: keysData, loading, refetch } = useApi<{ data: any[] }>("/api/api-keys");
   const [createOpen, setCreateOpen] = useState(false);
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
@@ -198,6 +249,19 @@ export function ApiKeysSection() {
     }
   };
 
+  const rotateKey = async (id: string) => {
+    try {
+      const res = await api.post(`/api/api-keys/${id}/rotate`);
+      setCreatedSecret(res.key || res.data?.key || res.secret);
+      setCreateOpen(true);
+      setSecretSaved(false);
+      toast.push({ tone: "success", title: "Key rotated", body: "The old key is now invalid." });
+      refetch();
+    } catch (err) {
+      toast.push({ tone: "danger", title: err instanceof Error ? err.message : "Failed" });
+    }
+  };
+
   return (
     <div className="apikeys-section">
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24, gap: 16 }}>
@@ -205,15 +269,12 @@ export function ApiKeysSection() {
           <h2 className="t-h2" style={{ marginBottom: 4 }}>API keys</h2>
           <p className="text-secondary">Used by the SDK and CLI to authenticate with the receiver.</p>
         </div>
-        <button className="btn primary" style={{ flexShrink: 0 }} onClick={() => { setCreateOpen(true); setKeyName(""); setCreatedSecret(null); setSecretSaved(false); }}><Icons.Plus size={13} /> Create key</button>
+        {perms.canManageApiKeys && <button className="btn primary" style={{ flexShrink: 0 }} onClick={() => { setCreateOpen(true); setKeyName(""); setCreatedSecret(null); setSecretSaved(false); }}><Icons.Plus size={13} /> Create key</button>}
       </div>
 
       {loading ? <Skeleton width="100%" height={200} /> : keys.length === 0 ? (
-        <div className="empty-state">
-          <Icons.Key size={32} style={{ color: "var(--text-muted)", marginBottom: 8 }} />
-          <div style={{ fontWeight: 600 }}>No API keys yet</div>
-          <div className="t-sm text-muted" style={{ marginTop: 4 }}>Create a key to connect agents to this workspace.</div>
-        </div>
+        <Empty icon={<Icons.Key size={24} />} title="No API keys yet"
+          subtitle="Create a key to connect agents to this workspace." />
       ) : (
         <div className="table-wrap">
           <table className="table">
@@ -222,14 +283,14 @@ export function ApiKeysSection() {
               {keys.map((k: any) => (
                 <tr key={k.id}>
                   <td style={{ fontWeight: 500 }}>{k.name}</td>
-                  <td className="mono" style={{ fontSize: 12.5 }}>{k.prefix || k.key_prefix || "sk_\u2026"}</td>
-                  <td className="text-secondary">{k.created_at || k.created || ""}</td>
-                  <td className="text-secondary">{k.last_used_at || k.last_used || "never"}</td>
+                  <td className="mono" style={{ fontSize: 12.5 }}>{k.prefix || k.key_prefix || "sk_…"}</td>
+                  <td className="text-secondary">{k.created_at || k.created ? formatDate(k.created_at || k.created) : ""}</td>
+                  <td className="text-secondary">{k.last_used_at || k.last_used ? formatRelative(k.last_used_at || k.last_used) : "never"}</td>
                   <td>
                     <Dropdown align="right" width={160}
                       trigger={({ toggle }) => <button className="btn icon ghost sm" onClick={toggle}><Icons.MoreHorizontal size={14} /></button>}
                       items={[
-                        { icon: <Icons.RotateCw size={13} />, label: "Rotate", onClick: () => toast.push({ tone: "warning", title: "Key rotation not yet available" }) },
+                        { icon: <Icons.RotateCw size={13} />, label: "Rotate", onClick: () => rotateKey(k.id) },
                         { divider: true },
                         { icon: <Icons.Trash size={13} />, label: "Revoke", danger: true, onClick: () => revokeKey(k.id) },
                       ]} />
@@ -301,7 +362,7 @@ export function ExportSection() {
     if (selected.size === 0) { toast.push({ tone: "warning", title: "Select at least one dataset" }); return; }
     setGenerating(true);
     try {
-      const res = await fetch("/api/compliance", {
+      const res = await fetch("/api/export", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
@@ -311,7 +372,9 @@ export function ExportSection() {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = url; a.download = `strathon-export-${Date.now()}.${format}`; a.click();
+        // CSV exports are delivered as a ZIP of per-dataset CSVs.
+        const ext = format === "csv" ? "zip" : "json";
+        a.href = url; a.download = `strathon-export-${Date.now()}.${ext}`; a.click();
         URL.revokeObjectURL(url);
         toast.push({ tone: "success", title: "Export downloaded" });
       } else {
