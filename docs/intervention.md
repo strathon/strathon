@@ -41,13 +41,12 @@ attrs["strathon.tool.args"].contains("@competitor.com")
 
 ### Standard attributes set by Strathon instrumentations
 
-These attributes are set consistently across all three framework integrations
-(LangGraph, CrewAI, OpenAI Agents SDK), so policies written against them are
-portable:
+These attributes are set consistently across all 10 framework integrations,
+so policies written against them are portable:
 
 | Attribute                       | Description                                  |
 |---------------------------------|----------------------------------------------|
-| `strathon.framework`            | One of `langgraph`, `crewai`, `agents`       |
+| `strathon.framework`            | Framework name (e.g. `langgraph`, `crewai`, `openai_agents`) |
 | `strathon.tool.name`            | The tool's name (also mirrored to `gen_ai.tool.name`) |
 | `strathon.tool.args`            | The tool's input arguments, as a JSON string |
 | `gen_ai.tool.name`              | Standard OTel attribute, same as `strathon.tool.name` |
@@ -677,16 +676,31 @@ all the user does. Steer enforcement requires one extra line per tool
 (or per agent) — replacing a tool's return value is a bigger contract
 change than refusing to call, so we ask the user to opt in explicitly.
 
-| Framework            | Block (auto)        | Steer (opt-in) | Steer opt-in call                                       |
-|----------------------|---------------------|----------------|---------------------------------------------------------|
-| LangGraph (LangChain)| `instrument(client)`| Per-tool       | `from strathon.policy import enforce_steer; enforce_steer(tool, client)` |
-| CrewAI               | `instrument(client)`| Per-tool       | `enforce_steer(tool, client)` (same helper)             |
-| OpenAI Agents SDK    | `instrument(client)`| Per-agent      | `from strathon.instrumentation.openai_agents import attach_strathon_guardrails; attach_strathon_guardrails(agent, client)` |
+| Framework            | Block (auto)        | Steer            | Steer opt-in call (callback frameworks only)            |
+|----------------------|---------------------|------------------|---------------------------------------------------------|
+| LangGraph (LangChain)| `instrument(client)`| Per-tool opt-in  | `from strathon.policy import enforce_steer; enforce_steer(tool, client)` |
+| CrewAI               | `instrument(client)`| Auto (per-tool optional) | `enforce_steer(tool, client)` (optional; class patch already covers steer) |
+| OpenAI Agents SDK    | `instrument(client)`| Per-agent opt-in | `from strathon.instrumentation.openai_agents import attach_strathon_guardrails; attach_strathon_guardrails(agent, client)` |
+| Pydantic AI          | `instrument(client)`| Auto             | not needed — plugin substitutes the tool result directly |
+| Google ADK           | `instrument(client)`| Auto             | not needed — plugin short-circuits with the replacement |
+| AutoGen              | `instrument(client)`| Auto             | not needed — plugin substitutes the tool result directly |
+| Claude Agent SDK     | `instrument(client)`| Auto             | not needed — plugin substitutes the tool result directly |
 
-CrewAI's `instrument(client)` already enforces *both* block and steer
-globally (its class patch sits at the right boundary for both), so the
-per-tool `enforce_steer` call on CrewAI is optional — it's there for
-parity with LangGraph and for users who want explicit per-tool control.
+Why the difference: the plugin-based frameworks (Pydantic AI, Google ADK,
+AutoGen, Claude Agent SDK) expose a hook that can replace a tool's return
+value, so block, throttle, and steer all work with just `instrument(client)`.
+The callback-based frameworks (LangGraph/LangChain) can hard-*block* from the
+callback but cannot substitute a return value there, so full steer (returning a
+replacement in place of the tool body) needs the one-line per-tool
+`enforce_steer` opt-in. CrewAI's class patch sits at a boundary that covers
+both, so its per-tool call is optional.
+
+The raw model-SDK integrations (OpenAI, Anthropic, LangChain core) are
+**observe-only**: they emit spans for visibility but do not enforce, because at
+the raw model-call layer there is no tool call to intercept. Enforcement
+happens at the tool-call boundary on the agent frameworks above. If you drive
+tools yourself on top of a raw model SDK, add enforcement at your own tool
+dispatch.
 
 ## Enforcing in your agent code
 

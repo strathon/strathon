@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""OpenAI direct SDK + Strathon observability demo.
+"""OpenAI direct SDK + Strathon demo.
 
 Shows how Strathon captures OpenTelemetry spans for every
 openai.chat.completions.create() and openai.responses.create() call.

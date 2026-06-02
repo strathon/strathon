@@ -181,5 +181,5 @@ Any policy can be set to **shadow mode** in the dashboard. Shadow policies evalu
 - **Templates**: Use one-click policy templates in the dashboard — no CEL needed
 - **AI Generation**: Copy the prompt above into Claude or ChatGPT
 - **Documentation**: [getstrathon.com/docs](https://getstrathon.com/docs)
-- **Community**: [Discord](https://discord.gg/strathon)
+- **Community**: [Discord](https://discord.gg/Ta9XRmh4H)
 - **Issues**: [GitHub Issues](https://github.com/strathon/strathon/issues)

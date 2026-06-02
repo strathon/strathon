@@ -25,9 +25,8 @@ issue tagged `security` (without disclosing vulnerability details).
 
 ## Supported Versions
 
-Strathon is pre-v1.0. Security fixes are applied to the latest commit
-on `main` only. Once v1.0 ships, we will maintain a supported-versions
-table here.
+Strathon security fixes are applied to the latest release on `main`.
+See the [CHANGELOG](CHANGELOG.md) for the current version.
 
 ## Scope
 

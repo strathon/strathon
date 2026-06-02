@@ -1,72 +1,39 @@
-# Strathon Benchmarks
+# Benchmarks
 
-## Load Test
+## loadtest.py
 
-Measures OTLP ingest throughput (spans/second) and request latency.
+Measures end-to-end OTLP span ingestion throughput, latency (p50/p95/p99), and
+error rate against a live receiver. Every request runs the full production
+pipeline: OTLP protobuf parse, CEL policy evaluation, credential pattern scan,
+PII redaction, and the batched PostgreSQL write.
 
-### Prerequisites
+The throughput figures in `docs/scaling.md` come from this script. Re-run it on
+your hardware to reproduce or update them — it reports what your machine
+sustained, with the hardware/config it ran on. Do not extrapolate published
+numbers across different hardware.
 
 ```bash
-pip install httpx
-docker compose up -d   # Start receiver + Postgres
+# Start a receiver (4 uvicorn workers is a reasonable reference config):
+docker compose up -d
+# or: cd ../receiver && uvicorn main:app --workers 4 --port 4318
+
+pip install httpx opentelemetry-proto protobuf
+
+python loadtest.py --requests 5000 --concurrency 16 --batch-size 20
 ```
 
-### Run
+Exits non-zero if the error rate exceeds 1%, so it can gate a release check.
+
+## Finding your real ceiling (sweep mode)
+
+Throughput rises with concurrency until the database saturates, then plateaus.
+To find that plateau in one command, sweep several concurrency levels:
 
 ```bash
-# Default: 1000 requests × 50 spans = 50,000 spans, 10 concurrency
-python benchmarks/loadtest.py
-
-# High throughput test
-python benchmarks/loadtest.py --requests 5000 --concurrency 50 --batch-size 100
-
-# Against a remote instance
-STRATHON_API_KEY=stra_... python benchmarks/loadtest.py --endpoint https://api.getstrathon.com
+python loadtest.py --requests 5000 --batch-size 20 --sweep 8,16,32,64
 ```
 
-### Parameters
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--requests` | 1000 | Number of HTTP requests to send |
-| `--concurrency` | 10 | Max concurrent requests |
-| `--batch-size` | 50 | Spans per request |
-| `--endpoint` | http://localhost:4318 | Receiver URL |
-| `--api-key` | dev key | API key |
-
-### Target
-
-**10,000 spans/second** on a single receiver instance with Postgres.
-
-### Sample Output
-
-```
-RESULTS
-==================================================
-  Requests:      1000
-  Batch size:    50 spans/request
-  Total spans:   50,000
-  Wall time:     4.32s
-  Successes:     1000
-  Errors:        0
-  Error rate:    0.0%
-
-  Throughput:    11,574 spans/sec
-  Requests/sec:  231
-
-  Latency p50:   32.1ms
-  Latency p95:   78.4ms
-  Latency p99:   124.2ms
-  Latency max:   201.8ms
-
-  ✅ PASS: 11,574 spans/sec >= 10,000 target
-```
-
-### Tuning
-
-If below target:
-- Increase `--batch-size` (fewer HTTP requests, more spans per batch)
-- Check Postgres: `shared_buffers`, `work_mem`, `max_connections`
-- Check uvicorn workers: `--workers 4` for multi-core
-- Check if PII redaction regexes are bottleneck (disable temporarily to measure)
-- Check if policy evaluation count is high (many active policies × many spans)
+It runs the test at each level and prints a throughput curve marking the peak.
+Where spans/sec stops climbing as concurrency rises is your real ceiling —
+usually Postgres-bound, since all receiver workers share one database. Publish
+the peak figure (with the hardware line) rather than a single arbitrary run.

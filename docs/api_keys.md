@@ -47,8 +47,8 @@ retrieved later (only the SHA-256 hash is stored).
   "id": "2a9943e3-97fc-497b-9c15-8458a1feaf36",
   "project_id": "00000000-0000-0000-0000-000000000001",
   "name": "production deploy 2026-05",
-  "key_prefix": "stra_66l4KiV",
-  "key": "stra_66l4KiV6GXSqqtm1MLvgTNYdku180BwnItDGmMKZ5YM",
+  "key_prefix": "stra_xxxxxxx",
+  "key": "stra_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "created_at": "2026-05-14T11:57:15.153470+00:00",
   "last_used_at": null,
   "revoked_at": null
@@ -61,7 +61,7 @@ Use this key in your SDK initialization:
 from strathon import Client
 
 client = Client(
-    api_key="stra_66l4KiV6GXSqqtm1MLvgTNYdku180BwnItDGmMKZ5YM",
+    api_key="stra_your_api_key_here",
     endpoint="https://strathon.your-domain.com",
 )
 ```

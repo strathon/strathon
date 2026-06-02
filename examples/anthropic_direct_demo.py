@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Anthropic direct SDK + Strathon observability demo.
+"""Anthropic direct SDK + Strathon demo.
 
 Shows how Strathon captures OpenTelemetry spans for every
 anthropic.messages.create() call, including streaming responses.

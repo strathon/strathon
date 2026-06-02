@@ -144,9 +144,3 @@ Span search queries use `SET LOCAL plan_cache_mode = 'force_custom_plan'`
 to ensure Postgres uses plan-time partition pruning rather than
 switching to a generic plan after the 6th prepared-statement
 execution.
-
-## Not yet shipped
-
-- Full-text search over span names and attributes.
-- TraceQL-style query language.
-- Span aggregation endpoints (count, sum cost, histogram by model).

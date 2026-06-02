@@ -5,6 +5,37 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-01
+
+### Added
+
+**CLI Enhancements**
+- `strathon policies create --template <name>` — create policies from built-in OWASP templates without writing CEL
+- `strathon policies create --from-english "..."` — describe a policy in plain English, review generated CEL, confirm
+- `strathon policies import policies.yaml` — bulk import policies from YAML/JSON files
+- `strathon policies test --name <policy> --last 100` — dry-run a policy against recent traces
+
+**Framework Documentation**
+- Per-framework integration guides for all 10 supported frameworks (docs/frameworks/)
+- Each guide covers installation, setup, what gets captured, and example policies
+
+**Scaling Documentation**
+- Enterprise scaling guide (docs/scaling.md): horizontal scaling, PgBouncer, read replicas, recommendations by scale
+
+**OWASP Coverage**
+- OWASP table updated to match the 2026 Agentic Applications list (ASI01 through ASI10)
+- OWASP Agentic Skills Top 10 (AST) coverage doc explaining runtime vs supply chain responsibilities
+
+**README**
+- Full rewrite: expanded quickstart with complete code example, feature descriptions with 2-3 sentences each, framework integration table with docs links, performance section with enterprise scaling path, OWASP coverage table (all 10 threats), deploy section with Docker pull and HTTPS guidance, star history chart
+
+### Changed
+
+- CLI `policies create` now accepts `--expr`, `--template`, or `--from-english` (one required)
+- CLI depends on `pyyaml>=6.0` for YAML policy import
+- Updated pyproject.toml descriptions for SDK and CLI
+- Production Docker Compose includes PgBouncer for connection pooling
+
 ## [1.0.1] - 2026-06-01
 
 First public release.

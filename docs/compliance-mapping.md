@@ -158,20 +158,23 @@ for the risk level of the AI system.
 
 ## OWASP Agentic Top 10 Coverage
 
-Strathon ships 8 policy templates mapped to the OWASP Agentic Security
-Top 10 threats. These are available via `GET /v1/policy-templates` and
-can be applied with a single API call.
+Strathon ships policy templates mapped to the [OWASP Top 10 for Agentic
+Applications 2026](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/).
+These are available via `GET /v1/policy-templates` and can be applied
+with a single API call.
 
 | OWASP Threat | Template | Strathon mechanism |
 |---|---|---|
-| A01 Prompt Injection | prompt-injection-detection | CEL policy on span attributes |
-| A02 Broken Access Control | tool-access-allowlist | Deny-by-default (allow-list mode) |
-| A03 Excessive Agency | iteration-budget-guard | Iteration budgets with auto-halt |
-| A04 Insecure Output Handling | output-validation | CEL policy on tool output attributes |
-| A05 Resource Overconsumption | cost-budget-guard | Cost budgets with auto-halt |
-| A06 Data Poisoning | See memory-poisoning templates (post Phase 4) | CEL policies on tool/memory attributes |
-| A07 Insufficient Logging | (built-in) | OTLP ingest + audit log + Prometheus metrics |
-| A08 Insecure Plugin/Tool Design | tool-access-allowlist | Per-tool policy enforcement, deny-by-default |
+| ASI01 Agent Goal Hijack | prompt-injection-detection | CEL policy on span attributes |
+| ASI02 Tool Misuse and Exploitation | tool-access-allowlist | Deny-by-default (allow-list mode) |
+| ASI03 Identity and Privilege Abuse | (built-in) | Scoped API keys, RBAC, MFA, per-key rate limits |
+| ASI04 Insecure Agent-to-Agent Communication | (built-in) | MCP gateway with policy evaluation |
+| ASI05 Unsafe Agent Memory Management | (built-in) | Behavioral drift detection (Vigil), halt propagation |
+| ASI06 Implicit Trust and Inadequate Verification | iteration-budget-guard, cost-budget-guard | Budgets with auto-halt, approval workflows |
+| ASI07 Overwhelming HITL Controls | (built-in) | Multi-party approval, auto-escalation, circuit breakers |
+| ASI08 Inadequate Agent Access Controls | tool-access-allowlist | Per-tool policy enforcement, egress proxy, credential scanning |
+| ASI09 Insufficient Logging, Monitoring, and Auditing | (built-in) | OTLP ingest + audit log + Prometheus metrics |
+| ASI10 Rogue Agents | (built-in) | Vigil drift detection, heartbeat monitoring, kill switches |
 
 ## ISO/IEC 42001:2023 Alignment
 

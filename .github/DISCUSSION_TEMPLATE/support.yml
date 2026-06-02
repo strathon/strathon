@@ -1,0 +1,13 @@
+title: "Support"
+labels: ["support"]
+body:
+  - type: textarea
+    attributes:
+      label: "Question"
+      description: "What do you need help with?"
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: "Context"
+      description: "Strathon version, framework, OS, error messages."

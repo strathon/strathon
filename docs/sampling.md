@@ -96,6 +96,5 @@ The receiver maintains in-memory counters for sampling decisions:
 - `spans_force_kept_total` (kept by an always-keep rule that overrode a
   would-be-drop decision)
 
-These will be exposed via the `/metrics` Prometheus endpoint in a future
-release (C4). For now they're accessible via the FastAPI app state for
-debugging.
+These are exposed via the `/metrics` Prometheus endpoint, and are also
+accessible via the FastAPI app state for debugging.

@@ -190,6 +190,53 @@ For real deployments, change at minimum:
 A production deploy recipe (Fly.io / Render / managed Postgres) ships in
 a later release.
 
+### HTTPS
+
+The receiver speaks plain HTTP. For production, terminate TLS with a
+reverse proxy. Two options:
+
+**Caddy** (automatic HTTPS, recommended for simplicity):
+
+```
+strathon.yourdomain.com {
+    reverse_proxy localhost:4318
+}
+```
+
+Save as `Caddyfile`, run `caddy run`. Caddy obtains and renews
+certificates from Let's Encrypt automatically. No further config needed.
+
+**nginx** (if you already run nginx):
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name strathon.yourdomain.com;
+
+    ssl_certificate     /etc/letsencrypt/live/strathon.yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/strathon.yourdomain.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:4318;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Obtain certificates with `certbot --nginx` or your preferred ACME client.
+
+After configuring HTTPS, update your SDK endpoint:
+
+```python
+client = Client(
+    api_key="stra_...",
+    endpoint="https://strathon.yourdomain.com",
+)
+```
+
 ### Health probes
 
 The receiver exposes two probe endpoints with distinct semantics, matching
@@ -223,7 +270,7 @@ Example Kubernetes pod spec:
 spec:
   containers:
   - name: receiver
-    image: ghcr.io/strathon/strathon:latest
+    image: ghcr.io/strathon/receiver:latest
     ports:
     - containerPort: 4318
 

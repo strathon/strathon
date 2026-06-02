@@ -123,8 +123,8 @@ results are ordered newest first. Hard cap per page is 1000.
 | `audit:write`  | `POST` / `DELETE` `/v1/audit/streams`                   |
 | `audit:admin`  | Reserved for break-glass legal-hold release operations  |
 
-`audit:admin` is enumerable but no Stage 1 endpoint requires it;
-Stage 2 wires it once legal-hold / e-discovery surfaces ship.
+`audit:admin` is enumerable but no current endpoint requires it;
+A future release wires it once legal-hold / e-discovery surfaces ship.
 
 ## Integrity model
 
@@ -141,7 +141,7 @@ The audit log is **tamper-evident**, not tamper-proof. Two layers:
    Merkle root over the prior interval's `row_hash` values and
    inserts an `audit.anchors` row every
    `STRATHON_AUDIT_ANCHOR_INTERVAL_SECONDS` (default 60s). The
-   anchor's `merkle_root` is a 32-byte SHA-256 digest. Stage 2
+   anchor's `merkle_root` is a 32-byte SHA-256 digest. A future release
    adds KMS signing so the anchor itself is non-repudiable.
 
 To verify a single event, call `GET /v1/audit/events/{id}/verify`.
@@ -160,7 +160,7 @@ Defense-in-depth at the DB level:
 - A determined attacker with `ALTER TABLE` can still drop the
   trigger. The per-minute anchor records the prior-minute Merkle
   root, so historical rows can't be silently rewritten without
-  invalidating every anchor that includes them. Stage 2's
+  invalidating every anchor that includes them. A future release's
   externally-signed anchors close this last residual gap.
 
 ## HMAC key generation and rotation
@@ -177,8 +177,8 @@ In development (`DEBUG=true`) an empty key is silently substituted
 with a deterministic dev key plus a loud warning in the logs.
 
 Each row records `hmac_key_id` so historical rows continue to
-verify under the key they were signed with. Stage 1 ships a single
-key (`hmac_key_id = 1`); rotation in Stage 2 increments the id and
+verify under the key they were signed with. The current release ships a single
+key (`hmac_key_id = 1`); rotation in a future release increments the id and
 keeps the previous key available for chain verification of
 historical rows.
 
@@ -200,8 +200,8 @@ before storage. Three strategies, one per field name:
   `external_user_id`.
 
 The full rule table is in `audit/redaction.py`. Operators who need
-additional fields covered open a PR — Stage 1 ships a fixed
-conservative default; Stage 2 surfaces a per-tenant rules table.
+additional fields covered open a PR — The current release ships a fixed
+conservative default; a future release surfaces a per-tenant rules table.
 
 ## Streams (webhook destinations)
 
@@ -238,7 +238,7 @@ Events are stored in monthly partitions of `audit.events`. The
 months remain on the hot Postgres tier. The default of 24 months
 satisfies the strictest current frameworks: HIPAA's six-year
 records-of-disclosure requirement is met by 24 months hot plus a
-cold archive (Stage 2 WORM tier); SOC 2 has no fixed minimum but
+cold archive (planned WORM tier); SOC 2 has no fixed minimum but
 auditors expect at least one full audit cycle (typically 12 months).
 
 A daily background task runs `ensure_future_partitions` which
@@ -247,17 +247,17 @@ months. Idempotent via `CREATE TABLE IF NOT EXISTS`.
 
 ## OWASP Agentic Top 10 mapping
 
-- **ASI04 (Reasoning Manipulation)** — audit captures the policy
+- **ASI04 (Insecure Agent-to-Agent Communication)** — audit captures the policy
   mutation that opened the attack vector. `policy.update` rows
   with `before_state` and `after_state` give the reviewer the
   exact change.
-- **ASI05 (Memory Poisoning)** — `halt.issue` rows record who
+- **ASI05 (Unsafe Agent Memory Management)** — `halt.issue` rows record who
   triggered the halt and why; the resource and reason fields are
   human-readable in dashboards and incident reviews.
-- **ASI09 (Identity Spoofing)** — every audit row records actor
+- **ASI09 (Insufficient Logging, Monitoring, and Auditing)** — every audit row records actor
   type, actor id, request id, source IP, and user agent. A halt
   issued by an unexpected actor is visible at a glance.
-- **ASI10 (Overwhelming HITL)** — `audit.read` rows surface the
+- **ASI10 (Rogue Agents)** — `audit.read` rows surface the
   query patterns of operators consuming the audit log itself. A
   flood of automated reads is detectable from the audit log.
 
@@ -270,7 +270,7 @@ months. Idempotent via `CREATE TABLE IF NOT EXISTS`.
 | PCI DSS 10.5.1   | Limit audit-log viewing to those with need| `audit:read` scope; `audit.read` self-logging                                  |
 | GDPR Art 5(1)(f) | Integrity & confidentiality of logs       | HMAC chain + Merkle anchors                                                    |
 | GDPR Art 17      | Right to erasure                          | Cascade-delete on resource teardown emits `cascade_root_id` group              |
-| ISO 27001 A.8.15 | Protected audit logs                      | Append-only triggers + revoked grants + signed anchors (Stage 2)               |
+| ISO 27001 A.8.15 | Protected audit logs                      | Append-only triggers + revoked grants + signed anchors (planned)               |
 | EU AI Act Art 12 | High-risk AI logging (Aug 2026 enforce)   | All policy/halt mutations logged with 24-month hot retention                   |
 
 ## Operational notes
@@ -279,7 +279,7 @@ months. Idempotent via `CREATE TABLE IF NOT EXISTS`.
   global view; reads scoped to one project return only that
   project's events.
 - HMAC key rotation must coordinate with chain verification:
-  Stage 2 ships a key-rotation tool that increments `hmac_key_id`
+  A future release ships a key-rotation tool that increments `hmac_key_id`
   and keeps historical keys available.
 - Anchor sealer runs in the receiver process, not a separate
   worker. Restarts skip an anchor or two depending on timing;
@@ -289,17 +289,3 @@ months. Idempotent via `CREATE TABLE IF NOT EXISTS`.
   in `webhook_deliveries`) but send inline to the request that
   triggered them — fine for dev, set `STRATHON_WEBHOOK_REDIS_URL`
   for production.
-
-## What's not yet shipped (post-Stage 1)
-
-- Async NDJSON export. `POST /v1/audit/export` is a stub.
-- KMS-signed anchors. Stage 1 anchors are plaintext-verifiable
-  Merkle roots.
-- WORM cold tier (S3 Object Lock Compliance / GCS Bucket Lock /
-  Azure immutable blob).
-- Parquet export.
-- Splunk HEC, Datadog Logs, Kafka destinations alongside the
-  generic webhook stream.
-- Per-tenant redaction rules table.
-- `audit:admin` break-glass operations.
-- HMAC key rotation tooling.

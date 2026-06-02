@@ -1,0 +1,13 @@
+title: "Feature Request"
+labels: ["enhancement"]
+body:
+  - type: textarea
+    attributes:
+      label: "Idea"
+      description: "What would you like to see in Strathon?"
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: "Use case"
+      description: "Why is this useful? What problem does it solve?"
