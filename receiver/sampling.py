@@ -91,7 +91,7 @@ class SamplingConfig:
 class SamplingCounters:
     """Thread-safe counters for sampling decisions.
 
-    Held on app.state; will be exposed via the /metrics endpoint in C4.
+    Held on app.state; exposed via the /metrics endpoint.
     """
 
     def __init__(self) -> None:

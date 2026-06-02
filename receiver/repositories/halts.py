@@ -29,7 +29,7 @@ budget_id to be non-null. v1 surfaces two operator-facing scopes:
                  agent_id='*' so the existing CHECK still passes.
 
 The richer trace_id and budget_id scopes are reserved for future server-
-side actors (the budget monitor and loop detector that ship in H2/H3).
+side actors such as the budget monitor and loop detector.
 For now those scope values aren't reachable through the operator-facing
 endpoints; only the resurrected /v1/intervention/sync reads them so the
 SDK's eventual budget-driven halts are visible.
@@ -43,7 +43,7 @@ A halt is active iff:
   AND (expires_at IS NULL OR expires_at > NOW())
 
 We don't currently have expires_at as a column on halt_state — that's
-deferred to H2 when we add programmatic halts that auto-clear after a
+deferred until programmatic halts that auto-clear after a
 window. For v1 every halt is indefinite until an operator clears it.
 """
 
@@ -389,7 +389,7 @@ async def get_active_halts_for_sync(
         dto = _row_to_dto(r)
         # Skip non-operator scopes (trace / budget / unknown) from the
         # sync payload until we have SDK code that actually handles them.
-        # H2 will revisit and emit them.
+        # A future revision will emit them once the SDK handles them.
         if dto.scope not in (SCOPE_AGENT, SCOPE_PROJECT):
             continue
         out.append({

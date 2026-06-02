@@ -124,7 +124,7 @@ class StrathonMetrics:
             registry=self.registry,
         )
 
-        # ---- Webhook delivery (C3) ----
+        # ---- Webhook delivery ----
         # Counted at the actor on every send classification. The
         # outcome label is the row's final status for that attempt:
         # succeeded | abandoned | failed_retrying | dlq.

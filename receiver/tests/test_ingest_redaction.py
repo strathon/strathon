@@ -279,6 +279,8 @@ def test_policy_match_expression_sees_unredacted_content(client):
                        'log', '{}'::jsonb, ARRAY[]::TEXT[], true, 0)""",
             (policy_id, DEFAULT_PROJECT_ID, f"redact_test_{policy_id[:8]}"),
         )
+        import policy_cache
+        policy_cache.invalidate_all()  # raw insert bypasses create_policy
 
         trace_id = os.urandom(16)
         span_id = os.urandom(8)
@@ -297,9 +299,12 @@ def test_policy_match_expression_sees_unredacted_content(client):
         assert resp.status_code == 200
 
         # 1. The policy_matches table should have one row from this span
+        #    for THIS policy. Scope by policy_id so an unrelated enabled
+        #    policy that also matches the span can't perturb the assertion.
         match_row = conn.execute(
-            "SELECT policy_id, action FROM policy_matches WHERE span_id = %s::bytea",
-            (span_id,),
+            "SELECT policy_id, action FROM policy_matches "
+            "WHERE span_id = %s::bytea AND policy_id = %s::uuid",
+            (span_id, policy_id),
         ).fetchone()
         assert match_row is not None, (
             "policy_match was not recorded — redaction likely fired BEFORE eval"
@@ -340,6 +345,8 @@ def test_alert_webhook_payload_has_redacted_attrs(client):
             (policy_id, DEFAULT_PROJECT_ID, f"alert_redact_{policy_id[:8]}",
              '{"webhook_url":"https://example.test/hook"}'),
         )
+        import policy_cache
+        policy_cache.invalidate_all()  # raw insert bypasses create_policy
 
         trace_id = os.urandom(16)
         span_id = os.urandom(8)

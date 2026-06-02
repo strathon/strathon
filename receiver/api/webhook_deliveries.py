@@ -76,7 +76,7 @@ async def list_webhook_deliveries(
     as a sentinel module (used for status.HTTP_200_OK etc.) and
     shadowing it inside the handler would be confusing.
     """
-    pid = coerce_project_id(request, project_id)
+    pid = coerce_project_id(request, project_id, ctx)
 
     pol_uuid: UUID | None = None
     if policy_id is not None:
@@ -122,7 +122,7 @@ async def get_webhook_delivery(
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid delivery_id")
 
-    pid = coerce_project_id(request, None)
+    pid = coerce_project_id(request, None, ctx)
     row_json = await deliveries_repo.get_delivery(session, did, pid)
     if row_json is None:
         raise HTTPException(status_code=404, detail="delivery not found")
@@ -156,7 +156,7 @@ async def replay_webhook_delivery(
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid delivery_id")
 
-    pid = coerce_project_id(request, None)
+    pid = coerce_project_id(request, None, ctx)
     try:
         updated = await deliveries_repo.replay_delivery(session, did, pid)
     except ValueError as exc:

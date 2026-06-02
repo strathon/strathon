@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import Body, APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -75,8 +75,8 @@ async def list_policies_endpoint(
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_policy_endpoint(
-    payload: dict[str, Any],
-    request: Request,
+    payload: dict[str, Any] = Body(default={}),
+    request: Request = None,
     ctx: auth_mod.ApiKeyContext = Depends(require_scope(auth_mod.SCOPE_POLICIES_WRITE)),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
@@ -295,8 +295,8 @@ async def get_policy_endpoint(
 @router.patch("/{policy_id}")
 async def update_policy_endpoint(
     policy_id: str,
-    payload: dict[str, Any],
-    request: Request,
+    payload: dict[str, Any] = Body(default={}),
+    request: Request = None,
     ctx: auth_mod.ApiKeyContext = Depends(require_scope(auth_mod.SCOPE_POLICIES_WRITE)),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:

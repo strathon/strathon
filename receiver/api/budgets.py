@@ -114,7 +114,7 @@ async def create_budget(
     ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    pid = coerce_project_id(request, None)
+    pid = coerce_project_id(request, None, ctx)
     try:
         budget = await budgets_repo.create_budget(
             session, pid,
@@ -159,7 +159,7 @@ async def list_budgets(
     ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    pid = coerce_project_id(request, None)
+    pid = coerce_project_id(request, None, ctx)
     rows = await budgets_repo.list_budgets(
         session, pid, include_inactive=include_inactive, limit=limit,
     )
@@ -178,7 +178,7 @@ async def get_budget(
     ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    pid = coerce_project_id(request, None)
+    pid = coerce_project_id(request, None, ctx)
     budget = await budgets_repo.get_budget(session, budget_id, pid)
     if budget is None:
         raise HTTPException(status_code=404, detail="budget not found")
@@ -207,7 +207,7 @@ async def get_budget_spend(
     For iteration budgets, returns the live count of tool spans in
     the rolling window instead.
     """
-    pid = coerce_project_id(request, None)
+    pid = coerce_project_id(request, None, ctx)
     budget = await budgets_repo.get_budget(session, budget_id, pid)
     if budget is None:
         raise HTTPException(status_code=404, detail="budget not found")
@@ -281,7 +281,7 @@ async def patch_budget(
     invalidates the existing budget_reset_at. Operators who need
     these create a new budget and delete the old one.
     """
-    pid = coerce_project_id(request, None)
+    pid = coerce_project_id(request, None, ctx)
     existing = await budgets_repo.get_budget(session, budget_id, pid)
     if existing is None:
         raise HTTPException(status_code=404, detail="budget not found")
@@ -368,7 +368,7 @@ async def delete_budget(
     ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    pid = coerce_project_id(request, None)
+    pid = coerce_project_id(request, None, ctx)
     before = await budgets_repo.get_budget(session, budget_id, pid)
     deleted = await budgets_repo.delete_budget(session, budget_id, pid)
     if not deleted:

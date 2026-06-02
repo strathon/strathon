@@ -4,13 +4,12 @@
   GET    /v1/audit/events/{event_id}     single event
   GET    /v1/audit/events/{event_id}/verify  hash-chain check
   GET    /v1/audit/anchors               recent integrity anchors
-  POST   /v1/audit/export                async NDJSON export (stub for Stage 1)
   GET    /v1/audit/streams               list webhook destinations
   POST   /v1/audit/streams               create webhook destination
   DELETE /v1/audit/streams/{stream_id}   remove webhook destination
 
 Scopes:
-  audit:read   GET endpoints + POST /export
+  audit:read   GET endpoints
   audit:write  POST + DELETE /streams
 
 The audit log of the audit log is closed: every GET of /events or
@@ -265,28 +264,6 @@ async def list_anchors_endpoint(
 
 
 # --- Export ------------------------------------------------------------------
-
-
-@router.post("/export", status_code=status.HTTP_202_ACCEPTED)
-async def export_events_endpoint(
-    ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
-        require_scope(auth_mod.SCOPE_AUDIT_READ)
-    ),
-) -> dict[str, Any]:
-    """Stage 1 stub for async NDJSON export.
-
-    The real implementation lands the export as a dramatiq task and
-    returns a signed download URL. Stage 1 returns a clear "not yet"
-    response so SDK clients can detect the endpoint exists and is
-    scope-protected. Stage 2 fills in the body.
-    """
-    return {
-        "status": "not_implemented",
-        "detail": (
-            "Audit export will land in Stage 2. Use GET /v1/audit/events "
-            "with cursor pagination for now."
-        ),
-    }
 
 
 # --- Streams -----------------------------------------------------------------

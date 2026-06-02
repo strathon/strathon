@@ -155,8 +155,8 @@ class AuditAnchor(Base):
     event's integrity requires the row plus a Merkle inclusion proof
     against this anchor.
 
-    ``signature`` and ``signing_key_id`` are nullable in Stage 1
-    (anchors are plaintext-verifiable). Stage 2 wires KMS signing.
+    ``signature`` and ``signing_key_id`` are nullable: current
+    anchors are plaintext-verifiable Merkle roots; KMS signing is a planned extension.
     """
 
     __tablename__ = "anchors"

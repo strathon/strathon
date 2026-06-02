@@ -126,7 +126,7 @@ class RateLimiterStore:
     The store hands out (and lazily creates) one :class:`TokenBucket`
     per identifier string. All buckets share the same capacity and
     refill rate configured at construction. Per-key limits would
-    require schema changes; see the v1.1 backlog for that.
+    require schema changes and are intentionally out of scope here.
     """
 
     def __init__(self, *, capacity: int, refill_per_second: float) -> None:

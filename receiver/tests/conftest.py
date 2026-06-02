@@ -153,9 +153,13 @@ async def isolated_project(session) -> AsyncGenerator:
     slug = f"test-{project_id.hex[:8]}"
 
     # Insert project + its settings row. The seeded migration relies on
-    # every project having a settings row, so we mirror that here.
+    # every project having a settings row, so we mirror that here. Every
+    # project belongs to an organization; tests use the default org.
+    default_org_id = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
     await session.execute(
-        insert(Project).values(id=project_id, name=f"Test {slug}", slug=slug)
+        insert(Project).values(
+            id=project_id, name=f"Test {slug}", slug=slug, org_id=default_org_id
+        )
     )
     await session.execute(
         insert(ProjectSettings).values(project_id=project_id)

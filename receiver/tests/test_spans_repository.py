@@ -55,7 +55,7 @@ async def test_list_spans_returns_project_scoped(session, isolated_project):
 
     other = uuid.uuid4()
     await session.execute(
-        insert(Project).values(id=other, name="other", slug=f"o-{other.hex[:8]}")
+        insert(Project).values(org_id=__import__("uuid").UUID("00000000-0000-0000-0000-0000000000aa"), id=other, name="other", slug=f"o-{other.hex[:8]}")
     )
     await session.execute(insert(ProjectSettings).values(project_id=other))
     await session.flush()

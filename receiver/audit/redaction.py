@@ -16,9 +16,9 @@ Three handling strategies, chosen per field via a static rule table:
   even hashed.
 
 The rules are intentionally hardcoded in this module rather than
-sourced from a database table; Stage 1 ships a fixed-and-conservative
-default. Stage 2 will add per-tenant configurability backed by
-``audit.field_rules``.
+sourced from a database table; the current default is fixed and
+conservative. Per-tenant configurability (backed by
+``audit.field_rules``) is a planned extension.
 
 Tests live in ``tests/test_audit_redaction.py``.
 """

@@ -3,7 +3,7 @@
 Up until this migration, every API key implicitly had full access to
 every endpoint that read the Authorization header — and the /v1/api_keys
 endpoints didn't read the header at all, so anyone reachable to the
-receiver could manage keys. The api/ restructure (stage 6a) preserved
+receiver could manage keys. The api/ restructure preserved
 that gap as a known issue; this migration plus the accompanying code
 changes close it.
 

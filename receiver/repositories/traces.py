@@ -29,9 +29,10 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Optional
+import uuid as uuid_pkg
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,17 +45,33 @@ logger = logging.getLogger("strathon.receiver.repositories.traces")
 
 
 async def ensure_default_project(session: AsyncSession, slug: str) -> UUID:
-    """Idempotent: get or create the default project, return its id.
+    """Idempotent: get or create the default org + default project, return
+    the project id.
 
     Called once at startup so a fresh deployment has somewhere to send
-    traces before any user creates a real project. The conflict target
-    is `slug` since name isn't unique.
+    traces before any user creates a real project. Every project lives
+    under an organization; on self-host there is a single default org. The
+    project conflict target is ``(org_id, slug)`` (the per-org unique index).
     """
+    from models import Organization
+
+    # Fixed default-org id; must match migration 026's DEFAULT_ORG_ID so the
+    # migration backfill and this bootstrap agree without a lookup.
+    default_org_id = uuid_pkg.UUID("00000000-0000-0000-0000-0000000000aa")
+
+    org_stmt = (
+        pg_insert(Organization)
+        .values(id=default_org_id, name="Default", slug="default")
+        .on_conflict_do_nothing(index_elements=[Organization.id])
+    )
+    await session.execute(org_stmt)
+
     stmt = (
         pg_insert(Project)
-        .values(name="Default", slug=slug)
+        .values(name="Default", slug=slug, org_id=default_org_id)
         .on_conflict_do_update(
-            index_elements=[Project.slug],
+            index_elements=[Project.org_id, Project.slug],
+            index_where=text("deleted_at IS NULL"),
             set_={"updated_at": pg_insert(Project).excluded.updated_at},
         )
         .returning(Project.id)

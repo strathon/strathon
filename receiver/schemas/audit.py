@@ -11,7 +11,7 @@ Shapes the read and write surfaces of the audit log API:
 Wire format follows the research's OCSF-compatibility recommendation
 in spirit (named actor/resource fields, structured before/after,
 metadata for cursor); we don't ship full OCSF v1.3.0 envelope shape
-in Stage 1 to keep the surface easy to evolve.
+initially to keep the surface easy to evolve.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 MAX_LIMIT: int = 1000
 DEFAULT_LIMIT: int = 50
 
-# Stage 1 destination types.
+# Supported destination types.
 VALID_STREAM_KINDS = {"webhook"}
 
 
@@ -102,7 +102,7 @@ class AuditAnchorRead(BaseModel):
     last_row_hash: str  # hex
     merkle_root: str  # hex
     event_count: int
-    signature: Optional[str] = None  # hex when present (Stage 2)
+    signature: Optional[str] = None  # hex when present 
     signing_key_id: Optional[str] = None
 
 

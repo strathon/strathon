@@ -18,7 +18,7 @@ Not supported (return ``ParseError``):
   in the schema or have explicit nullability semantics that ``pr``
   wouldn't help with anyway. Add if a real query case appears.
 - Value-path filters (``addresses[type eq "work"]``). Audit events
-  have no nested JSON attributes worth deep-filtering in Stage 1.
+  have no nested JSON attributes worth deep-filtering today.
 - Schema URI prefixes (``urn:ietf:params:scim:schemas:Core:1.0:User``).
   Strathon's audit log is a flat schema; URIs are noise.
 

@@ -506,16 +506,3 @@ def test_audit_stream_create_emits_audit(client):
     )
 
 
-# --- Export stub ------------------------------------------------------------
-
-
-def test_export_endpoint_returns_not_implemented(client):
-    """Stage 1 returns a clear stub; Stage 2 wires the real async export."""
-    key = _mint(client, f"i-ex-{uuid.uuid4().hex[:6]}", ["audit:read"])
-    resp = client.post(
-        "/v1/audit/export",
-        headers={"Authorization": f"Bearer {key}"},
-    )
-    assert resp.status_code == 202
-    body = resp.json()
-    assert body["status"] == "not_implemented"

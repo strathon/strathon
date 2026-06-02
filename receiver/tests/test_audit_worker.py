@@ -98,7 +98,7 @@ async def test_seal_anchor_writes_for_nonempty_interval(async_engine):
     pid = uuid.uuid4()
     async with AsyncSession(async_engine, expire_on_commit=False) as s:
         await s.execute(
-            insert(Project).values(id=pid, name=str(pid), slug=f"p-{pid.hex[:8]}")
+            insert(Project).values(org_id=__import__("uuid").UUID("00000000-0000-0000-0000-0000000000aa"), id=pid, name=str(pid), slug=f"p-{pid.hex[:8]}")
         )
         await s.execute(insert(ProjectSettings).values(project_id=pid))
         await s.commit()
@@ -151,7 +151,7 @@ async def test_seal_anchor_only_covers_new_events(async_engine):
     pid = uuid.uuid4()
     async with AsyncSession(async_engine, expire_on_commit=False) as s:
         await s.execute(
-            insert(Project).values(id=pid, name=str(pid), slug=f"p-{pid.hex[:8]}")
+            insert(Project).values(org_id=__import__("uuid").UUID("00000000-0000-0000-0000-0000000000aa"), id=pid, name=str(pid), slug=f"p-{pid.hex[:8]}")
         )
         await s.execute(insert(ProjectSettings).values(project_id=pid))
         await s.commit()

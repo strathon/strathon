@@ -31,7 +31,7 @@ SUPPORTED_FRAMEWORKS: list[str] = [
     "google_adk",
 ]
 
-# No planned-but-unimplemented frameworks remain. All eight have
+# No planned-but-unimplemented frameworks remain. All ten have
 # real instrumentation modules. PLANNED_FRAMEWORKS is kept as an
 # empty list for API compatibility (tests reference it).
 PLANNED_FRAMEWORKS: list[str] = []
@@ -55,6 +55,7 @@ def auto_instrument(client, frameworks: Optional[List[str]] = None) -> List[str]
             planned but not yet implemented.
         ValueError: If a framework name is completely unknown.
     """
+    explicit = frameworks is not None
     if frameworks is None:
         frameworks = list(SUPPORTED_FRAMEWORKS)
 
@@ -77,6 +78,18 @@ def auto_instrument(client, frameworks: Optional[List[str]] = None) -> List[str]
             module = __import__(module_name, fromlist=["instrument"])
             if module.instrument(client):
                 instrumented.append(fw)
+            elif explicit:
+                # The user asked for this framework by name but it did not
+                # instrument — almost always because the framework package
+                # isn't installed. Stay loud: silently failing to instrument
+                # a firewall leaves the user believing calls are enforced
+                # when they are not.
+                logger.warning(
+                    "Strathon: requested framework %r was not instrumented "
+                    "(is the %r package installed in this environment?). "
+                    "Tool calls through it will NOT be enforced.",
+                    fw, fw,
+                )
         except NotImplementedError:
             raise
         except Exception as e:

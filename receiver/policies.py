@@ -1,6 +1,6 @@
 """Ingest-side policy composition.
 
-After stage 3 of the ORM refactor, this module is intentionally thin:
+This module is intentionally thin:
 
   - CRUD lives in receiver/repositories/policies.py (uses AsyncSession)
   - CEL expression machinery lives in receiver/policies_eval.py (pure)
@@ -109,7 +109,7 @@ def evaluate_for_span(
     return matched
 
 
-# Webhook firing has moved to the webhooks/ package (commit C1).
+# Webhook firing lives in the webhooks/ package.
 # fire_webhook here was fire-and-forget with no retries, signing, or
 # durability — see webhooks.dispatch.enqueue_delivery for the
 # reliable replacement.

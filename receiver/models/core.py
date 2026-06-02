@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     ForeignKey,
     Index,
@@ -35,6 +36,40 @@ if TYPE_CHECKING:
     from .traces import Trace
 
 
+# ----- Organization -----------------------------------------------------
+
+
+class Organization(Base, TimestampMixin):
+    """Tenancy layer above projects. One organization owns many projects.
+
+    On self-host there is a single default organization and it is largely
+    invisible. On hosted/cloud deployments each customer is an organization.
+    The ``cloud_*`` columns are null and unused on self-host; they exist so
+    hosted billing/usage metering can attach without a schema change.
+    """
+
+    __tablename__ = "organizations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
+
+    # Hosted-only fields; null on self-host.
+    cloud_plan: Mapped[Optional[str]] = mapped_column(Text)
+    cloud_billing_cycle_anchor: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    cloud_current_cycle_usage: Mapped[Optional[int]] = mapped_column(BigInteger)
+    cloud_config: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+
+    projects: Mapped[list["Project"]] = relationship(back_populates="organization")
+
+
 # ----- Project ----------------------------------------------------------
 
 class Project(Base, TimestampMixin):
@@ -48,10 +83,16 @@ class Project(Base, TimestampMixin):
         server_default=text("gen_random_uuid()"),
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    slug: Mapped[str] = mapped_column(Text, nullable=False)
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     deleted_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
 
     # Relationships
+    organization: Mapped["Organization"] = relationship(back_populates="projects")
     api_keys: Mapped[list["ApiKey"]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
@@ -75,10 +116,13 @@ class Project(Base, TimestampMixin):
 
     __table_args__ = (
         Index(
-            "idx_projects_slug",
+            "uq_projects_org_slug",
+            "org_id",
             "slug",
+            unique=True,
             postgresql_where=text("deleted_at IS NULL"),
         ),
+        Index("idx_projects_org", "org_id"),
     )
 
 
@@ -153,6 +197,11 @@ class ApiKey(Base):
             "idx_api_keys_prefix",
             "key_prefix",
             postgresql_where=text("revoked_at IS NULL"),
+        ),
+        Index(
+            "idx_api_keys_expires_at",
+            "expires_at",
+            postgresql_where=text("expires_at IS NOT NULL AND revoked_at IS NULL"),
         ),
         CheckConstraint(
             "cardinality(scopes) > 0",

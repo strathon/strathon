@@ -79,7 +79,7 @@ async def create_halt(
     in a future commit) use the in-process repository directly with
     actor=``budget_monitor`` and don't pass through this endpoint.
     """
-    pid = coerce_project_id(request, project_id)
+    pid = coerce_project_id(request, project_id, ctx)
     try:
         halt = await halts_repo.create_halt(
             session, pid,
@@ -121,7 +121,7 @@ async def list_halts(
     Default returns only active halts (state in paused/halted AND
     not cleared). include_cleared=true returns the full audit trail.
     """
-    pid = coerce_project_id(request, None)
+    pid = coerce_project_id(request, None, ctx)
     halts = await halts_repo.list_active_halts(
         session, pid,
         include_cleared=include_cleared,
@@ -144,7 +144,7 @@ async def get_halt(
     404 if not found OR not in this project (we don't differentiate so
     we don't leak cross-project existence).
     """
-    pid = coerce_project_id(request, None)
+    pid = coerce_project_id(request, None, ctx)
     halt = await halts_repo.get_halt(session, halt_id, pid)
     if halt is None:
         raise HTTPException(status_code=404, detail="halt not found")
@@ -165,7 +165,7 @@ async def delete_halt(
 
     Returns the updated row (now with cleared_at populated).
     """
-    pid = coerce_project_id(request, None)
+    pid = coerce_project_id(request, None, ctx)
     before = await halts_repo.get_halt(session, halt_id, pid)
     try:
         halt = await halts_repo.clear_halt(session, halt_id, pid)

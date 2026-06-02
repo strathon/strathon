@@ -145,7 +145,7 @@ CREATE TABLE audit.events (
     -- of the resource. diff is an RFC 6902 JSON Patch derived from
     -- them; redundant but pre-computed for efficient operator review.
     -- Each capped at 64 KB at the application layer; oversized
-    -- payloads are stored by reference (Stage 2).
+    -- payloads are stored by reference (planned).
     before_state    JSONB,
     after_state     JSONB,
     diff            JSONB,
@@ -175,7 +175,7 @@ CREATE TABLE audit.events (
 COMMENT ON TABLE audit.events IS
     'Append-only audit trail of operator mutations. Partitioned monthly. '
     'Tamper-evident via HMAC-SHA256 hash chain (prev_hash, row_hash). '
-    'See docs/audit.md and roadmap.md for the full design rationale.';
+    'See docs/audit.md for the full design rationale.';
 
 -- ---- Indexes on the parent (propagate to all partitions) ----
 
@@ -213,7 +213,7 @@ CREATE INDEX events_cascade
 -- REVOKE UPDATE/DELETE/TRUNCATE on PUBLIC, this provides defense in
 -- depth against accidental or programmatic mutation. A determined
 -- attacker with superuser can still ALTER TABLE to drop the trigger;
--- the per-minute anchor and forward-looking WORM archive (Stage 2)
+-- the per-minute anchor and forward-looking WORM archive (planned)
 -- close that residual gap.
 CREATE OR REPLACE FUNCTION audit.deny_mutation() RETURNS trigger AS $$
 BEGIN
@@ -234,7 +234,7 @@ CREATE TRIGGER events_no_truncate BEFORE TRUNCATE ON audit.events
 -- all events in the prior minute; verification of a single event
 -- requires the row, the prev_hash chain to the next anchor, and the
 -- Merkle inclusion proof. signature is filled in by KMS signing in
--- Stage 2; Stage 1 stores plaintext-verifiable anchors.
+-- planned; current anchors are plaintext-verifiable.
 CREATE TABLE audit.anchors (
     anchor_at       TIMESTAMPTZ PRIMARY KEY,
     last_sequence   BIGINT      NOT NULL,
@@ -246,8 +246,8 @@ CREATE TABLE audit.anchors (
 );
 
 COMMENT ON TABLE audit.anchors IS
-    'Per-minute integrity anchors over audit.events. Stage 1 stores '
-    'plaintext-verifiable Merkle roots; Stage 2 adds KMS signatures.';
+    'Per-minute integrity anchors over audit.events. Currently stores '
+    'plaintext-verifiable Merkle roots; KMS signatures planned.';
 
 -- ---- audit.streams ----
 -- Operator-registered webhook destinations. Each enabled stream

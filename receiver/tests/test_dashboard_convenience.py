@@ -158,6 +158,39 @@ def test_invite_member(client):
     assert r.json()["status"] == "invited"
 
 
+def test_pending_invitation_listed_then_revoked(client):
+    h = {"Authorization": f"Bearer {DEV_KEY}"}
+    email = _unique_email()
+    # Invite an email that has NOT registered -> should appear as pending.
+    r = client.post("/v1/members", json={"email": email, "role": "viewer"}, headers=h)
+    assert r.status_code in (200, 201)
+
+    r = client.get("/v1/members/pending", headers=h)
+    assert r.status_code == 200
+    emails = [p["email"] for p in r.json()["data"]]
+    assert email.lower() in [e.lower() for e in emails]
+    # the pending row carries role + status
+    row = next(p for p in r.json()["data"] if p["email"].lower() == email.lower())
+    assert row["role"] == "viewer"
+    assert row["status"] == "pending"
+
+    # Revoke it.
+    r = client.delete(f"/v1/members/pending/{email}", headers=h)
+    assert r.status_code == 200
+    assert r.json()["status"] == "revoked"
+
+    # Gone from the pending list.
+    r = client.get("/v1/members/pending", headers=h)
+    emails = [p["email"].lower() for p in r.json()["data"]]
+    assert email.lower() not in emails
+
+
+def test_pending_list_requires_read_scope(client):
+    # No auth header -> unauthorized.
+    r = client.get("/v1/members/pending")
+    assert r.status_code in (401, 403)
+
+
 def test_invite_duplicate_fails(client):
     new_email = _unique_email()
     # Register user first.

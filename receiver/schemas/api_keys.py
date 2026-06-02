@@ -30,6 +30,19 @@ class ApiKeyCreate(BaseModel):
     allowed_ips: Optional[list[str]] = None
 
 
+class ApiKeyUpdate(BaseModel):
+    """PATCH /v1/api_keys/{id} request body.
+
+    All fields optional: a PATCH updates only what it carries. The
+    endpoint rejects an empty body (nothing to change) with HTTP 400.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    expires_at: Optional[datetime] = None
+
+
 class ApiKeyRead(BaseModel):
     """Response model for GET /v1/api_keys (list) and any non-creation read.
 

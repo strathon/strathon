@@ -57,6 +57,7 @@ class Approval(Base):
     )
     expires_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False,
+        comment="requested_at + timeout_seconds. Background reaper checks this.",
     )
     approvers_required: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("1"),
@@ -69,6 +70,9 @@ class Approval(Base):
     approval_decisions: Mapped[list] = mapped_column(
         JSON, nullable=False, server_default=text("'[]'::json"),
         comment="Array of {actor, decision, timestamp} records.",
+    )
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1"),
     )
 
     __table_args__ = (

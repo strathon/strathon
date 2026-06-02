@@ -14,7 +14,7 @@ Transaction model:
     persisted via `session` here commits atomically on a clean response
     or rolls back together on any raised exception. There is NO outer
     asyncpg pool transaction wrapping this — that pattern was removed in
-    stage 5 of the ORM refactor.
+    the ORM refactor.
 
 Why parse OTLP protobuf manually rather than using opentelemetry-proto's
 generated readers fully: speed and footprint. The protobuf classes are
@@ -175,7 +175,7 @@ async def ingest_traces(
         logger.warning("Failed to parse OTLP body (%d bytes): %s", len(body), exc)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid OTLP protobuf: {exc}",
+            detail="Invalid OTLP protobuf payload.",
         )
 
     span_count = 0
@@ -186,13 +186,18 @@ async def ingest_traces(
     # repository returns Pydantic models — convert to dicts so the legacy
     # evaluate_for_span call sites (which accept the raw shape) keep working.
     try:
-        policy_models = await policies_repo.list_policies(
-            session, project_id, only_enabled=True
-        )
-        active_policies = [
-            {**p.model_dump(mode="python"), "id": str(p.id)}
-            for p in policy_models
-        ]
+        import policy_cache
+
+        async def _load_policies():
+            models = await policies_repo.list_policies(
+                session, project_id, only_enabled=True
+            )
+            return [
+                {**p.model_dump(mode="python"), "id": str(p.id)}
+                for p in models
+            ]
+
+        active_policies = await policy_cache.get_policies(project_id, _load_policies)
     except Exception:
         logger.exception("failed to load policies for ingest; proceeding without policy eval")
         active_policies = []
@@ -327,7 +332,7 @@ async def ingest_traces(
                             },
                         })
 
-                # ---- PII redaction (P1) ----
+                # ---- PII redaction ----
                 # Runs after policy evaluation so match_expressions see
                 # the raw content, but before webhook payload assembly
                 # and span persistence so neither downstream consumer
@@ -574,7 +579,7 @@ async def ingest_traces(
         )
         state.metrics.policy_matches.labels(action=m["action"]).inc()
 
-    # Alert webhook delivery (commit C1: durable + retried + signed).
+    # Alert webhook delivery (durable, retried, signed).
     #
     # For each matched alert policy, insert a webhook_deliveries row
     # inside this request's transaction. The row is the durable record

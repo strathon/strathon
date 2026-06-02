@@ -1,6 +1,6 @@
 """Strathon receiver entrypoint.
 
-After stage 6a of the refactor, this module owns three things and
+After the API refactor, this module owns three things and
 nothing else:
 
   1. Lifespan: migrations, default project, retention task, quickstart
@@ -290,24 +290,30 @@ async def lifespan(app: FastAPI):
         logger.warning(
             "STRATHON_PASSWORD_PEPPER not set. Consider adding for defense-in-depth."
         )
-    _mode = os.environ.get("STRATHON_MODE", "self-hosted")
-    logger.info("Strathon mode: %s", _mode)
+    from config import get_settings
+    _settings = get_settings()
+    logger.info("Strathon mode: %s", _settings.mode)
 
     # Ensure the default project (and its settings row) exists so a fresh
-    # deployment has somewhere to send traces before any user creates a
-    # real project. Uses its own short-lived session that commits
-    # explicitly — we don't yet have a request-scoped session here.
+    # self-hosted deployment has somewhere to send traces before any user
+    # creates a real project. In cloud (multi-tenant) there is no shared
+    # default project — each organization's projects are created through
+    # signup — so this bootstrap is self-host only.
     from database import async_session_maker
     from repositories.traces import ensure_default_project
 
-    async with async_session_maker() as session:
-        app.state.default_project_id = await ensure_default_project(
-            session, DEFAULT_PROJECT_SLUG
-        )
-        await session.commit()
-    logger.info("Default project id: %s", app.state.default_project_id)
+    if _settings.is_cloud:
+        app.state.default_project_id = None
+        logger.info("Cloud mode: skipping default-project bootstrap")
+    else:
+        async with async_session_maker() as session:
+            app.state.default_project_id = await ensure_default_project(
+                session, DEFAULT_PROJECT_SLUG
+            )
+            await session.commit()
+        logger.info("Default project id: %s", app.state.default_project_id)
 
-    # Sampling config (env-driven) + counters for /metrics in C4
+    # Sampling config (env-driven) + counters for the /metrics endpoint
     app.state.sampling_config = sampling.SamplingConfig.from_env()
     app.state.sampling_counters = sampling.SamplingCounters()
     logger.info(
@@ -642,7 +648,7 @@ app = FastAPI(
         "An open-source firewall for AI agents. Write CEL rules, "
         "Strathon blocks the tool call before it runs."
     ),
-    version="1.0.1",
+    version="1.1.0",
     license_info={"name": "MIT", "url": "https://opensource.org/licenses/MIT"},
     contact={"name": "Strathon", "url": "https://getstrathon.com"},
     openapi_tags=[
@@ -720,9 +726,10 @@ app.add_middleware(RateLimitMiddleware)
 from api import (  # noqa: E402
     agent_inventory, analytics, api_keys, approvals, audit, auth_endpoints,
     budgets, dashboard_convenience, security_tools, compliance_export, cost_forecast, costs,
+    data_export, mcp,
     github_integration, halts, health, intervention, members, model_prices,
     notification_channels, policies, policy_suggestions, policy_templates,
-    project_settings, projects, simulate, spans, topology, traces,
+    project_settings, policy_generate, projects, simulate, spans, topology, traces,
     webhook_deliveries, webhook_signing_keys,
 )
 
@@ -738,6 +745,7 @@ app.include_router(policy_suggestions.router)
 app.include_router(policies.router)
 app.include_router(policy_templates.router)
 app.include_router(simulate.router)
+app.include_router(policy_generate.router)
 app.include_router(api_keys.router)
 app.include_router(intervention.router)
 app.include_router(halts.router)
@@ -748,6 +756,8 @@ app.include_router(model_prices.router)
 app.include_router(approvals.router)
 app.include_router(agent_inventory.router)
 app.include_router(compliance_export.router)
+app.include_router(data_export.router)
+app.include_router(mcp.router)
 app.include_router(project_settings.router)
 app.include_router(audit.router)
 # RBAC: auth + membership management

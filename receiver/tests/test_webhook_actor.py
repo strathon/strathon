@@ -57,7 +57,7 @@ async def _committed_project_and_policy(async_engine):
     slug = f"actor-{project_id.hex[:8]}"
 
     async with AsyncSession(bind=async_engine, expire_on_commit=False) as s:
-        await s.execute(insert(Project).values(id=project_id, name=slug, slug=slug))
+        await s.execute(insert(Project).values(org_id=__import__("uuid").UUID("00000000-0000-0000-0000-0000000000aa"), id=project_id, name=slug, slug=slug))
         await s.execute(insert(ProjectSettings).values(project_id=project_id))
         await s.execute(insert(Policy).values(
             id=policy_id, project_id=project_id,

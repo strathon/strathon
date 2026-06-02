@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -24,7 +23,6 @@ from database import get_db_session
 from ._deps import require_scope
 
 # In-memory store for MCP proxy configs until a migration adds a column.
-_mcp_proxy_configs: dict[str, dict[str, Any]] = {}
 
 router = APIRouter(tags=["security"])
 
@@ -262,85 +260,3 @@ def _to_cyclonedx(agents: list[dict]) -> dict:
         "components": components,
     }
 
-
-# ---- MCP Security Gateway Proxy ----------------------------------------------
-
-class MCPProxyConfig(BaseModel):
-    upstream_url: str = Field(..., description="Real MCP server URL")
-    blocked_tools: list[str] = Field(default_factory=list)
-    scan_responses: bool = True
-    model_config = {"extra": "forbid"}
-
-
-@router.post("/v1/mcp/configure")
-async def configure_mcp_proxy(
-    body: MCPProxyConfig,
-    ctx: auth_mod.ApiKeyContext = Depends(
-        require_scope(auth_mod.SCOPE_PROJECT_SETTINGS_WRITE)
-    ),
-    session: AsyncSession = Depends(get_db_session),
-) -> dict[str, Any]:
-    """Configure MCP proxy for a project. Stores upstream URL and settings."""
-    # MCP proxy config stored in-memory until a dedicated migration adds
-    # a column or table. project_settings is NOT a key-value store.
-    # Per-project MCP config via env vars; DB column for future release.
-    _mcp_proxy_configs[str(ctx.project_id)] = {
-        "upstream_url": body.upstream_url,
-        "blocked_tools": body.blocked_tools,
-        "scan_responses": body.scan_responses,
-    }
-    return {
-        "status": "configured",
-        "proxy_endpoint": "/v1/mcp/proxy",
-        "upstream_url": body.upstream_url,
-    }
-
-
-@router.post("/v1/mcp/proxy")
-async def mcp_proxy(
-    request: dict[str, Any],
-    ctx: auth_mod.ApiKeyContext = Depends(
-        require_scope(auth_mod.SCOPE_TRACES_WRITE)
-    ),
-    session: AsyncSession = Depends(get_db_session),
-) -> dict[str, Any]:
-    """MCP security proxy endpoint.
-
-    Agents point their MCP client to this URL instead of the real
-    MCP server. Strathon evaluates every tools/call against CEL
-    policies, scans responses for credential leakage, and forwards
-    allowed requests to the upstream server.
-
-    Setup:
-      1. POST /v1/mcp/configure with upstream_url
-      2. Point agent MCP client to /v1/mcp/proxy
-      3. All tool calls flow through Strathon policies
-
-    The agent uses its normal Strathon API key for auth.
-    """
-    # Load proxy config for this project.
-    result = await session.execute(text(
-        "SELECT value FROM project_settings "
-        "WHERE project_id = :pid AND key = 'mcp_proxy'"
-    ), {"pid": ctx.project_id})
-    row = result.scalar_one_or_none()
-
-    if not row:
-        from fastapi import HTTPException
-        raise HTTPException(
-            status_code=400,
-            detail="MCP proxy not configured. Call POST /v1/mcp/configure first.",
-        )
-
-    config = json.loads(row) if isinstance(row, str) else row
-
-    from mcp_gateway import MCPSecurityGateway
-    gateway = MCPSecurityGateway(
-        upstream_url=config["upstream_url"],
-        strathon_api_key=ctx.key_prefix,  # Internal use only.
-        strathon_endpoint="http://localhost:4318",
-        blocked_tools=config.get("blocked_tools", []),
-        scan_responses=config.get("scan_responses", True),
-    )
-
-    return await gateway.handle_request(request)

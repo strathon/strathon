@@ -101,7 +101,7 @@ async def test_list_keys_scopes_to_project(session, isolated_project, async_engi
     other_project_id = uuid.uuid4()
     async with AsyncSession(bind=async_engine, expire_on_commit=False) as s:
         await s.execute(insert(Project).values(
-            id=other_project_id, name="other-proj",
+            org_id=__import__("uuid").UUID("00000000-0000-0000-0000-0000000000aa"), id=other_project_id, name="other-proj",
             slug=f"other-{other_project_id.hex[:8]}",
         ))
         await s.execute(insert(ProjectSettings).values(project_id=other_project_id))
@@ -173,7 +173,7 @@ async def test_revoke_key_wrong_project_returns_none(session, isolated_project, 
     other_key_id = None
     async with AsyncSession(bind=async_engine, expire_on_commit=False) as s:
         await s.execute(insert(Project).values(
-            id=other_project_id, name="other",
+            org_id=__import__("uuid").UUID("00000000-0000-0000-0000-0000000000aa"), id=other_project_id, name="other",
             slug=f"other-{other_project_id.hex[:8]}",
         ))
         await s.execute(insert(ProjectSettings).values(project_id=other_project_id))

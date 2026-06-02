@@ -36,3 +36,33 @@ class Config:
     # Retry behaviour on export failure
     max_retries: int = 3
     retry_backoff_seconds: float = 1.0
+
+    def __post_init__(self) -> None:
+        """Validate configuration so misconfiguration fails fast with a clear
+        message rather than surfacing as a confusing error deep in the export
+        pipeline at runtime."""
+        if not (0.0 <= self.sample_rate <= 1.0):
+            raise ValueError(
+                f"sample_rate must be between 0.0 and 1.0, got {self.sample_rate}"
+            )
+        if self.batch_size < 1:
+            raise ValueError(f"batch_size must be >= 1, got {self.batch_size}")
+        if self.batch_timeout_seconds <= 0:
+            raise ValueError(
+                f"batch_timeout_seconds must be > 0, got {self.batch_timeout_seconds}"
+            )
+        if self.http_timeout_seconds <= 0:
+            raise ValueError(
+                f"http_timeout_seconds must be > 0, got {self.http_timeout_seconds}"
+            )
+        if self.intervention_poll_interval_seconds <= 0:
+            raise ValueError(
+                "intervention_poll_interval_seconds must be > 0, got "
+                f"{self.intervention_poll_interval_seconds}"
+            )
+        if self.max_retries < 0:
+            raise ValueError(f"max_retries must be >= 0, got {self.max_retries}")
+        if self.retry_backoff_seconds < 0:
+            raise ValueError(
+                f"retry_backoff_seconds must be >= 0, got {self.retry_backoff_seconds}"
+            )

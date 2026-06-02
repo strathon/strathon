@@ -1,6 +1,6 @@
 """HTTP routers for the Strathon receiver.
 
-After stage 6a, every FastAPI endpoint lives in one of the sibling modules
+Every FastAPI endpoint lives in one of the sibling modules
 here (health, traces, policies, api_keys, intervention). main.py owns
 app construction + lifespan only.
 

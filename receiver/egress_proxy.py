@@ -44,6 +44,10 @@ try:
             )
             self.api_key = os.environ.get("STRATHON_API_KEY", "")
             self._credential_patterns = None
+            # Pulled policy list (same model the SDK uses: fetch from
+            # /v1/policies, evaluate CEL locally, refresh periodically).
+            self._policies: list[dict[str, Any]] = []
+            self._policies_loaded = False
 
         def load(self, loader):
             loader.add_option(
@@ -60,6 +64,29 @@ try:
                 self.strathon_url = mitmctx.options.strathon_url
             if "strathon_key" in updates:
                 self.api_key = mitmctx.options.strathon_key
+            # Refresh the policy list whenever config changes (and on first run).
+            self._refresh_policies()
+
+        def _refresh_policies(self) -> None:
+            """Pull the project's policies from /v1/policies (the real
+            endpoint the SDK uses). Evaluation happens locally; there is no
+            per-request round-trip and therefore no per-request fail-open.
+            """
+            if not (self.api_key and self.strathon_url):
+                return
+            try:
+                import httpx
+                with httpx.Client(timeout=5.0) as client:
+                    resp = client.get(
+                        f"{self.strathon_url}/v1/policies",
+                        headers={"Authorization": f"Bearer {self.api_key}"},
+                        params={"enabled": "true"},
+                    )
+                if resp.status_code == 200:
+                    self._policies = resp.json().get("policies", [])
+                    self._policies_loaded = True
+            except Exception:
+                logger.exception("egress: failed to refresh policies")
 
         def _get_patterns(self):
             """Lazy-load credential patterns."""
@@ -95,35 +122,50 @@ try:
                 )
                 return
 
-            # Check against Strathon policies (optional, requires receiver).
-            if self.api_key and self.strathon_url:
-                try:
-                    import httpx
-                    with httpx.Client(timeout=2.0) as client:
-                        resp = client.post(
-                            f"{self.strathon_url}/v1/policies/evaluate",
-                            headers={"Authorization": f"Bearer {self.api_key}"},
-                            json={
-                                "tool_name": f"http.{method.lower()}",
-                                "arguments": {"url": url},
-                                "source": "egress_proxy",
-                            },
-                        )
-                        if resp.status_code == 200:
-                            result = resp.json()
-                            if result.get("action") == "block":
-                                flow.response = http.Response.make(
-                                    403,
-                                    json.dumps({
-                                        "error": f"Blocked by policy: {result.get('policy_name', 'unknown')}",
-                                    }).encode(),
-                                    {"Content-Type": "application/json",
-                                     "X-Strathon-Block-Reason": "policy"},
-                                )
-                                return
-                except Exception:
-                    # Fail open — don't block traffic if receiver is unreachable.
-                    pass
+            # Evaluate against pulled policies LOCALLY (no per-request HTTP).
+            verdict = self._evaluate_policies(method, url)
+            if verdict.get("action") == "block":
+                flow.response = http.Response.make(
+                    403,
+                    json.dumps({
+                        "error": f"Blocked by policy: {verdict.get('policy_name', 'unknown')}",
+                    }).encode(),
+                    {"Content-Type": "application/json",
+                     "X-Strathon-Block-Reason": "policy"},
+                )
+                logger.warning("Blocked request to %s by policy %s",
+                               url, verdict.get("policy_name", ""))
+                return
+
+        def _evaluate_policies(self, method: str, url: str) -> dict[str, Any]:
+            """Evaluate the pulled policies against this request, locally.
+
+            Maps the HTTP request to the same span-context shape the rest of
+            Strathon uses (tool name = http.<method>, url in attrs) and runs
+            the shared CEL evaluator. Returns the highest-priority matching
+            action, or allow if none match.
+            """
+            if not self._policies:
+                return {"action": "allow"}
+            try:
+                from policies import evaluate_for_span
+                tool_name = f"http.{method.lower()}"
+                attrs = {
+                    "strathon.tool.name": tool_name,
+                    "gen_ai.tool.name": tool_name,
+                    "strathon.http.url": url,
+                    "strathon.source": "egress_proxy",
+                }
+                matches = evaluate_for_span(self._policies, tool_name, attrs)
+                if not matches:
+                    return {"action": "allow"}
+                top = matches[0]
+                return {"action": top.get("action", "allow"),
+                        "policy_name": top.get("name", "")}
+            except Exception:
+                logger.exception("egress: local policy evaluation failed")
+                # Fail-closed on the policy path: if evaluation errors, block.
+                return {"action": "block", "policy_name": "_fail_closed"}
 
         def response(self, flow: http.HTTPFlow) -> None:
             """Scan response body for credential leakage."""

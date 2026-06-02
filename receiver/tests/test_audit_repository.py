@@ -99,7 +99,7 @@ async def test_chains_are_per_project(session):
     p2 = uuid.uuid4()
     for pid in (p1, p2):
         await session.execute(
-            insert(Project).values(id=pid, name=str(pid), slug=f"p-{pid.hex[:8]}")
+            insert(Project).values(org_id=__import__("uuid").UUID("00000000-0000-0000-0000-0000000000aa"), id=pid, name=str(pid), slug=f"p-{pid.hex[:8]}")
         )
         await session.execute(insert(ProjectSettings).values(project_id=pid))
     await session.flush()

@@ -163,7 +163,7 @@ def test_sarif_credential_finding():
 
 def test_mcp_gateway_error_response():
     from mcp_gateway import MCPSecurityGateway
-    resp = MCPSecurityGateway._error_response("req-1", -32600, "Blocked")
+    resp = MCPSecurityGateway._error("req-1", -32600, "Blocked")
     assert resp["jsonrpc"] == "2.0"
     assert resp["id"] == "req-1"
     assert resp["error"]["code"] == -32600

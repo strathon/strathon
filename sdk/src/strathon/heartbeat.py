@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("strathon.heartbeat")
 
-_VERSION = "1.0.1"
+_VERSION = "1.1.0"
 
 
 def compute_code_hash() -> str:

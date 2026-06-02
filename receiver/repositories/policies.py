@@ -3,7 +3,7 @@
 Session-aware replacements for the raw-asyncpg CRUD functions previously
 in receiver/policies.py. The CEL evaluator now lives in policies_eval.py
 and the ingest-side matcher (evaluate_for_span) stays in policies.py.
-Webhook delivery moved to the webhooks/ package in commit C1.
+Webhook delivery lives in the webhooks/ package.
 
 Update semantics:
     The `updated_at` column is set explicitly by update_policy. The
@@ -116,6 +116,7 @@ async def create_policy(
     # at the request boundary, not here.
     await session.flush()
     await session.refresh(policy)
+    _invalidate(project_id)
     result = PolicyRead.model_validate(policy)
     await _capture_version(session, result, "create")
     return result
@@ -188,6 +189,7 @@ async def update_policy(
         return None
     updated = PolicyRead.model_validate(policy)
     await _capture_version(session, updated, "update")
+    _invalidate(project_id)
     return updated
 
 
@@ -210,6 +212,7 @@ async def delete_policy(
         Policy.id == policy_id,
     )
     result = await session.execute(stmt)
+    _invalidate(project_id)
     return bool(result.rowcount)  # type: ignore[attr-defined]
 
 
@@ -340,3 +343,12 @@ async def get_version(
     )
     row = result.mappings().first()
     return dict(row) if row is not None else None
+
+
+def _invalidate(project_id) -> None:
+    """Drop the ingest policy cache for a project after a mutation."""
+    try:
+        import policy_cache
+        policy_cache.invalidate_project(project_id)
+    except Exception:
+        pass

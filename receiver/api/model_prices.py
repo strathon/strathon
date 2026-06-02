@@ -71,7 +71,7 @@ async def upsert_price(
     ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    pid = coerce_project_id(request, None)
+    pid = coerce_project_id(request, None, ctx)
     in_cost = _str_to_decimal("input_cost_per_token", body.input_cost_per_token)
     out_cost = _str_to_decimal("output_cost_per_token", body.output_cost_per_token)
     try:
@@ -103,7 +103,7 @@ async def list_prices(
     ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    pid = coerce_project_id(request, None)
+    pid = coerce_project_id(request, None, ctx)
     rows = await prices_repo.list_overrides(session, pid)
     return {"overrides": [r.to_json() for r in rows]}
 
@@ -117,7 +117,7 @@ async def delete_price(
     ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    pid = coerce_project_id(request, None)
+    pid = coerce_project_id(request, None, ctx)
     deleted = await prices_repo.delete_override(session, pid, model_name)
     if not deleted:
         raise HTTPException(status_code=404, detail="override not found")

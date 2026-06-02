@@ -11,11 +11,13 @@ Do not move model classes to subpackages without re-exporting them here.
 """
 
 from .base import Base, TimestampMixin
+from .approvals import Approval
 from .audit import AuditAnchor, AuditEvent, AuditStream
-from .core import ApiKey, Project, ProjectSettings, Session
+from .core import ApiKey, Organization, Project, ProjectSettings, Session
 from .git import GitCommit, GitHubIntegration
-from .identity import ProjectMember, User
+from .identity import PendingInvitation, ProjectMember, User
 from .intervention import Budget, HaltState, InterventionLog, ModelPriceOverride
+from .notifications import NotificationChannel
 from .policies import Policy, PolicyMatch, PolicyVersion
 from .traces import Span, SpanEvent, SpanLink, Trace
 from .webhooks import WebhookDelivery, WebhookSigningKey
@@ -25,6 +27,7 @@ __all__ = [
     "Base",
     "TimestampMixin",
     # Core
+    "Organization",
     "Project",
     "ApiKey",
     "Session",
@@ -56,4 +59,8 @@ __all__ = [
     "AuditAnchor",
     "AuditEvent",
     "AuditStream",
+    # Identity (invitations) + approvals + notifications
+    "PendingInvitation",
+    "Approval",
+    "NotificationChannel",
 ]

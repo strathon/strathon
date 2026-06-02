@@ -4,7 +4,7 @@ Deletes traces (and via FK cascade, their spans / span_events / span_links /
 policy_matches) older than each project's configured
 ``project_settings.trace_retention_days``.
 
-After stage 4 of the ORM refactor:
+ORM-backed retention:
 - DB work lives in receiver/repositories/retention.py (uses AsyncSession)
 - This module owns the loop + config + env-parsing
 - The loop constructs its own session per sweep via async_session_maker

@@ -42,7 +42,7 @@ import logging
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import Body, APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
@@ -60,8 +60,8 @@ router = APIRouter(prefix="/v1/intervention", tags=["intervention"])
 
 @router.post("/sync")
 async def intervention_sync(
-    payload: dict[str, Any],
-    request: Request,
+    payload: dict[str, Any] = Body(default={}),
+    request: Request = None,
     ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
         require_scope(auth_mod.SCOPE_HALTS_READ)
     ),
@@ -71,11 +71,11 @@ async def intervention_sync(
 
     The body is currently ignored — earlier designs had the SDK push
     its current loop count / spent cost up here for the server to
-    roll up. v1 reads, doesn't roll up. Future commits may consume
+    roll up. v1 reads, doesn't roll up. A future release may consume
     body fields; the shape is preserved so the SDK doesn't need a
     coordinated update.
     """
-    pid = coerce_project_id(request, None)
+    pid = coerce_project_id(request, None, ctx)
     halts = await halts_repo.get_active_halts_for_sync(session, pid)
 
     # Surface active budgets to the SDK as well. The SDK does NOT
@@ -117,7 +117,7 @@ async def intervention_sync(
 
 @router.post("/halt", status_code=status.HTTP_201_CREATED)
 async def intervention_halt(
-    payload: dict[str, Any],
+    payload: dict[str, Any] = Body(default={}),
     ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
         require_scope(auth_mod.SCOPE_TRACES_WRITE)
     ),

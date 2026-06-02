@@ -10,10 +10,13 @@ Scope: audit:read.
 
 from __future__ import annotations
 
+import json
+
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +27,9 @@ from database import get_db_session
 from ._deps import require_scope
 
 router = APIRouter(prefix="/v1/compliance", tags=["compliance"])
+
+# Strathon version reported in the SARIF tool driver.
+STRATHON_VERSION = "1.1.0"
 
 # Minimum retention required by EU AI Act Article 19(1).
 MIN_RETENTION_DAYS = 180
@@ -204,7 +210,7 @@ async def export_compliance(
             f"minimum {MIN_RETENTION_DAYS} days (6 months)."
         )
 
-    return {
+    report = {
         "framework": framework,
         "generated_at": now.isoformat(),
         "project_id": str(project_id),
@@ -218,6 +224,115 @@ async def export_compliance(
         },
         "recommendations": recommendations,
         "recommendation_count": len(recommendations),
+    }
+
+    fmt = (body or {}).get("format", "json").lower()
+    if fmt == "sarif":
+        sarif = _to_sarif(report, now)
+        return Response(
+            content=json.dumps(sarif, indent=2),
+            media_type="application/sarif+json",
+            headers={
+                "Content-Disposition": 'attachment; filename="strathon-compliance.sarif"'
+            },
+        )
+    if fmt not in ("json", "sarif"):
+        # Unknown format: don't silently mislabel. Tell the caller.
+        return JSONResponse(
+            status_code=400,
+            content={
+                "detail": f"Unsupported format '{fmt}'. Use 'json' or 'sarif'."
+            },
+        )
+    return report
+
+
+def _to_sarif(report: dict[str, Any], now: datetime) -> dict[str, Any]:
+    """Render the compliance report as a SARIF 2.1.0 log.
+
+    Each EU AI Act article maps to a SARIF reporting descriptor (rule);
+    each non-compliant article and each recommendation maps to a SARIF
+    result. Compliant articles emit an informational result so the file
+    is a complete evidence record, not only a list of gaps. Results carry
+    no physical source location (compliance findings are about the system,
+    not a source file), which is valid SARIF.
+    """
+    articles: dict[str, Any] = report.get("articles", {})
+
+    rules: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
+
+    for key, art in articles.items():
+        rule_id = key  # e.g. "article_9_risk_management"
+        description = str(art.get("description", rule_id))
+        rules.append(
+            {
+                "id": rule_id,
+                "name": rule_id,
+                "shortDescription": {"text": description},
+                "fullDescription": {"text": description},
+                "defaultConfiguration": {"level": "error"},
+            }
+        )
+        compliant = bool(art.get("compliant", False))
+        results.append(
+            {
+                "ruleId": rule_id,
+                "level": "note" if compliant else "error",
+                "message": {
+                    "text": (
+                        f"{description}: "
+                        f"{'compliant' if compliant else 'NOT compliant'}."
+                    )
+                },
+                "properties": {k: v for k, v in art.items() if k != "description"},
+            }
+        )
+
+    # Recommendations become their own results under a dedicated rule.
+    rec_rule_id = "compliance_recommendation"
+    if report.get("recommendations"):
+        rules.append(
+            {
+                "id": rec_rule_id,
+                "name": rec_rule_id,
+                "shortDescription": {"text": "Compliance gap recommendation"},
+                "fullDescription": {
+                    "text": "An actionable recommendation to close a compliance gap."
+                },
+                "defaultConfiguration": {"level": "warning"},
+            }
+        )
+        for rec in report["recommendations"]:
+            results.append(
+                {
+                    "ruleId": rec_rule_id,
+                    "level": "warning",
+                    "message": {"text": str(rec)},
+                }
+            )
+
+    return {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "Strathon",
+                        "version": STRATHON_VERSION,
+                        "informationUri": "https://github.com/strathon/strathon",
+                        "rules": rules,
+                    }
+                },
+                "results": results,
+                "properties": {
+                    "framework": report.get("framework"),
+                    "generated_at": report.get("generated_at"),
+                    "project_id": report.get("project_id"),
+                },
+            }
+        ],
     }
 
 

@@ -2,7 +2,7 @@
 
 Usage:
     strathon policies list
-    strathon policies create --name "block email" --expr 'attrs["gen_ai.tool.name"] == "send_email"' --action block
+    strathon policies create --name "block-email" --expr ... --action block
     strathon policies delete <id>
     strathon traces list
     strathon spans search --q "send_email"
@@ -87,16 +87,113 @@ def policies_list(as_json: bool):
 
 
 @policies.command("create")
-@click.option("--name", required=True, help="Policy name")
-@click.option("--expr", required=True, help="CEL match expression")
-@click.option("--action", required=True,
-              type=click.Choice(["block", "steer", "throttle", "log", "alert", "require_approval"]),
+@click.option("--name", default=None, help="Policy name")
+@click.option("--expr", default=None, help="CEL match expression")
+@click.option("--template", default=None,
+              help="Create from a built-in template (e.g. block-prompt-injection)")
+@click.option("--from-english", "from_english", default=None,
+              help="Describe policy in plain English")
+@click.option("--action", default=None,
+              type=click.Choice(
+                  ["block", "steer", "throttle",
+                   "log", "alert", "require_approval"]),
               help="Enforcement action")
 @click.option("--shadow", is_flag=True, help="Create as shadow policy")
 @click.option("--priority", default=0, help="Priority (higher = first)")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
-def policies_create(name, expr, action, shadow, priority, as_json):
-    """Create a new policy."""
+def policies_create(name, expr, template, from_english, action, shadow, priority, as_json):
+    """Create a new policy.
+
+    Three modes:
+
+    \b
+      --expr          Provide a CEL expression directly
+      --template      Create from a built-in template by name
+      --from-english  Describe the policy in plain English
+
+    With --template, --name and --action are optional (the template provides defaults).
+    With --from-english, the generated CEL is shown for confirmation before creating.
+    """
+    modes = sum(1 for x in (expr, template, from_english) if x is not None)
+    if modes == 0:
+        raise click.UsageError("Provide one of: --expr, --template, or --from-english")
+    if modes > 1:
+        raise click.UsageError("Only one of --expr, --template, or --from-english can be used")
+
+    if template:
+        # Fetch template from the receiver and create from it.
+        templates_resp = api_get("/v1/policy-templates")
+        templates_list = templates_resp.get("data", [])
+        match = None
+        for t in templates_list:
+            slug = t.get("slug") or t.get("name", "").lower().replace(" ", "-")
+            if slug == template or t.get("name", "").lower() == template.lower():
+                match = t
+                break
+        if not match:
+            available = [t.get("slug") or t.get("name", "").lower().replace(" ", "-")
+                         for t in templates_list]
+            click.echo(f"Template '{template}' not found.", err=True)
+            if available:
+                click.echo(f"Available: {', '.join(available)}", err=True)
+            raise SystemExit(1)
+
+        body = {
+            "name": name or match.get("name", template),
+            "match_expression": match.get("match_expression", ""),
+            "action": action or match.get("action", "block"),
+            "shadow": shadow,
+            "priority": priority,
+        }
+        result = api_post("/v1/policies", json=body)
+        if as_json:
+            click.echo(json_mod.dumps(result, indent=2))
+        else:
+            click.echo(f"Created policy {result.get('id', '')} from template '{template}'")
+        return
+
+    if from_english:
+        # Ask the receiver to generate CEL from English description.
+        try:
+            gen_result = api_post("/v1/policies/generate", json={"description": from_english})
+        except (SystemExit, Exception):
+            click.echo("AI policy generation failed.", err=True)
+            click.echo("Ensure STRATHON_AI_API_KEY is set on the receiver.", err=True)
+            click.echo("Manual reference: getstrathon.com/docs/cel-reference", err=True)
+            raise SystemExit(1)
+        generated_expr = gen_result.get("match_expression", "")
+        generated_action = gen_result.get("action", "block")
+        generated_name = gen_result.get("name", from_english[:50])
+
+        console.print(f"\n  [bold]Description:[/] {from_english}")
+        console.print(f"  [bold]Generated CEL:[/] {generated_expr}")
+        console.print(f"  [bold]Action:[/] {action or generated_action}")
+        console.print()
+
+        if not click.confirm("  Create this policy?"):
+            click.echo("Aborted.")
+            return
+
+        body = {
+            "name": name or generated_name,
+            "match_expression": generated_expr,
+            "action": action or generated_action,
+            "shadow": shadow,
+            "priority": priority,
+        }
+        result = api_post("/v1/policies", json=body)
+        if as_json:
+            click.echo(json_mod.dumps(result, indent=2))
+        else:
+            click.echo(f"Created policy {result.get('id', '')} ({body['name']})")
+        return
+
+    # Direct --expr mode (original behavior).
+    if not name:
+        raise click.UsageError("--name is required when using --expr")
+    if not action:
+        raise click.UsageError("--action is required when using --expr")
+
     body = {
         "name": name,
         "match_expression": expr,
@@ -110,6 +207,133 @@ def policies_create(name, expr, action, shadow, priority, as_json):
         click.echo(json_mod.dumps(result, indent=2))
     else:
         click.echo(f"Created policy {result.get('id', '')} ({name})")
+
+
+@policies.command("import")
+@click.argument("filepath", type=click.Path(exists=True))
+@click.option("--dry-run", is_flag=True, help="Validate without creating")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def policies_import(filepath, dry_run, as_json):
+    """Bulk import policies from a YAML or JSON file.
+
+    \b
+    Expected format (YAML):
+      policies:
+        - name: block-email
+          match_expression: 'attrs["gen_ai.tool.name"] == "send_email"'
+          action: block
+        - name: log-shell
+          match_expression: 'attrs["gen_ai.tool.name"] == "run_shell"'
+          action: log
+    """
+    import yaml  # noqa: E402 — lazy import, yaml is optional dep
+
+    with open(filepath) as f:
+        if filepath.endswith((".yaml", ".yml")):
+            data = yaml.safe_load(f)
+        else:
+            data = json_mod.load(f)
+
+    items = data.get("policies", [])
+    if not items:
+        click.echo("No policies found in file.", err=True)
+        raise SystemExit(1)
+
+    results = []
+    for i, p in enumerate(items):
+        p_name = p.get("name", f"imported-{i}")
+        p_expr = p.get("match_expression", "")
+        p_action = p.get("action", "block")
+        if not p_expr:
+            click.echo(f"Skipping '{p_name}': no match_expression", err=True)
+            continue
+
+        if dry_run:
+            results.append({"name": p_name, "status": "valid"})
+            continue
+
+        body = {
+            "name": p_name,
+            "match_expression": p_expr,
+            "action": p_action,
+            "shadow": p.get("shadow", False),
+            "priority": p.get("priority", 0),
+        }
+        result = api_post("/v1/policies", json=body)
+        results.append(result)
+
+    if as_json:
+        click.echo(json_mod.dumps(results, indent=2))
+    else:
+        verb = "validated" if dry_run else "imported"
+        click.echo(f"{verb} {len(results)} policies from {filepath}")
+
+
+@policies.command("test")
+@click.option("--name", required=True, help="Policy name to test")
+@click.option("--last", "last_n", default=100, type=int,
+              help="Number of recent traces to test against (default: 100)")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def policies_test(name, last_n, as_json):
+    """Test a policy against recent traces (dry run).
+
+    Fetches the last N traces and shows which spans would have matched
+    the named policy. Useful for validating a policy before enabling it.
+    """
+    # Get the policy by name.
+    policies_resp = api_get("/v1/policies")
+    policy_list = policies_resp.get("policies", [])
+    policy = None
+    for p in policy_list:
+        if p.get("name") == name:
+            policy = p
+            break
+    if not policy:
+        click.echo(f"Policy '{name}' not found.", err=True)
+        raise SystemExit(1)
+
+    # Fetch recent traces.
+    traces_resp = api_get("/v1/traces", params={"limit": last_n})
+    traces = traces_resp.get("traces", [])
+
+    if not traces:
+        click.echo("No traces found to test against.")
+        return
+
+    # Ask the receiver to evaluate the policy against these traces.
+    test_result = api_post("/v1/policies/simulate", json={
+        "match_expression": policy.get("match_expression", ""),
+        "hours": 24,
+    })
+
+    matches = test_result.get("matches", [])
+
+    if as_json:
+        click.echo(json_mod.dumps(test_result, indent=2))
+        return
+
+    click.echo(f"Policy: {name} ({policy.get('action', 'block')})")
+    click.echo(f"Tested against: {test_result.get('traces_tested', len(traces))} traces, "
+               f"{test_result.get('spans_tested', 0)} spans")
+    click.echo(f"Matches: {len(matches)}")
+    click.echo()
+
+    if matches:
+        table = Table(title="Matched Spans")
+        table.add_column("Trace ID", style="dim")
+        table.add_column("Span Name")
+        table.add_column("Tool")
+        table.add_column("Timestamp")
+        for m in matches[:20]:
+            table.add_row(
+                m.get("trace_id", "")[:12],
+                m.get("span_name", ""),
+                m.get("tool_name", ""),
+                m.get("timestamp", ""),
+            )
+        console.print(table)
+        if len(matches) > 20:
+            click.echo(f"  ... and {len(matches) - 20} more (use --json for full list)")
 
 
 @policies.command("get")
@@ -507,17 +731,31 @@ def compliance():
 
 
 @compliance.command("export")
-@click.option("--json", "as_json", is_flag=True)
-def compliance_export(as_json):
+@click.option("--format", "fmt", type=click.Choice(["json", "sarif"]), default="json",
+              help="Output format. 'sarif' emits a SARIF 2.1.0 log.")
+@click.option("--output", "-o", "output", type=click.Path(), default=None,
+              help="Write the package to a file instead of stdout.")
+@click.option("--json", "as_json", is_flag=True,
+              help="Print the raw JSON package (alias for --format json -o -).")
+def compliance_export(fmt, output, as_json):
     """Generate EU AI Act compliance evidence package."""
-    result = api_post("/v1/compliance/export")
-
     if as_json:
-        click.echo(json_mod.dumps(result, indent=2))
+        fmt = "json"
+    result = api_post("/v1/compliance/export", json={"format": fmt})
+
+    # SARIF (or explicit JSON to a file / stdout): emit the document verbatim.
+    if fmt == "sarif" or output or as_json:
+        text = json_mod.dumps(result, indent=2)
+        if output:
+            with open(output, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            console.print(f"[green]Wrote {fmt.upper()} package to {output}[/]")
+        else:
+            click.echo(text)
         return
 
     recs = result.get("recommendations", [])
-    articles = result.get("articles_covered", {})
+    articles = result.get("articles", {})
 
     click.echo("EU AI Act Compliance Export")
     click.echo("=" * 40)

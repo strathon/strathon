@@ -73,7 +73,7 @@ async def list_webhook_signing_keys(
     never returned — even the auditor can only see the four-character
     prefix that identifies which key is which.
     """
-    pid = coerce_project_id(request, project_id)
+    pid = coerce_project_id(request, project_id, ctx)
     rows = await keys_repo.list_keys(session, pid, include_revoked=include_revoked)
     return {"webhook_signing_keys": [r.to_json() for r in rows]}
 
@@ -104,7 +104,7 @@ async def create_webhook_signing_key(
     space-delimited in the webhook-signature header.
     """
     body = payload or {}
-    pid = coerce_project_id(request, body.get("project_id"))
+    pid = coerce_project_id(request, body.get("project_id"), ctx)
 
     result = await keys_repo.create_key(session, pid)
 
@@ -165,7 +165,7 @@ async def revoke_webhook_signing_key(
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid key_id")
 
-    pid = coerce_project_id(request, None)
+    pid = coerce_project_id(request, None, ctx)
     revoked = await keys_repo.revoke_key(session, kid_uuid, pid)
     if revoked is None:
         raise HTTPException(

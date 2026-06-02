@@ -139,7 +139,7 @@ async def test_list_scopes_to_project(session, isolated_project, async_engine):
     other_pid = uuid.uuid4()
     async with AsyncSession(bind=async_engine, expire_on_commit=False) as s:
         await s.execute(insert(Project).values(
-            id=other_pid, name="other", slug=f"other-{other_pid.hex[:8]}",
+            org_id=__import__("uuid").UUID("00000000-0000-0000-0000-0000000000aa"), id=other_pid, name="other", slug=f"other-{other_pid.hex[:8]}",
         ))
         await s.execute(insert(ProjectSettings).values(project_id=other_pid))
         policy_in_other = await _make_policy(s, other_pid)
@@ -253,7 +253,7 @@ async def test_get_delivery_wrong_project_returns_none(
     other_did = None
     async with AsyncSession(bind=async_engine, expire_on_commit=False) as s:
         await s.execute(insert(Project).values(
-            id=other_pid, name="other", slug=f"other-{other_pid.hex[:8]}",
+            org_id=__import__("uuid").UUID("00000000-0000-0000-0000-0000000000aa"), id=other_pid, name="other", slug=f"other-{other_pid.hex[:8]}",
         ))
         await s.execute(insert(ProjectSettings).values(project_id=other_pid))
         policy_in_other = await _make_policy(s, other_pid)

@@ -30,7 +30,7 @@ async def second_project(session):
     pid = uuid.uuid4()
     await session.execute(
         sa_insert(Project).values(
-            id=pid, name=f"Other {pid.hex[:6]}", slug=f"other-{pid.hex[:8]}",
+            org_id=__import__("uuid").UUID("00000000-0000-0000-0000-0000000000aa"), id=pid, name=f"Other {pid.hex[:6]}", slug=f"other-{pid.hex[:8]}",
         )
     )
     await session.execute(sa_insert(ProjectSettings).values(project_id=pid))

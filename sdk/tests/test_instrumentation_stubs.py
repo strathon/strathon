@@ -128,3 +128,64 @@ def test_auto_instrument_explicit_anthropic():
         anth_mod._PATCHED = False
     result = auto_instrument(client, frameworks=["anthropic"])
     assert isinstance(result, list)
+
+
+# ---------------------------------------------------------------------------
+# Regression: auto_instrument must WARN when a framework the caller EXPLICITLY
+# requested fails to instrument (e.g. the framework package isn't installed).
+# Silent non-instrumentation of a firewall is a safety gap. Auto-detect mode
+# (frameworks=None) must stay quiet. Made deterministic by stubbing a module's
+# instrument() rather than depending on what's installed in the test env.
+# ---------------------------------------------------------------------------
+
+
+def _stub_instrument_result(monkeypatch, fw, result):
+    """Force strathon.instrumentation.<fw>.instrument() to return `result`."""
+    module = __import__(
+        f"strathon.instrumentation.{fw}", fromlist=["instrument"]
+    )
+    monkeypatch.setattr(module, "instrument", lambda client: result)
+
+
+def test_explicit_request_warns_when_not_instrumented(monkeypatch, caplog):
+    import logging
+    _stub_instrument_result(monkeypatch, "crewai", False)
+
+    class C:
+        pass
+
+    with caplog.at_level(logging.WARNING, logger="strathon.instrumentation"):
+        result = auto_instrument(C(), frameworks=["crewai"])
+
+    assert result == []
+    assert any("not instrumented" in r.message or "NOT be enforced" in r.message
+               for r in caplog.records), "expected a loud warning"
+
+
+def test_autodetect_does_not_warn_when_not_instrumented(monkeypatch, caplog):
+    import logging
+    # In auto-detect mode (frameworks=None) a framework returning False is
+    # normal (just not installed) and must NOT warn.
+    _stub_instrument_result(monkeypatch, "crewai", False)
+
+    class C:
+        pass
+
+    with caplog.at_level(logging.WARNING, logger="strathon.instrumentation"):
+        auto_instrument(C(), frameworks=None)
+
+    assert not any("not instrumented" in r.message for r in caplog.records)
+
+
+def test_explicit_request_no_warn_when_instrumented(monkeypatch, caplog):
+    import logging
+    _stub_instrument_result(monkeypatch, "crewai", True)
+
+    class C:
+        pass
+
+    with caplog.at_level(logging.WARNING, logger="strathon.instrumentation"):
+        result = auto_instrument(C(), frameworks=["crewai"])
+
+    assert "crewai" in result
+    assert not any("not instrumented" in r.message for r in caplog.records)

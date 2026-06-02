@@ -251,7 +251,7 @@ async def evaluate_one_budget(
                 # trace_id/agent_id/budget_id non-null; budget_id is
                 # set, so the CHECK passes. The SDK's check_halt code
                 # path doesn't natively understand budget-scope halts
-                # in this commit (H4 will extend it). For v1 we still
+                # natively yet. For v1 we still
                 # need the SDK to see SOMETHING, so we ALSO populate
                 # agent_id with the project-wildcard so the existing
                 # project-scope code path picks it up.

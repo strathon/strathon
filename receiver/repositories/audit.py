@@ -184,7 +184,7 @@ async def emit(
         prev_hash = GENESIS_PREV_HASH
         # We don't know the sequence_no until INSERT (BIGSERIAL).
         # The chain compute below uses a placeholder; we'll fix up
-        # after the INSERT returns the actual value. For Stage 1
+        # after the INSERT returns the actual value. Currently
         # we don't include sequence_no in the hash payload (it's in
         # HASH_FIELDS but recomputed below after the SELECT returns
         # the assigned value).
@@ -241,7 +241,7 @@ async def emit(
     insert_values = dict(row_for_hash)
     insert_values["prev_hash"] = prev_hash
     insert_values["row_hash"] = row_hash
-    insert_values["hmac_key_id"] = 1  # Stage 1: single key
+    insert_values["hmac_key_id"] = 1  # single active signing key
     await session.execute(insert(AuditEvent).values(**insert_values))
     return event_id
 

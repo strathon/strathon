@@ -180,7 +180,7 @@ async def test_dramatiq_send_fires_exactly_once_after_commit(async_engine):
     # Set up committed project + policy.
     async with AsyncSession(bind=async_engine, expire_on_commit=False) as s:
         await s.execute(insert(Project).values(
-            id=project_id, name=slug, slug=slug,
+            org_id=__import__("uuid").UUID("00000000-0000-0000-0000-0000000000aa"), id=project_id, name=slug, slug=slug,
         ))
         await s.execute(insert(ProjectSettings).values(project_id=project_id))
         await s.execute(insert(Policy).values(
@@ -233,7 +233,7 @@ async def test_dramatiq_send_does_not_fire_on_rollback(async_engine):
 
     async with AsyncSession(bind=async_engine, expire_on_commit=False) as s:
         await s.execute(insert(Project).values(
-            id=project_id, name=slug, slug=slug,
+            org_id=__import__("uuid").UUID("00000000-0000-0000-0000-0000000000aa"), id=project_id, name=slug, slug=slug,
         ))
         await s.execute(insert(ProjectSettings).values(project_id=project_id))
         await s.execute(insert(Policy).values(

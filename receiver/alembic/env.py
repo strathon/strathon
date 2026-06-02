@@ -9,9 +9,13 @@ CI, and production. Accepts URLs in any of the formats the receiver uses
 internally (postgresql://, postgresql+asyncpg://, postgresql+psycopg://)
 and normalizes them to a sync driver Alembic can use.
 
-There is no target_metadata — we don't use SQLAlchemy ORM models in
-Strathon. All migrations are hand-written using op.execute() with raw
-SQL. Autogenerate is therefore not supported, which is intentional.
+``target_metadata`` is ``Base.metadata`` (populated by importing the
+``models`` package). Migrations are still authored by hand — autogenerate
+is used as a drift *guard* (``alembic check``), not to generate migrations.
+The ORM models mirror the hand-written schema so that check stays green.
+Objects that cannot be round-tripped (the ``audit`` schema, partition child
+tables, and the generated ``search_vector`` column) are excluded via
+``_include_object`` below.
 """
 
 from __future__ import annotations
@@ -135,6 +139,16 @@ def _include_object(object_, name, type_, reflected, compare_to):
     if type_ == "foreign_key_constraint" and name:
         if re.search(r"fkey\d+$", name):
             return False
+
+    # Exclude the spans.search_vector generated (STORED) tsvector column and
+    # its GIN index. Postgres normalizes a GENERATED column's expression on
+    # reflection, so autogenerate can never round-trip it cleanly and would
+    # perpetually report drift. The column is owned by its raw-SQL migration
+    # and still backs full-text search; we just don't let alembic manage it.
+    if type_ == "column" and name == "search_vector":
+        return False
+    if type_ == "index" and name == "idx_spans_search_vector":
+        return False
 
     return True
 

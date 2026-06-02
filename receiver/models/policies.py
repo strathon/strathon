@@ -16,6 +16,7 @@ from sqlalchemy import (
     LargeBinary,
     TIMESTAMP,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -67,8 +68,9 @@ class Policy(Base, TimestampMixin):
     shadow: Mapped[bool] = mapped_column(
         nullable=False, server_default=text("FALSE"),
         comment=(
-            "Shadow mode: evaluates and records matches but does not "
-            "enforce block/steer/throttle. Log and alert still fire."
+            "Shadow mode: policy evaluates and records matches "
+            "but does not enforce block/steer/throttle actions. "
+            "Log and alert actions still fire."
         ),
     )
 
@@ -173,4 +175,8 @@ class PolicyVersion(Base):
 
     __table_args__ = (
         Index("idx_policy_versions_policy", "policy_id", text("version DESC")),
+        UniqueConstraint(
+            "policy_id", "version",
+            name="policy_versions_policy_id_version_key",
+        ),
     )

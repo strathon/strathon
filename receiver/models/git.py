@@ -47,10 +47,10 @@ class GitHubIntegration(Base):
     installation_id: Mapped[Optional[int]] = mapped_column(BigInteger)
     webhook_secret: Mapped[str] = mapped_column(Text, nullable=False)
 
-    created_by_user_id: Mapped[uuid.UUID] = mapped_column(
+    created_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id"),
-        nullable=False,
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=func.now()

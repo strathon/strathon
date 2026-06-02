@@ -51,6 +51,15 @@ class Settings(BaseSettings):
     db_pool_recycle: int = Field(default=1800, alias="STRATHON_DB_POOL_RECYCLE", ge=60)
     db_echo: bool = Field(default=False, alias="STRATHON_DB_ECHO")
 
+    # ---- Deployment mode ----
+    # "self-hosted" (default) or "cloud". Self-host runs single-tenant with a
+    # single default organization; cloud is multi-tenant. This gates the
+    # self-host-only conveniences (default project + dev key seeding) and is
+    # the switch entitlement checks consult.
+    mode: Literal["self-hosted", "cloud"] = Field(
+        default="self-hosted", alias="STRATHON_MODE"
+    )
+
     # ---- Logging ----
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
@@ -224,7 +233,7 @@ class Settings(BaseSettings):
         description=(
             "How many months of audit events to keep in the hot "
             "Postgres tier. Partitions older than this are eligible "
-            "for archive (Stage 2). Default 24 satisfies the strictest "
+            "for archive . Default 24 satisfies the strictest "
             "current frameworks (HIPAA 6yr cold + SOC 2 baseline)."
         ),
     )
@@ -279,6 +288,11 @@ class Settings(BaseSettings):
         # psycopg3 is both sync and async with the same package — the SQLAlchemy
         # dialect is the same string. So sync URL == async URL for psycopg3.
         return url
+
+    @property
+    def is_cloud(self) -> bool:
+        """True on the multi-tenant hosted deployment. Self-host is False."""
+        return self.mode == "cloud"
 
 
 # Lazy singleton via FastAPI's recommended @lru_cache(get_settings) pattern.

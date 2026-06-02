@@ -1,5 +1,6 @@
 """Main Strathon client for sending traces and managing interventions."""
 
+import atexit
 import logging
 from typing import Optional
 
@@ -76,6 +77,12 @@ class Client:
         if not api_key:
             raise AuthenticationError("api_key is required")
 
+        if not endpoint or not str(endpoint).startswith(("http://", "https://")):
+            raise ValueError(
+                f"endpoint must start with http:// or https://, got {endpoint!r}. "
+                "Example: http://localhost:4318"
+            )
+
         self.api_key = api_key
         self.endpoint = endpoint.rstrip("/")
         self.project_id = project_id
@@ -112,6 +119,18 @@ class Client:
         self._tracer_provider = TracerProvider(resource=resource)
         self._tracer_provider.add_span_processor(self._span_processor)
 
+        # Flush buffered spans on interpreter exit. Without this, a script
+        # that creates a Client, emits spans, and exits without calling
+        # shutdown()/force_flush() silently loses the last batch — a common
+        # footgun. atexit guarantees the BatchSpanProcessor drains first.
+        self._atexit_registered = False
+        try:
+            atexit.register(self._atexit_flush)
+            self._atexit_registered = True
+        except Exception:
+            # atexit can be unavailable in some embedded runtimes; non-fatal.
+            logger.debug("Strathon: could not register atexit flush")
+
         # Register as the global provider only if no real one is set yet
         if set_global_tracer:
             current = trace.get_tracer_provider()
@@ -119,7 +138,7 @@ class Client:
                 trace.set_tracer_provider(self._tracer_provider)
 
         # Named tracer for instrumentations and manual span emission
-        self._tracer = self._tracer_provider.get_tracer("strathon", "1.0.1")
+        self._tracer = self._tracer_provider.get_tracer("strathon", "1.1.0")
 
         # Runtime intervention: optional policy enforcer
         self._policy_enforcer = None
@@ -251,8 +270,22 @@ class Client:
         """
         return self._span_processor.force_flush(timeout_millis=timeout_millis)
 
+    def _atexit_flush(self) -> None:
+        """atexit hook: best-effort flush of buffered spans on process exit.
+        Swallows everything — an interpreter teardown must not raise."""
+        try:
+            self._span_processor.force_flush(timeout_millis=5000)
+        except Exception:
+            pass
+
     def shutdown(self) -> None:
         """Flush pending traces and shut down the tracer provider."""
+        if getattr(self, "_atexit_registered", False):
+            try:
+                atexit.unregister(self._atexit_flush)
+            except Exception:
+                pass
+            self._atexit_registered = False
         if hasattr(self, "_heartbeat"):
             self._heartbeat.stop()
         if self._policy_enforcer is not None:

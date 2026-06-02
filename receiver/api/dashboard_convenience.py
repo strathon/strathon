@@ -28,7 +28,7 @@ from ._deps import require_scope
 
 router = APIRouter(tags=["dashboard"])
 
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 API_VERSION = "v1"
 
 
@@ -59,7 +59,7 @@ async def get_version() -> dict[str, str]:
 
 class ChangePasswordBody(BaseModel):
     current_password: str
-    new_password: str = Field(min_length=10, max_length=128)
+    new_password: str = Field(min_length=1, max_length=128)
     model_config = {"extra": "forbid"}
 
 
@@ -73,6 +73,9 @@ async def change_password(
 ) -> dict[str, Any]:
     """Change own password. Requires current password verification."""
     from password import verify_password
+    from api.auth_endpoints import _validate_password
+
+    _validate_password(body.new_password)
 
     result = await session.execute(
         text("SELECT password_hash FROM users WHERE id = :uid"),
@@ -192,6 +195,58 @@ async def invite_member(
 
     await session.commit()
     return {"status": "invited", "email": body.email, "role": body.role}
+
+
+@router.get("/v1/members/pending")
+async def list_pending_invitations(
+    ctx: auth_mod.ApiKeyContext = Depends(
+        require_scope(auth_mod.SCOPE_PROJECT_SETTINGS_READ)
+    ),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """List invitations that have been sent but not yet redeemed.
+
+    These are rows in pending_invitations for this project — people who were
+    invited but have not registered yet. Surfacing them lets an owner see
+    outstanding invites instead of them being invisible until registration.
+    """
+    result = await session.execute(
+        text(
+            "SELECT email, role, created_at FROM pending_invitations "
+            "WHERE project_id = :pid ORDER BY created_at DESC"
+        ),
+        {"pid": ctx.project_id},
+    )
+    pending = [
+        {
+            "email": row["email"],
+            "role": row["role"],
+            "invited_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "status": "pending",
+        }
+        for row in result.mappings()
+    ]
+    return {"data": pending}
+
+
+@router.delete("/v1/members/pending/{email}")
+async def revoke_pending_invitation(
+    email: str,
+    ctx: auth_mod.ApiKeyContext = Depends(
+        require_scope(auth_mod.SCOPE_PROJECT_SETTINGS_WRITE)
+    ),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Revoke an outstanding invitation before it is redeemed."""
+    await session.execute(
+        text(
+            "DELETE FROM pending_invitations "
+            "WHERE project_id = :pid AND LOWER(email) = LOWER(:email)"
+        ),
+        {"pid": ctx.project_id, "email": email},
+    )
+    await session.commit()
+    return {"status": "revoked", "email": email}
 
 
 class UpdateRoleBody(BaseModel):
