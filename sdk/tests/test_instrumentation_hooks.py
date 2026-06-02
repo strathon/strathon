@@ -1,4 +1,4 @@
-"""Tests for Phase 1b instrumentation upgrades.
+"""Tests for instrumentation hook policy enforcement.
 
 Covers:
 - Claude Agent SDK: PreToolUse hook policy enforcement (block returns

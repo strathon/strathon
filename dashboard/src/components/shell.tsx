@@ -86,7 +86,7 @@ export function Sidebar({ collapsed, setCollapsed, pendingCount, isMobile, setMo
     <aside className="sidebar">
       <div className="sidebar-top">
         {/* When expanded: logo + name on left, panel-toggle on right.
-            When collapsed: entire sidebar-top acts as expand button (Langfuse pattern).
+            When collapsed: the entire sidebar-top acts as an expand button.
             CSS hides the toggle button when collapsed and shows a pointer cursor. */}
         <div
           className="brand"
