@@ -35,9 +35,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import platform
 import random
 import string
 import struct
+import sys
 import time
 from dataclasses import dataclass, field
 
@@ -147,7 +149,7 @@ def generate_otlp_payload(num_spans: int) -> bytes:
 
     # InstrumentationScope
     scope = _string_field(1, "strathon-loadtest")  # name
-    scope += _string_field(2, "1.0.1")              # version
+    scope += _string_field(2, "1.1.0")              # version
     scope_spans = _field_bytes(1, 2, scope) + spans_data
 
     # Resource
@@ -285,6 +287,25 @@ async def run_load_test(
         print(f"  📊 {spans_per_sec:,.0f} spans/sec = {daily/1e6:,.0f}M spans/day")
         print(f"  📊 Supports ~{agents:,.0f} concurrent agents (at 50 calls/min)")
 
+    # Hardware/config context so a published number is meaningful and
+    # reproducible. Numbers without this context should not be quoted.
+    print()
+    print("  Context (for reproducibility):")
+    print(f"    Hardware:  {platform.platform()}")
+    print(f"    CPU:       {os.cpu_count()} cores, {platform.machine()}")
+    print(f"    Config:    {num_requests} requests, concurrency={concurrency}, "
+          f"batch={batch_size}")
+
+    spans_per_sec_final = 0.0
+    if stats.latencies:
+        spans_per_sec_final = total_spans / wall_time
+
+    return {
+        "error_rate": stats.errors / num_requests if num_requests else 1.0,
+        "spans_per_sec": spans_per_sec_final,
+        "concurrency": concurrency,
+    }
+
 
 def main():
     parser = argparse.ArgumentParser(description="Strathon load test")
@@ -296,12 +317,62 @@ def main():
     parser.add_argument("--concurrency", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=50,
                         help="Spans per request")
+    parser.add_argument(
+        "--sweep", default="",
+        help=(
+            "Comma-separated concurrency levels to sweep, e.g. "
+            "'8,16,32,64'. Runs the test at each level and prints a "
+            "throughput curve so you can find where Postgres saturates "
+            "(the plateau is your real ceiling). Overrides --concurrency."
+        ),
+    )
     args = parser.parse_args()
 
-    asyncio.run(run_load_test(
+    if args.sweep:
+        try:
+            levels = [int(x) for x in args.sweep.split(",") if x.strip()]
+        except ValueError:
+            print("--sweep must be comma-separated integers, e.g. 8,16,32,64",
+                  file=sys.stderr)
+            sys.exit(2)
+        curve = []
+        for c in levels:
+            print(f"\n########## concurrency = {c} ##########")
+            res = asyncio.run(run_load_test(
+                args.endpoint, args.api_key, args.requests, c, args.batch_size,
+            ))
+            curve.append(res)
+        # Summary curve.
+        print("\n" + "=" * 50)
+        print("THROUGHPUT CURVE (find the plateau = your ceiling)")
+        print("=" * 50)
+        print(f"  {'concurrency':>12} | {'spans/sec':>14} | {'err%':>6}")
+        print("  " + "-" * 40)
+        best = max(curve, key=lambda r: r["spans_per_sec"]) if curve else None
+        for r in curve:
+            mark = "  <- peak" if best and r is best else ""
+            print(f"  {r['concurrency']:>12} | {r['spans_per_sec']:>14,.0f} | "
+                  f"{r['error_rate'] * 100:>5.1f}%{mark}")
+        if best:
+            print(f"\n  Peak sustained: {best['spans_per_sec']:,.0f} spans/sec "
+                  f"at concurrency {best['concurrency']}.")
+            print("  If spans/sec stops climbing as concurrency rises, that")
+            print("  plateau is your real ceiling (usually Postgres-bound).")
+        # Fail the run if any level exceeded the error threshold.
+        if any(r["error_rate"] > 0.01 for r in curve):
+            print("\nFAIL: error rate exceeded 1% at one or more levels",
+                  file=sys.stderr)
+            sys.exit(1)
+        return
+
+    result = asyncio.run(run_load_test(
         args.endpoint, args.api_key,
         args.requests, args.concurrency, args.batch_size,
     ))
+    if result["error_rate"] > 0.01:
+        print(f"\nFAIL: error rate {result['error_rate'] * 100:.1f}% exceeds 1% threshold",
+              file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

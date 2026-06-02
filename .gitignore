@@ -104,4 +104,3 @@ roadmap.md
 
 # Pre-commit hook config (org-specific forbidden patterns).
 .strathon-forbidden-words
-dashboard/package-lock.json

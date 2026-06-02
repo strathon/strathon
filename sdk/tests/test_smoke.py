@@ -24,7 +24,7 @@ def make_client(**kwargs):
 
 
 def test_version():
-    assert __version__ == "1.0.1"
+    assert __version__ == "1.1.0"
 
 
 def test_client_requires_api_key():
@@ -91,3 +91,73 @@ def test_client_flush_returns_bool():
     result = client.flush(timeout_millis=100)
     assert isinstance(result, bool)
     client.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for launch-hardening fixes. These lock in behavior that was
+# added during the pre-launch audit so it cannot silently revert.
+# ---------------------------------------------------------------------------
+
+
+def test_config_rejects_invalid_sample_rate():
+    with pytest.raises(ValueError, match="sample_rate"):
+        Config(sample_rate=1.5)
+    with pytest.raises(ValueError, match="sample_rate"):
+        Config(sample_rate=-0.1)
+
+
+def test_config_rejects_invalid_batch_size():
+    with pytest.raises(ValueError, match="batch_size"):
+        Config(batch_size=0)
+
+
+def test_config_rejects_non_positive_timeouts():
+    with pytest.raises(ValueError, match="batch_timeout_seconds"):
+        Config(batch_timeout_seconds=0)
+    with pytest.raises(ValueError, match="http_timeout_seconds"):
+        Config(http_timeout_seconds=-1)
+
+
+def test_config_rejects_negative_retries():
+    with pytest.raises(ValueError, match="max_retries"):
+        Config(max_retries=-1)
+
+
+def test_config_accepts_valid_values():
+    # Boundary values must be allowed.
+    Config(sample_rate=0.0)
+    Config(sample_rate=1.0)
+    Config(batch_size=1)
+    Config(max_retries=0)
+
+
+def test_client_rejects_endpoint_without_scheme():
+    with pytest.raises(ValueError, match="http"):
+        Client(
+            api_key="k",
+            endpoint="localhost:4318",
+            set_global_tracer=False,
+            enable_policies=False,
+            enable_halts=False,
+        )
+
+
+def test_client_rejects_non_http_scheme():
+    with pytest.raises(ValueError, match="http"):
+        Client(
+            api_key="k",
+            endpoint="ftp://example.com",
+            set_global_tracer=False,
+            enable_policies=False,
+            enable_halts=False,
+        )
+
+
+def test_client_registers_atexit_flush():
+    # The client must register an atexit flush so a script that exits without
+    # calling shutdown() does not silently lose its last span batch.
+    client = make_client()
+    assert client._atexit_registered is True
+    # Explicit shutdown unregisters it (no double-flush into a torn-down provider).
+    client.shutdown()
+    assert client._atexit_registered is False

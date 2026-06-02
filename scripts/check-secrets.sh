@@ -163,30 +163,38 @@ check_pattern \
     "Possible GCP service account JSON"
 
 # 6. Internal references that should not be public.
-for file in $STAGED; do
-    if [[ "$file" == *.md ]] || [[ "$file" == "scripts/check-secrets.sh" ]] || \
-       [[ "$file" == *test_* ]]; then
-        continue
-    fi
-
-    content=$(git show ":$file" 2>/dev/null || true)
-    if [ -z "$content" ]; then
-        continue
-    fi
-
-    matches=$(echo "$content" | grep -nE \
-        '"Emergent Ventures"|"YC W27"|"YC W26"|emergent.ventures|ycombinator\.com/apply' \
-        || true)
-    if [ -n "$matches" ]; then
-        echo "BLOCKED: Internal reference (investor/application)"
-        echo "  File: $file"
-        echo "$matches" | head -3 | while read -r line; do
-            echo "  $line"
+#
+# The list of forbidden terms is kept in a local, gitignored file so the
+# terms themselves never enter the repository. Create
+# scripts/forbidden-terms.local (one extended-regex pattern per line; blank
+# lines and '#' comments are ignored) on each machine that commits. See
+# scripts/forbidden-terms.local.example for the format. If the file is
+# absent, this check is skipped with a notice.
+FORBIDDEN_FILE="$(dirname "$0")/forbidden-terms.local"
+if [ -f "$FORBIDDEN_FILE" ]; then
+    FORBIDDEN_PATTERN=$(grep -vE '^[[:space:]]*(#|$)' "$FORBIDDEN_FILE" | paste -sd '|' -)
+    if [ -n "$FORBIDDEN_PATTERN" ]; then
+        for file in $STAGED; do
+            if [[ "$file" == "scripts/check-secrets.sh" ]] || [[ "$file" == *test_* ]]; then
+                continue
+            fi
+            content=$(git show ":$file" 2>/dev/null || true)
+            [ -z "$content" ] && continue
+            matches=$(echo "$content" | grep -nE "$FORBIDDEN_PATTERN" || true)
+            if [ -n "$matches" ]; then
+                echo "BLOCKED: Forbidden internal reference"
+                echo "  File: $file"
+                echo "$matches" | head -3 | while read -r line; do
+                    echo "  $line"
+                done
+                echo ""
+                FAIL=1
+            fi
         done
-        echo ""
-        FAIL=1
     fi
-done
+else
+    echo "Notice: $FORBIDDEN_FILE not found; skipping internal-reference scan."
+fi
 
 if [ $FAIL -ne 0 ]; then
     echo "=========================================="

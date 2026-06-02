@@ -1,0 +1,44 @@
+# Gitleaks configuration for Strathon.
+#
+# Extends the default gitleaks ruleset (so real secret detection is unchanged)
+# and allowlists the specific, reviewed false positives that a security tool
+# necessarily contains: test fixtures that feed fake secrets into the redactor
+# to prove it scrubs them, the credential-pattern definitions themselves, the
+# documented non-production dev key, and documentation placeholder keys.
+#
+# This mirrors the exemptions already in scripts/check_secrets.py. A real
+# credential committed anywhere outside these paths will still be flagged.
+#
+# Audited June 1, 2026: gitleaks reported 13 findings, all confirmed to be the
+# items below (no real credential, nothing rotated).
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Reviewed false positives — test fixtures, pattern defs, documented placeholders"
+
+# Path-based: these files legitimately contain secret-shaped strings.
+paths = [
+  # Test fixtures: fake secrets fed into the redactor / scanner to assert
+  # they are detected and scrubbed. They grant access to nothing.
+  '''receiver/tests/.*''',
+  '''sdk/tests/.*''',
+  '''.*/test_.*\.py''',
+  # The credential-pattern definitions ARE the regexes that match keys; they
+  # contain example PEM headers and key shapes by necessity.
+  '''receiver/credential_patterns\.py''',
+  # Documentation: API-key usage examples use the documented dev key and
+  # obvious placeholders.
+  '''docs/api_keys\.md''',
+  '''docs/self-hosting\.md''',
+  '''README\.md''',
+]
+
+# Value-based: the documented non-production dev key is intentionally public.
+regexes = [
+  '''stra_dev_local_default_project_do_not_use_in_production''',
+  # Placeholder/sample doc keys (non-functional).
+  '''stra_your_api_key_here''',
+  '''stra_x{5,}''',
+]

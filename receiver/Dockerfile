@@ -1,5 +1,6 @@
-# Receiver-only image. The unified Dockerfile at the repo root will replace
-# this once the dashboard exists.
+# Receiver image: FastAPI app served by uvicorn. Built and published as
+# ghcr.io/strathon/receiver. Runs alongside the dashboard image and Postgres
+# via docker compose.
 
 FROM python:3.12-slim
 

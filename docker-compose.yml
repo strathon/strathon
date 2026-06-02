@@ -11,11 +11,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Note: no migrations are mounted here. The receiver runs `alembic
-      # upgrade head` in its startup lifespan, so the schema is managed by
-      # Alembic, not Postgres's docker-entrypoint-initdb.d. This avoids
-      # the well-known footgun where init.d scripts only run on first boot
-      # and silently no-op on subsequent migrations.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U strathon -d strathon"]
       interval: 5s
@@ -23,6 +18,7 @@ services:
       retries: 5
 
   receiver:
+    image: ghcr.io/strathon/receiver:latest
     build:
       context: ./receiver
       dockerfile: Dockerfile
@@ -40,6 +36,7 @@ services:
       STRATHON_RETENTION_ENABLED: ${STRATHON_RETENTION_ENABLED:-true}
       STRATHON_RETENTION_INTERVAL_SECONDS: ${STRATHON_RETENTION_INTERVAL_SECONDS:-3600}
       STRATHON_RETENTION_BATCH_SIZE: ${STRATHON_RETENTION_BATCH_SIZE:-5000}
+      STRATHON_AI_API_KEY: ${STRATHON_AI_API_KEY:-}
     ports:
       - "4318:4318"
     healthcheck:
@@ -47,12 +44,26 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
 
-  # The dashboard service gets added in a future commit (Next.js scaffold).
-  # Once the dashboard exists, it merges with the receiver into a single
-  # supervisord-managed container per the committed architecture.
+  dashboard:
+    image: ghcr.io/strathon/dashboard:latest
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: strathon-dashboard
+    restart: unless-stopped
+    depends_on:
+      receiver:
+        condition: service_healthy
+    environment:
+      RECEIVER_URL: http://receiver:4318
+      NODE_ENV: production
+      # Set to "true" only when serving the dashboard over HTTPS (e.g. behind
+      # a TLS reverse proxy). Over plain HTTP, Secure cookies are dropped by
+      # the browser and login fails, so this defaults off for local self-host.
+      STRATHON_COOKIE_SECURE: ${STRATHON_COOKIE_SECURE:-false}
+    ports:
+      - "3000:3000"
 
 volumes:
   postgres_data:
-    name: strathon_postgres_data
