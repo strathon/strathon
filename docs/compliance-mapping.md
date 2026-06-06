@@ -7,7 +7,9 @@ NIST AI Risk Management Framework (AI 100-1, AI 600-1) and obligations
 in the EU AI Act (Regulation (EU) 2024/1689) for high-risk AI systems.
 
 **Deadline context**: EU AI Act Article 6(2) high-risk obligations take
-effect August 2, 2026. NIST AI RMF is voluntary but increasingly
+effect December 2, 2027 for standalone Annex III systems under the Digital
+Omnibus agreement (May 2026, pending formal adoption); transparency obligations
+and the broader framework remain active from August 2, 2026. NIST AI RMF is voluntary but increasingly
 referenced by U.S. federal agencies (FTC, SEC, OCC, CFPB) in
 enforcement guidance and procurement requirements.
 
@@ -208,7 +210,7 @@ Generative AI Profile. It does not replace organizational governance
 (policies, training, risk committees) but provides the technical
 infrastructure that makes compliance demonstrable and auditable.
 
-For organizations preparing for the August 2, 2026 EU AI Act deadline,
+For organizations preparing for the EU AI Act high-risk deadline (December 2, 2027 for Annex III systems under the Digital Omnibus),
 Strathon's audit log, policy engine, kill-switches, and budget controls
 provide the Article 12 (record-keeping) and Article 14 (human oversight)
 capabilities that are the most scrutinized during conformity assessment.

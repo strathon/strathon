@@ -271,7 +271,7 @@ months. Idempotent via `CREATE TABLE IF NOT EXISTS`.
 | GDPR Art 5(1)(f) | Integrity & confidentiality of logs       | HMAC chain + Merkle anchors                                                    |
 | GDPR Art 17      | Right to erasure                          | Cascade-delete on resource teardown emits `cascade_root_id` group              |
 | ISO 27001 A.8.15 | Protected audit logs                      | Append-only triggers + revoked grants + signed anchors (planned)               |
-| EU AI Act Art 12 | High-risk AI logging (Aug 2026 enforce)   | All policy/halt mutations logged with 24-month hot retention                   |
+| EU AI Act Art 12 | High-risk AI logging (Dec 2027, Annex III) | All policy/halt mutations logged with 24-month hot retention                   |
 
 ## Operational notes
 

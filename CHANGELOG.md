@@ -3,93 +3,49 @@
 All notable changes to Strathon are documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+> Versions 0.1.0, 1.0.0, and 1.0.1 were early development builds published
+> during initial setup. v1.1.0 is the first release intended for general use,
+> and this changelog starts there.
+
 ## [Unreleased]
 
-## [1.1.0] - 2026-06-01
+## [1.1.0] - 2026-06-06
 
 ### Added
 
-**CLI Enhancements**
-- `strathon policies create --template <name>` — create policies from built-in OWASP templates without writing CEL
-- `strathon policies create --from-english "..."` — describe a policy in plain English, review generated CEL, confirm
-- `strathon policies import policies.yaml` — bulk import policies from YAML/JSON files
-- `strathon policies test --name <policy> --last 100` — dry-run a policy against recent traces
+**Policy engine**
+- CEL policy engine with 6 actions (block, steer, throttle, log, alert, require_approval)
+- Allow-list mode, time-based rules, policy versioning, shadow mode
+- OWASP-mapped policy templates
 
-**Framework Documentation**
-- Per-framework integration guides for all 10 supported frameworks (docs/frameworks/)
-- Each guide covers installation, setup, what gets captured, and example policies
+**Human oversight**
+- Multi-party (N-of-M) approval workflows
+- Kill-switch halts and SDK poll-based approval
 
-**Scaling Documentation**
-- Enterprise scaling guide (docs/scaling.md): horizontal scaling, PgBouncer, read replicas, recommendations by scale
+**Data plane**
+- OTLP protobuf ingest, RANGE-partitioned spans
+- Span search, full-text search, aggregation, trace tree
+- PII redaction, sampling, retention
 
-**OWASP Coverage**
-- OWASP table updated to match the 2026 Agentic Applications list (ASI01 through ASI10)
-- OWASP Agentic Skills Top 10 (AST) coverage doc explaining runtime vs supply chain responsibilities
-
-**README**
-- Full rewrite: expanded quickstart with complete code example, feature descriptions with 2-3 sentences each, framework integration table with docs links, performance section with enterprise scaling path, OWASP coverage table (all 10 threats), deploy section with Docker pull and HTTPS guidance, star history chart
-
-### Changed
-
-- CLI `policies create` now accepts `--expr`, `--template`, or `--from-english` (one required)
-- CLI depends on `pyyaml>=6.0` for YAML policy import
-- Updated pyproject.toml descriptions for SDK and CLI
-- Production Docker Compose includes PgBouncer for connection pooling
-
-## [1.0.1] - 2026-06-01
-
-First public release.
-
-### Added
-
-**Policy Engine**
-- CEL policy evaluation with 6 actions: block, steer, throttle, log, alert, require_approval
-- Allow-list mode, time-based rules, policy versioning
-- 12 OWASP-mapped templates (including MINJA memory-poisoning)
-- Shadow mode, batch operations, conflict detection
-- Policy export/import, evaluation metrics, automated suggestions
-
-**Human Oversight (EU AI Act Article 14)**
-- Approval workflow with multi-party support (N-of-M)
-- Kill-switches (halts) with project or agent scope
-- SDK poll-based approval with configurable timeout
-
-**10 Framework Integrations**
-- LangGraph, CrewAI, OpenAI Agents SDK, OpenAI, Anthropic, LangChain, AutoGen, Claude Agent SDK, Pydantic AI, Google ADK
-- Fail-closed mode, per-key scoped auth
-
-**Data Plane**
-- OTLP protobuf ingest (4MB cap), RANGE-partitioned spans
-- Full-text search, span aggregation, trace tree, PII redaction
-- Head-based sampling, configurable retention
-
-**Compliance + Intelligence**
-- EU AI Act compliance evidence export (Articles 9-15, 19)
-- Agent inventory with risk scoring, cost forecasting
-- Incident detection with Article 73 metadata, agent topology map
-
-**Integrations**
-- Slack (Block Kit, interactive approve/deny buttons)
-- Discord (rich embeds, interactive components)
-- GitHub App (webhooks, commit tracking, issues from incidents)
-- Notification channels CRUD with event filters
-
-**Identity + Access**
-- RBAC (owner/admin/operator/viewer), Argon2id auth, TOTP MFA
-- API key rotation, expiration, IP allowlisting
-- Column-level encryption (Fernet AES-256), auth failure logging
-
-**Audit**
-- Tamper-evident HMAC-SHA256 hash chain, DB-level immutability
-- SCIM 2.0 queries, Merkle root anchors
+**Integrations & auth**
+- 10 framework integrations, fail-closed mode, per-key scoped auth
+- RBAC, Argon2id auth, TOTP MFA, API key rotation
+- Tamper-evident HMAC-SHA256 audit log with Merkle anchors
 
 **CLI**
-- 12 command groups, 30+ subcommands, Rich formatting
+- Create policies from OWASP templates (`--template`), from plain English (`--from-english`), or by bulk import (`policies import`)
+- Dry-run a policy against recent traces (`policies test`)
 
-### Security
-- protobuf >= 6.31.1 (CVE-2025-4565)
-- Webhook SSRF + replay protection
-- google-re2 for PII regexes, Pydantic extra="forbid"
-- hmac.compare_digest on all secrets
-- Postgres RLS, /docs gating, CORS allowlist
-- Pre-commit secret scanning
+**Compliance**
+- EU AI Act evidence export (Articles 9-15, 19)
+- Agent inventory with risk scoring, agent topology map
+- OWASP Agentic Applications 2026 mapping (ASI01-ASI10) across docs and templates
+
+**Deployment & docs**
+- Self-host with Docker Compose, including PgBouncer connection pooling
+- Per-framework integration guides for all 10 supported frameworks
+- Enterprise scaling guide (horizontal scaling, PgBouncer, read replicas)
+- Published to PyPI: `pip install strathon`
+
+[Unreleased]: https://github.com/strathon/strathon/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/strathon/strathon/releases/tag/v1.1.0
