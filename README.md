@@ -148,6 +148,10 @@ Evidence export for Articles 9–15 and 19, covering risk management, data gover
 
 Proxy between your agents and MCP servers. Every MCP request and response passes through the policy engine before reaching the server or returning to the agent. Credential scanning catches leaked secrets in MCP tool responses. Combined with egress policies, you control exactly which MCP tools your agents can call and what data they can send. Fails closed: a tool call is blocked, not allowed, if policy evaluation can't complete. [Learn more → getstrathon.com/docs/mcp](https://getstrathon.com/docs/mcp)
 
+### Egress Proxy
+
+A network-layer catch-all. Runs as a mitmproxy addon in front of the agent and enforces the same policies on all outbound HTTP, including calls the in-process SDK can't see (raw network calls, uninstrumented tools, third-party libraries). Scans request and response bodies for credential leakage. Optional defense-in-depth for higher-security deployments. [Learn more → getstrathon.com/docs/egress](https://getstrathon.com/docs/egress)
+
 ### Behavioral Drift Detection
 
 EWMA and CUSUM statistical analysis per agent. Auto-calibrates from the first 50 observations, then fires alerts when behavior shifts — token usage spikes, tool call patterns change, latency anomalies. Catches compromised or malfunctioning agents before damage accumulates. [Learn more → getstrathon.com/docs/analytics](https://getstrathon.com/docs/analytics)
@@ -272,6 +276,19 @@ Strathon's threat model is anchored on the [OWASP Top 10 for Agentic Application
 | **ASI08** Inadequate Agent Access Controls | [Egress proxy](https://getstrathon.com/docs/egress) with domain allowlisting, MCP gateway, credential scanning, RBAC |
 | **ASI09** Insufficient Logging, Monitoring, and Auditing | Tamper-evident audit log, trace search, webhook alerts, dashboard, SARIF export |
 | **ASI10** Rogue Agents | Behavioral drift detection (Vigil), heartbeat monitoring, SDK integrity check, kill switches |
+
+## Scope and Limitations
+
+Strathon enforces policy at the **tool-call boundary**: it inspects each tool call and its arguments before execution and can block, steer, throttle, require approval, log, or alert. This is the layer where an agent's decisions become real-world actions, and it is the right place to stop an action regardless of whether the model was mistaken, manipulated, or compromised.
+
+It is one layer of agent security, not the whole of it. Some attack classes are not solvable at the tool-call boundary alone, and we would rather say so than imply otherwise:
+
+- **Data-flow exfiltration.** When sensitive data read earlier is smuggled inside an otherwise-valid argument (for example, encoded into a URL on an allowed domain), the individual call looks legitimate. Catching this reliably requires data-flow provenance (taint tracking), which is on our roadmap.
+- **Poisoned tool output and context attacks.** Instructions injected into a tool's response, or into the tool-list during a protocol handshake, can influence an agent without producing a malicious call of their own. These need response sanitization and input filtering, not only call-time enforcement.
+- **Memory poisoning.** A malicious instruction planted in an agent's long-term memory produces a later call that carries no in-band signal. Defending this is a memory-integrity and training-time problem.
+- **Aggregate/economic abuse.** Each call can be legitimate while the volume is the attack. Strathon's budgets and drift detection address this, but through cost and rate accounting rather than per-call policy.
+
+The honest framing from the security community applies: an agent that combines access to private data, exposure to untrusted content, and an outbound channel is structurally exploitable, and the most reliable mitigation is to remove one of those legs by design. Strathon governs the outbound-action leg well; it is most effective as part of a layered design, not as a single guarantee.
 
 ## Architecture
 

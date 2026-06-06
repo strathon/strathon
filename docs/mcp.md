@@ -10,6 +10,12 @@ Agent  ->  Strathon MCP Gateway  ->  upstream MCP server
            (policy evaluation)
 ```
 
+**When to use this.** Enable the MCP gateway when your agents reach their tools
+through an MCP server rather than (or in addition to) calling them in-process.
+The in-process SDK enforces on tools the agent calls directly; the gateway
+enforces on tools the agent reaches over MCP. Same policies, different boundary.
+If your agents don't use MCP, you don't need this.
+
 Every MCP request is evaluated against the **same enabled policies** the rest
 of Strathon uses — the gateway calls the identical policy primitive the trace
 ingest path does, so an MCP `tools/call` is judged exactly like a tool call

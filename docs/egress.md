@@ -11,6 +11,15 @@ agent process  ->  mitmproxy + Strathon addon  ->  internet
                    (credential scan + policy)
 ```
 
+**When to use this.** The egress proxy is a network-layer catch-all. The
+in-process SDK enforces on tool calls it can see; the egress proxy catches
+outbound HTTP the SDK doesn't — raw network calls, uninstrumented tools, or
+calls made through libraries you don't control. Enable it as a defense-in-depth
+layer when you want to guarantee that no data leaves the process without passing
+a policy check. It's heavier to run than the SDK (a separate proxy process, and
+HTTPS interception needs the agent to trust mitmproxy's CA), so it's opt-in
+hardening, not a default.
+
 It does two things on every request, and one on every response:
 
 - **Request body credential scan.** If the outbound request body contains a
