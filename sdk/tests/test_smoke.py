@@ -94,8 +94,8 @@ def test_client_flush_returns_bool():
 
 
 # ---------------------------------------------------------------------------
-# Regression tests for launch-hardening fixes. These lock in behavior that was
-# added during the pre-launch audit so it cannot silently revert.
+# Regression tests. These lock in config validation and endpoint-scheme
+# checks so the behavior cannot silently revert.
 # ---------------------------------------------------------------------------
 
 

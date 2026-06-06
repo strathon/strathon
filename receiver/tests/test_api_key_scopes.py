@@ -366,7 +366,7 @@ def test_invalid_token_returns_401(client):
     assert resp.status_code == 401
 
 
-# ---- /v1/policies/generate auth (regression for launch-hardening) -------
+# ---- /v1/policies/generate auth -----------------------------------------
 #
 # This endpoint calls a paid LLM API using the server's STRATHON_AI_API_KEY.
 # It was previously UNAUTHENTICATED, which is a credit-burn / open-LLM-proxy

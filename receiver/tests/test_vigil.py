@@ -1,6 +1,6 @@
 """Tests for Vigil behavioral-drift detection (vigil.py).
 
-Vigil is claimed as the ASI05 (memory poisoning) / ASI10 (rogue agent)
+Vigil is claimed as the ASI06 (memory & context poisoning) / ASI10 (rogue agent)
 control via EWMA/CUSUM drift detection. These tests verify the core
 AgentBaseline.update() math: calibration, stability (no false drift on a
 steady signal), and detection of a sustained shift.

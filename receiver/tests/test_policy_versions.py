@@ -56,12 +56,9 @@ async def test_delete_captures_version(session, isolated_project):
     from repositories.policies import delete_policy
     policy = await _create_policy(session, isolated_project)
     await delete_policy(session, isolated_project, policy.id)
-    # Versions survive deletion (FK CASCADE is on policies, but
-    # we captured the version BEFORE the delete).
-    # Actually with CASCADE the versions are deleted too. Let me check.
-    # The FK is ON DELETE CASCADE, so versions ARE deleted. This is
-    # correct — if the policy is gone, its versions are gone.
-    # But we can verify the version was captured by checking BEFORE delete.
+    # The policy_versions FK is ON DELETE CASCADE, so deleting the policy
+    # also deletes its versions. We verify the version was captured by
+    # checking before the delete.
 
 
 @pytest.mark.asyncio

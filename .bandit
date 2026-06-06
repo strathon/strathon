@@ -1,8 +1,7 @@
 # Bandit security-scan configuration.
 #
-# Result of the launch security review: 0 high-severity findings across the
-# receiver, SDK, CLI, and scripts. The skipped rules below were each reviewed
-# and confirmed to be false positives for this codebase:
+# The skipped rules below were each reviewed and confirmed to be false
+# positives for this codebase:
 #
 #   B101 — assert: used only in tests (excluded) and a few internal invariants.
 #   B105 — "hardcoded password": these are PII-redaction field-name labels

@@ -8,9 +8,6 @@
 #
 # This mirrors the exemptions already in scripts/check_secrets.py. A real
 # credential committed anywhere outside these paths will still be flagged.
-#
-# Audited June 1, 2026: gitleaks reported 13 findings, all confirmed to be the
-# items below (no real credential, nothing rotated).
 
 [extend]
 useDefault = true

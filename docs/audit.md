@@ -247,14 +247,14 @@ months. Idempotent via `CREATE TABLE IF NOT EXISTS`.
 
 ## OWASP Agentic Top 10 mapping
 
-- **ASI04 (Insecure Agent-to-Agent Communication)** — audit captures the policy
+- **ASI04 (Agentic Supply Chain Vulnerabilities)** — audit captures the policy
   mutation that opened the attack vector. `policy.update` rows
   with `before_state` and `after_state` give the reviewer the
   exact change.
-- **ASI05 (Unsafe Agent Memory Management)** — `halt.issue` rows record who
+- **ASI08 (Cascading Failures)** — `halt.issue` rows record who
   triggered the halt and why; the resource and reason fields are
   human-readable in dashboards and incident reviews.
-- **ASI09 (Insufficient Logging, Monitoring, and Auditing)** — every audit row records actor
+- **ASI09 (Human-Agent Trust Exploitation)** — every audit row records actor
   type, actor id, request id, source IP, and user agent. A halt
   issued by an unexpected actor is visible at a glance.
 - **ASI10 (Rogue Agents)** — `audit.read` rows surface the

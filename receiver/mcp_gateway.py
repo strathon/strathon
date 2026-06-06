@@ -35,8 +35,8 @@ Supported MCP methods:
   everything else -> forwarded unchanged.
 
 Research: Anthropic MCP specification (modelcontextprotocol.io),
-JSON-RPC 2.0, OWASP Agentic ASI04 (agent-to-agent) / ASI08 (access
-control). Reviewed before implementation.
+JSON-RPC 2.0, OWASP Agentic ASI04 (agentic supply chain) / ASI07
+(inter-agent communication). Reviewed before implementation.
 """
 
 from __future__ import annotations

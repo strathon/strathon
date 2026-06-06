@@ -168,12 +168,12 @@ with a single API call.
 | ASI01 Agent Goal Hijack | prompt-injection-detection | CEL policy on span attributes |
 | ASI02 Tool Misuse and Exploitation | tool-access-allowlist | Deny-by-default (allow-list mode) |
 | ASI03 Identity and Privilege Abuse | (built-in) | Scoped API keys, RBAC, MFA, per-key rate limits |
-| ASI04 Insecure Agent-to-Agent Communication | (built-in) | MCP gateway with policy evaluation |
-| ASI05 Unsafe Agent Memory Management | (built-in) | Behavioral drift detection (Vigil), halt propagation |
-| ASI06 Implicit Trust and Inadequate Verification | iteration-budget-guard, cost-budget-guard | Budgets with auto-halt, approval workflows |
-| ASI07 Overwhelming HITL Controls | (built-in) | Multi-party approval, auto-escalation, circuit breakers |
-| ASI08 Inadequate Agent Access Controls | tool-access-allowlist | Per-tool policy enforcement, egress proxy, credential scanning |
-| ASI09 Insufficient Logging, Monitoring, and Auditing | (built-in) | OTLP ingest + audit log + Prometheus metrics |
+| ASI04 Agentic Supply Chain Vulnerabilities | (built-in) | MCP gateway with policy evaluation, egress proxy, credential scanning |
+| ASI05 Unexpected Code Execution | tool-access-allowlist | Block/allow-list on shell, code, and SQL tools; approval before code execution |
+| ASI06 Memory and Context Poisoning | (built-in) | Behavioral drift detection (Vigil), halt propagation, content redaction |
+| ASI07 Insecure Inter-Agent Communication | (built-in) | MCP gateway policy evaluation, fail-closed enforcement |
+| ASI08 Cascading Failures | iteration-budget-guard, cost-budget-guard | Budgets with auto-halt, circuit breakers, kill switches, halt propagation |
+| ASI09 Human-Agent Trust Exploitation | (built-in) | Human approval workflows, tamper-evident audit log, SARIF export |
 | ASI10 Rogue Agents | (built-in) | Vigil drift detection, heartbeat monitoring, kill switches |
 
 ## ISO/IEC 42001:2023 Alignment

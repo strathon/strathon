@@ -267,14 +267,14 @@ Strathon's threat model is anchored on the [OWASP Top 10 for Agentic Application
 | Threat | Strathon Coverage |
 |--------|-------------------|
 | **ASI01** Agent Goal Hijack | CEL policies on prompt content and input patterns, block/alert on detected hijack attempts |
-| **ASI02** Tool Misuse and Exploitation | Block/allow-list on tool names and arguments, approval workflows for sensitive tools |
+| **ASI02** Tool Misuse and Exploitation | Pre-execution policy enforcement on tool names and arguments (block/allow-list), fully qualified tool-name pinning, and approval workflows for sensitive tools |
 | **ASI03** Identity and Privilege Abuse | Scoped API keys, RBAC (4 roles), MFA, per-key rate limits |
-| **ASI04** Insecure Agent-to-Agent Communication | MCP gateway intercepts and evaluates all agent-to-agent calls against policies |
-| **ASI05** Unsafe Agent Memory Management | Detects memory poisoning effects via behavioral drift detection (EWMA/CUSUM), halt propagation |
-| **ASI06** Implicit Trust and Inadequate Verification | Cost and iteration budgets with auto-halt, approval workflows, circuit breakers |
-| **ASI07** Overwhelming HITL Controls | Multi-party approval (N-of-M), auto-escalation, approval reaper, circuit breakers, kill switches |
-| **ASI08** Inadequate Agent Access Controls | [Egress proxy](https://getstrathon.com/docs/egress) with domain allowlisting, MCP gateway, credential scanning, RBAC |
-| **ASI09** Insufficient Logging, Monitoring, and Auditing | Tamper-evident audit log, trace search, webhook alerts, dashboard, SARIF export |
+| **ASI04** Agentic Supply Chain Vulnerabilities | [MCP gateway](https://getstrathon.com/docs/mcp) evaluates third-party tool/MCP-server calls against policies; [egress proxy](https://getstrathon.com/docs/egress) with domain allowlisting; credential scanning on tool responses |
+| **ASI05** Unexpected Code Execution | Block and allow-list policies on shell, code, and SQL tools; approval workflows required before code-executing tools run |
+| **ASI06** Memory and Context Poisoning | Behavioral drift detection (Vigil, EWMA/CUSUM) surfaces poisoning effects; halt propagation; content redaction on ingested data |
+| **ASI07** Insecure Inter-Agent Communication | MCP gateway evaluates inter-agent and tool calls against policies, fails closed when evaluation cannot complete |
+| **ASI08** Cascading Failures | Cost and iteration budgets with auto-halt, circuit breakers, kill switches, and halt propagation to contain failures before they fan out |
+| **ASI09** Human-Agent Trust Exploitation | Human approval workflows (multi-party N-of-M, auto-escalation), tamper-evident audit log, trace search, and SARIF export for accountability |
 | **ASI10** Rogue Agents | Behavioral drift detection (Vigil), heartbeat monitoring, SDK integrity check, kill switches |
 
 ## Scope and Limitations
