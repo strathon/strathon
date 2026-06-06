@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/strathon/strathon/main/assets/banner.png" alt="Strathon" width="600" />
 
   <p><strong>Open-source AI agent firewall</strong></p>
-  <p>Runtime security, CEL policies, and EU AI Act compliance for LLM agents.</p>
+  <p>Open-source AI agent firewall. CEL policies, runtime enforcement at the tool-call boundary, and EU AI Act compliance.</p>
 
   <div>
     <a href="https://getstrathon.com"><strong>Website</strong></a> ·
@@ -25,7 +25,7 @@
 
 <br/>
 
-Strathon is an **open-source firewall for AI agents**. Write a [CEL](https://cel.dev) policy, and Strathon blocks the tool call **before** it executes — no gateway proxy, no latency tax, enforcement happens inside your agent process. Self-host in minutes with Docker Compose. 1,000+ tests, 10 framework integrations, EU AI Act compliance built in.
+Strathon is an **open-source firewall for AI agents**. Write a [CEL](https://cel.dev) policy, and Strathon blocks the tool call **before** it executes — no gateway proxy, no latency tax, enforcement happens inside your agent process. Self-host in minutes with Docker Compose. 1,000+ tests, 10 framework integrations, EU AI Act compliance.
 
 Other agent observability tools tell you what went wrong after the fact. Enterprise SaaS products block in real time but are closed-source and gateway-layer. **Strathon is the only project that is open-source, framework-native, and actually blocks.**
 

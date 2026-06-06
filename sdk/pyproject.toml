@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "strathon"
 version = "1.1.0"
-description = "Open-source AI agent firewall. CEL policies, runtime enforcement, and compliance for LLM agents."
+description = "Open-source AI agent firewall. CEL policies, runtime enforcement at the tool-call boundary, and EU AI Act compliance."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -70,6 +70,7 @@ Homepage = "https://getstrathon.com"
 Repository = "https://github.com/strathon/strathon"
 Documentation = "https://getstrathon.com/docs"
 Issues = "https://github.com/strathon/strathon/issues"
+Discord = "https://discord.gg/Ta9XRmh4H"
 
 [tool.setuptools.packages.find]
 where = ["src"]
