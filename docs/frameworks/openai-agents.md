@@ -36,7 +36,7 @@ Block shell command execution:
 
 ```cel
 attrs["gen_ai.tool.name"] == "run_command"
-  && attrs["gen_ai.tool.args"].contains("rm ")
+  && attrs["strathon.tool.args"].contains("rm ")
 ```
 
 Log all tool calls for a specific agent:

@@ -71,7 +71,7 @@ to block any email tool call addressed to a competitor domain:
 
 ```cel
 attrs["gen_ai.tool.name"] == "send_email"
-  && attrs["gen_ai.tool.args"].contains("competitor.com")
+  && attrs["strathon.tool.args"].contains("competitor.com")
 ```
 
 Set the action to `block` and the status to `enabled`. (Start with `shadow`

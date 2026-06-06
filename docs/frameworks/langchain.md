@@ -37,7 +37,7 @@ Block tool calls to unapproved external APIs:
 
 ```cel
 attrs["gen_ai.tool.name"] == "requests_get"
-  && !attrs["gen_ai.tool.args"].contains("api.internal.com")
+  && !attrs["strathon.tool.args"].contains("api.internal.com")
 ```
 
 Throttle retrieval calls to prevent runaway RAG loops:

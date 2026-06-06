@@ -52,7 +52,7 @@ For high-risk tool calls, use `require_approval` instead of `block`:
 
 ```cel
 attrs["gen_ai.tool.name"] == "execute_sql"
-  && attrs["gen_ai.tool.args"].contains("DELETE")
+  && attrs["strathon.tool.args"].contains("DELETE")
 ```
 
 The agent pauses until an operator approves in the dashboard or Slack.

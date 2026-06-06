@@ -37,15 +37,15 @@ Block tool calls that access Google Cloud resources in production:
 
 ```cel
 attrs["gen_ai.tool.name"] == "gcloud_run"
-  && attrs["gen_ai.tool.args"].contains("--project=prod-")
+  && attrs["strathon.tool.args"].contains("--project=prod-")
 ```
 
 Require approval for database mutations:
 
 ```cel
 attrs["gen_ai.tool.name"] == "bigquery_query"
-  && (attrs["gen_ai.tool.args"].contains("DELETE")
-      || attrs["gen_ai.tool.args"].contains("UPDATE"))
+  && (attrs["strathon.tool.args"].contains("DELETE")
+      || attrs["strathon.tool.args"].contains("UPDATE"))
 ```
 
 ## Notes

@@ -12,6 +12,7 @@ description into a CEL expression for the Strathon AI agent firewall.
 
 Available attributes in every span:
 - attrs["gen_ai.tool.name"]     — tool being called (string)
+- attrs["strathon.tool.args"]   — tool input arguments, as a JSON string
 - attrs["gen_ai.agent.name"]    — agent name (string)
 - attrs["gen_ai.content"]       — prompt or response text (string)
 - attrs["gen_ai.request.model"] — model name (string)

@@ -19,7 +19,7 @@ node entering and exiting is a span. Spans nest: a single agent run produces a
 **trace**, a tree of spans showing exactly what happened in what order.
 
 Spans follow the OpenTelemetry data model, with attributes like
-`gen_ai.request.model`, `gen_ai.tool.name`, and `gen_ai.tool.args`. Policies
+`gen_ai.request.model`, `gen_ai.tool.name`, and `strathon.tool.args`. Policies
 are written against these attributes. Spans are stored in a partitioned
 Postgres table — see [Spans](spans.md) for the storage detail.
 

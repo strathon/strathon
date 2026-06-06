@@ -35,7 +35,7 @@ Block tool calls that access sensitive directories:
 
 ```cel
 attrs["gen_ai.tool.name"] == "file_read"
-  && attrs["gen_ai.tool.args"].contains("/etc/")
+  && attrs["strathon.tool.args"].contains("/etc/")
 ```
 
 Require approval for agent actions that modify infrastructure:
