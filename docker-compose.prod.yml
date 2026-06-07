@@ -14,6 +14,59 @@
 # (Kludex/fastapi-prometheus-grafana, DEV Community 2026 guides).
 
 services:
+  # Production: run schema migrations directly against Postgres (one-shot),
+  # then route the long-running receiver's connections through PgBouncer.
+  # Migrations are DDL and must NOT go through a transaction-mode pooler;
+  # the runtime app pool benefits from PgBouncer at many instances.
+  migrate:
+    image: ghcr.io/strathon/receiver:latest
+    container_name: strathon-migrate
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      # Direct to Postgres, not PgBouncer. Sync psycopg driver for Alembic.
+      DATABASE_URL: postgresql+psycopg://strathon:${POSTGRES_PASSWORD:-strathon_dev}@postgres:5432/strathon
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  receiver:
+    # The receiver no longer migrates on boot; the migrate service owns that.
+    # Runtime queries go through PgBouncer (transaction pooling).
+    environment:
+      STRATHON_AUTO_MIGRATE: "false"
+      DATABASE_URL: postgresql://strathon:${POSTGRES_PASSWORD:-strathon_dev}@pgbouncer:6432/strathon
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      pgbouncer:
+        condition: service_started
+
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.23.1-p2
+    container_name: strathon-pgbouncer
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: strathon
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-strathon_dev}
+      DB_NAME: strathon
+      LISTEN_PORT: "6432"
+      # Strathon uses short transactions; transaction pooling maximizes reuse.
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "1000"
+      DEFAULT_POOL_SIZE: "50"
+      # psycopg3 uses server-side prepared statements; PgBouncer 1.21+ tracks
+      # them across the transaction pool when this is non-zero.
+      MAX_PREPARED_STATEMENTS: "200"
+      AUTH_TYPE: scram-sha-256
+    ports:
+      - "6432:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   prometheus:
     image: prom/prometheus:v2.53.0
     container_name: strathon-prometheus
