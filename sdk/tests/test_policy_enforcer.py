@@ -304,3 +304,48 @@ def test_policy_serialization_roundtrip():
     assert restored.match_expression == p.match_expression
     assert restored.action_config == p.action_config
     assert restored.priority == p.priority
+
+
+# ---- Environment-scoped policies (strathon.project.environment) ----
+
+
+def _env_policy():
+    from strathon.policy.types import Policy
+    return Policy(
+        id="env1", project_id="proj1", name="block-deploy-in-prod",
+        match_expression=(
+            'attrs["gen_ai.tool.name"] == "deploy" '
+            '&& attrs["strathon.project.environment"] == "production"'
+        ),
+        action="block", action_config={}, applies_to=[], enabled=True, priority=100,
+    )
+
+
+def _ready_enforcer(environment):
+    from strathon.policy.enforcer import PolicyEnforcer
+    enf = PolicyEnforcer(endpoint="http://x", environment=environment)
+    enf._policies = [_env_policy()]
+    enf._intervention_default_action = "allow"
+    enf._last_refresh_at = 9e18
+    return enf
+
+
+def test_environment_scoped_policy_matches_in_that_environment():
+    enf = _ready_enforcer("production")
+    d = enf.check_policy({"name": "deploy", "attrs": {"gen_ai.tool.name": "deploy"}})
+    assert d.is_block, "env-scoped policy should match when enforcer env matches"
+
+
+def test_environment_scoped_policy_skips_other_environment():
+    enf = _ready_enforcer("development")
+    d = enf.check_policy({"name": "deploy", "attrs": {"gen_ai.tool.name": "deploy"}})
+    assert not d.is_block, "env-scoped policy must not match a different environment"
+
+
+def test_explicit_environment_attr_wins_over_enforcer_default():
+    enf = _ready_enforcer("production")
+    d = enf.check_policy({
+        "name": "deploy",
+        "attrs": {"gen_ai.tool.name": "deploy", "strathon.project.environment": "development"},
+    })
+    assert not d.is_block, "an explicitly provided environment attr should win"

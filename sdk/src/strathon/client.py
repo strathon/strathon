@@ -153,6 +153,7 @@ class Client:
                 refresh_interval_sec=policy_refresh_interval_sec,
                 fail_closed=fail_closed,
                 fail_closed_max_staleness_sec=fail_closed_max_staleness_sec,
+                environment=self.environment,
             )
             # start() does a synchronous fetch + spawns background refresh.
             # We swallow failures so an unreachable receiver doesn't break

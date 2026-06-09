@@ -56,10 +56,12 @@ class PolicyEnforcer:
         request_timeout_sec: float = 5.0,
         fail_closed: bool = False,
         fail_closed_max_staleness_sec: float = 60.0,
+        environment: Optional[str] = None,
     ) -> None:
         self._endpoint = endpoint.rstrip("/")
         self._api_key = api_key
         self._project_id = project_id
+        self._environment = environment
         self._refresh_interval_sec = refresh_interval_sec
         self._request_timeout_sec = request_timeout_sec
         self._fail_closed = fail_closed
@@ -201,6 +203,20 @@ class PolicyEnforcer:
 
         if not policies:
             return self._default_decision(default_action)
+
+        # Make the deployment environment queryable in CEL. The Client knows
+        # its environment (it ships it as the deployment.environment span
+        # resource attribute), but resource attributes do not flow into the
+        # per-call attrs the policy evaluator sees. Merge it in here, once,
+        # under strathon.project.environment so a single policy like
+        #   attrs["strathon.project.environment"] == "production"
+        # works uniformly across every enforcement surface. Only set it when
+        # the caller has not already provided one, so an explicit per-call
+        # value still wins.
+        if self._environment is not None:
+            attrs = span_context.get("attrs")
+            if isinstance(attrs, dict) and "strathon.project.environment" not in attrs:
+                attrs["strathon.project.environment"] = self._environment
 
         for policy in policies:
             if not policy.enabled:
