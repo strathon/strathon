@@ -71,7 +71,7 @@ async def async_engine():
     teardown so connections don't leak between tests.
     """
     from sqlalchemy import text
-    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
     # Normalize URL through config so the same rewriter logic applies as
     # the receiver runtime uses.
@@ -86,28 +86,58 @@ async def async_engine():
         await engine.dispose()
         pytest.skip("Postgres not reachable for repository tests")
 
-    # Create test partitions covering the fake timestamp ranges used by
-    # tests (start_time_unix_nano values like 1000, 2000, 1_000_000_000_000).
-    # Production partitions cover 2026+ months. Tests use small values
-    # that fall outside any real month, so we need a catch-all test partition.
-    # Range: 0 to 2026-01-01T00:00:00Z in nanoseconds (1767225600000000000).
-    async with engine.begin() as conn:
-        for tbl in ("spans", "span_events", "span_links"):
-            await conn.execute(text(
-                f"CREATE TABLE IF NOT EXISTS {tbl}_test "
-                f"PARTITION OF {tbl} "
-                f"FOR VALUES FROM (0) TO (1767225600000000000)"
-            ))
+    # Partition coverage for the test DB.
+    #
+    # The spans tables are RANGE-partitioned on start_time_unix_nano. Tests
+    # insert at two kinds of timestamps: tiny synthetic values (1000, 2000,
+    # 1_000_000_000_000, the 1.7e18 fixtures) and real wall-clock values
+    # (time.time()-based, "now"). Every inserted row must land in some
+    # partition or Postgres raises "no partition of relation found".
+    #
+    # We cover this deterministically rather than relying on a hardcoded bound:
+    #   1. ensure_partitions() creates the production months (previous month
+    #      through +PREMAKE_MONTHS, relative to now) using the real worker code,
+    #      so "now"-dated inserts always land and the real partition routing is
+    #      exercised. This tracks wall-clock automatically.
+    #   2. A historical catch-all covers [0, <start of the earliest production
+    #      month>) so every synthetic value below the real partitions lands too.
+    #      Bounding it at the earliest ensured month (not a hardcoded date)
+    #      leaves NO gap between the synthetic range and the real partitions.
+    from datetime import datetime, timezone
 
-        # Disable audit immutability triggers in the test DB so
-        # test cleanup (DELETE FROM audit.events) works. Production
-        # triggers prevent UPDATE/DELETE on audit tables.
+    from spans_worker import (
+        _advance_month,
+        _month_bounds_ns,
+        ensure_partitions,
+    )
+
+    async with engine.begin() as conn:
+        # Disable audit immutability triggers in the test DB so test cleanup
+        # (DELETE FROM audit.events) works. Production triggers prevent
+        # UPDATE/DELETE on audit tables.
         await conn.execute(text(
             "ALTER TABLE audit.events DISABLE TRIGGER trg_events_immutable"
         ))
         await conn.execute(text(
             "ALTER TABLE audit.anchors DISABLE TRIGGER trg_anchors_immutable"
         ))
+
+    # Create the real production months via the worker (commits internally).
+    async with AsyncSession(engine) as session:
+        await ensure_partitions(session)
+
+    # Historical catch-all up to the earliest production month, so synthetic
+    # low timestamps and any pre-"now" fixtures land without a gap.
+    _now = datetime.now(timezone.utc)
+    _earliest_year, _earliest_month = _advance_month(_now.year, _now.month, -1)
+    _earliest_start_ns, _ = _month_bounds_ns(_earliest_year, _earliest_month)
+    async with engine.begin() as conn:
+        for tbl in ("spans", "span_events", "span_links"):
+            await conn.execute(text(
+                f"CREATE TABLE IF NOT EXISTS {tbl}_test "
+                f"PARTITION OF {tbl} "
+                f"FOR VALUES FROM (0) TO ({_earliest_start_ns})"
+            ))
 
     try:
         yield engine

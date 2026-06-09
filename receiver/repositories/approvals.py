@@ -179,13 +179,3 @@ async def expire_pending_approvals(session: AsyncSession) -> int:
     if count:
         logger.info("Expired %d pending approval(s)", count)
     return count
-
-
-async def get_approval_by_id_any_project(
-    session: AsyncSession,
-    approval_id: UUID,
-) -> Optional[Approval]:
-    """Get approval without project scoping — for webhook callback URLs."""
-    stmt = select(Approval).where(Approval.id == approval_id)
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()

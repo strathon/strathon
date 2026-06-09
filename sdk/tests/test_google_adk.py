@@ -61,8 +61,11 @@ class TestToolSpanAttrs:
         assert attrs["strathon.agent.name"] == "research_agent"
 
     def test_none_args(self):
+        # strathon.tool.args is now ALWAYS present (default "") so an
+        # args-based policy matches consistently across every surface; a
+        # missing key would make a CEL index error and silently not match.
         attrs = _tool_span_attrs("search", None)
-        assert "strathon.tool.args" not in attrs
+        assert attrs["strathon.tool.args"] == ""
 
 
 class TestModelRequestAttrs:
@@ -144,6 +147,9 @@ class TestBeforeToolCallback:
         decision.retry_after_seconds = 30 if throttle else None
 
         client.check_policy.return_value = decision
+        no_halt = MagicMock()
+        no_halt.is_halt = False
+        client.check_halt.return_value = no_halt
         client._policy_enforcer = MagicMock()
         client.tracer = MagicMock()
 
@@ -252,6 +258,9 @@ class TestBeforeToolCallback:
         cls = _try_import_plugin()
         client = MagicMock()
         client._policy_enforcer = MagicMock()
+        no_halt = MagicMock()
+        no_halt.is_halt = False
+        client.check_halt.return_value = no_halt
         client.check_policy.side_effect = RuntimeError("Service down")
         plugin = cls(client=client)
         tool, tool_args, tool_context = self._make_tool_mocks()

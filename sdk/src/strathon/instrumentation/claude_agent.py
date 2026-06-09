@@ -214,10 +214,15 @@ def _build_pre_tool_use_hook(client):
             "gen_ai.tool.name": tool_name,
             "strathon.tool.name": tool_name,
         }
-        if tool_input:
-            span_attrs["strathon.tool.args"] = _truncate(
-                _json_or_str(tool_input)
-            )
+        # Always set strathon.tool.args (default "") for consistent matching.
+        span_attrs["strathon.tool.args"] = _truncate(
+            _json_or_str(tool_input)
+        ) if tool_input else ""
+
+        # Halt check before the policy try/except so an operator kill-switch
+        # propagates rather than being swallowed by the fail-open handler.
+        from strathon.policy.steer import check_halt_or_raise
+        check_halt_or_raise(client, f"claude_agent.tool.{tool_name}", span_attrs)
 
         try:
             decision = client.check_policy({
@@ -335,10 +340,10 @@ def _build_post_tool_use_hook(client):
             "gen_ai.tool.name": tool_name,
             "strathon.tool.name": tool_name,
         }
-        if tool_input:
-            span_attrs["strathon.tool.args"] = _truncate(
-                _json_or_str(tool_input)
-            )
+        # Always set strathon.tool.args (default "") for consistent matching.
+        span_attrs["strathon.tool.args"] = _truncate(
+            _json_or_str(tool_input)
+        ) if tool_input else ""
 
         start = _TOOL_START_TIMES.pop(tool_use_id or "", None)
         if start is not None:

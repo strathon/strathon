@@ -106,8 +106,10 @@ def _tool_span_attrs(
         "gen_ai.tool.name": tool_name,
         "strathon.tool.name": tool_name,
     }
-    if tool_args is not None:
-        attrs["strathon.tool.args"] = _truncate(_json_or_str(tool_args))
+    # Always set strathon.tool.args (default "") for consistent matching.
+    attrs["strathon.tool.args"] = (
+        _truncate(_json_or_str(tool_args)) if tool_args is not None else ""
+    )
     return attrs
 
 
@@ -236,6 +238,8 @@ def _build_firewall_class():
             tool_name = tool_def.name if tool_def else getattr(call, "tool_name", "unknown")
             span_attrs = _tool_span_attrs(tool_name, args)
 
+            from strathon.policy.steer import check_halt_or_raise
+            check_halt_or_raise(self.client, f"pydantic_ai.tool.{tool_name}", span_attrs)
             try:
                 span_context = {"name": f"pydantic_ai.tool.{tool_name}", "attrs": span_attrs}
                 decision = self.client.check_policy(span_context)
@@ -280,8 +284,9 @@ def _build_firewall_class():
                 # twice (risking divergent decisions and duplicate spans), so a
                 # matched require_approval falls closed here: deny with a loud,
                 # observable block rather than silently allowing. Interactive
-                # approval on pydantic-ai needs a Tier-1 surface (enforce_steer /
-                # the @enforcer decorator), which can await.
+                # approval on pydantic-ai needs a surface that wraps the tool
+                # invocation directly (enforce_steer / the @enforcer decorator),
+                # which can await.
                 from strathon.policy.steer import _emit_intervention_span
                 _emit_intervention_span(
                     self.client,

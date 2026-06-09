@@ -207,7 +207,7 @@ def wait_for_approval(
 # ---------------------------------------------------------------------------
 # The functions above (request_approval, poll_approval, wait_for_approval) are
 # synchronous and block via time.sleep. They are correct for synchronous call
-# sites (the decorator, Tier-1 tool-invoke patching). Async framework hooks
+# sites (the decorator, the tool-invoke patching path). Async framework hooks
 # (openai_agents, autogen, google_adk, claude_agent, pydantic_ai) must NOT call
 # the blocking version: time.sleep inside a coroutine would freeze the event
 # loop the agent runs on. await_for_approval below runs the same proven,

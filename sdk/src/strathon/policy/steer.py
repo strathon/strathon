@@ -241,6 +241,50 @@ def _emit_intervention_span(
 # ===========================================================================
 
 
+def check_halt_or_raise(client: Any, span_name: str, attrs: Dict[str, Any]) -> None:
+    """Shared operator-halt check for adapter pre-tool hooks.
+
+    Every enforcement surface must honor operator kill-switches (the dashboard
+    panic-stop), not just the surfaces that route through the dispatchers. The
+    callback/hook-based adapters (autogen, google_adk, claude_agent,
+    openai_agents RunHooks, langgraph, pydantic_ai) call this at the top of their
+    pre-tool hook so halt behavior is identical everywhere and can't drift the
+    way it did when each adapter hand-rolled its own enforcement.
+
+    Raises StrathonHaltExceeded if an operator halt is active for this call.
+    Fail-open isolation on lookup error (a bug in halt code must not break the
+    user's tool), matching the dispatchers.
+    """
+    tool_name = attrs.get("strathon.tool.name") or attrs.get("gen_ai.tool.name") or "tool"
+    try:
+        halt_decision = client.check_halt({"name": span_name, "attrs": attrs})
+    except Exception:
+        logger.exception("halt check raised for %s; allowing tool", tool_name)
+        return
+    if halt_decision is None or not halt_decision.is_halt:
+        return
+    _emit_intervention_span(
+        client, span_name=span_name, attrs=attrs,
+        decision_kind="halted", decision=halt_decision,
+    )
+    scope_desc = (
+        f"agent '{halt_decision.scope_value}'"
+        if halt_decision.scope == "agent"
+        else "project"
+    )
+    raise StrathonHaltExceeded(
+        (
+            f"Tool '{tool_name}' halted by Strathon "
+            f"(halt #{halt_decision.halt_id}, {scope_desc}): "
+            f"{halt_decision.reason or 'no reason given'}"
+        ),
+        halt_id=halt_decision.halt_id,
+        scope=halt_decision.scope,
+        scope_value=halt_decision.scope_value,
+        reason=halt_decision.reason,
+    )
+
+
 def dispatch_policy_decision(
     client: Any,
     *,
@@ -424,8 +468,172 @@ def dispatch_policy_decision(
         # Approved — run the tool.
         return on_allow()
 
-    # is_allow: run the original tool body.
-    return on_allow()
+    # is_allow: run the original tool body. Any decision that is NOT a
+    # recognized allow fails closed — a future action this SDK version doesn't
+    # understand must never silently run the tool (forward-compat: today
+    # check_policy only emits known actions, so this branch is unreachable, but
+    # it keeps "unknown action -> allow" from ever being the default).
+    if decision.is_allow:
+        return on_allow()
+    _emit_intervention_span(
+        client, span_name=span_name, attrs=attrs,
+        decision_kind="blocked", decision=decision,
+    )
+    raise StrathonPolicyBlocked(
+        f"Tool '{tool_name}' blocked: unrecognized policy decision "
+        f"'{getattr(decision, 'action', '?')}' (SDK cannot enforce it)",
+        policy_id=getattr(decision, "policy_id", None),
+        policy_name=getattr(decision, "policy_name", None),
+    )
+
+
+async def dispatch_policy_decision_async(
+    client: Any,
+    *,
+    span_name: str,
+    attrs: Dict[str, Any],
+    on_allow: Callable[[], Any],
+) -> Any:
+    """Async sibling of ``dispatch_policy_decision``.
+
+    Behaviorally identical to the sync dispatcher — halt check first, then
+    block / throttle / steer / require_approval / allow — but for surfaces whose
+    tool invoke is a coroutine (LangChain ``ainvoke``, the OpenAI Agents tool
+    guardrail, and any other async pre-execution hook). Routing every async
+    surface through this one function is what keeps async enforcement from
+    drifting away from the sync engine the way it did before (require_approval
+    and the halt check were silently missing on the hand-rolled async paths).
+
+    ``on_allow`` may be sync or async; its result is awaited if awaitable, so the
+    caller's real (possibly async) tool body runs only on allow/approval.
+
+    Because this runs inside a coroutine, ``require_approval`` does REAL
+    interactive approval via ``await_for_approval`` (suspends without blocking
+    the event loop) rather than failing closed.
+    """
+    tool_name = attrs.get("strathon.tool.name") or attrs.get("gen_ai.tool.name") or "tool"
+
+    async def _run_allow() -> Any:
+        result = on_allow()
+        if asyncio.iscoroutine(result):
+            return await result
+        return result
+
+    # ---- Halt check first (operator kill-switch overrides everything) ----
+    try:
+        halt_decision = client.check_halt({"name": span_name, "attrs": attrs})
+    except Exception:
+        logger.exception("halt check raised for %s; allowing tool", tool_name)
+        halt_decision = None
+
+    if halt_decision is not None and halt_decision.is_halt:
+        _emit_intervention_span(
+            client,
+            span_name=span_name,
+            attrs=attrs,
+            decision_kind="halted",
+            decision=halt_decision,
+        )
+        scope_desc = (
+            f"agent '{halt_decision.scope_value}'"
+            if halt_decision.scope == "agent"
+            else "project"
+        )
+        raise StrathonHaltExceeded(
+            (
+                f"Tool '{tool_name}' halted by Strathon "
+                f"(halt #{halt_decision.halt_id}, {scope_desc}): "
+                f"{halt_decision.reason or 'no reason given'}"
+            ),
+            halt_id=halt_decision.halt_id,
+            scope=halt_decision.scope,
+            scope_value=halt_decision.scope_value,
+            reason=halt_decision.reason,
+        )
+
+    try:
+        decision = client.check_policy({"name": span_name, "attrs": attrs})
+    except Exception:
+        logger.exception("policy check raised for %s; allowing tool", tool_name)
+        return await _run_allow()
+
+    if decision.is_block:
+        _emit_intervention_span(
+            client, span_name=span_name, attrs=attrs,
+            decision_kind="blocked", decision=decision,
+        )
+        raise StrathonPolicyBlocked(
+            decision.message or f"Tool '{tool_name}' blocked by Strathon policy",
+            policy_id=decision.policy_id,
+            policy_name=decision.policy_name,
+        )
+
+    if decision.is_throttle:
+        _emit_intervention_span(
+            client, span_name=span_name, attrs=attrs,
+            decision_kind="throttled", decision=decision,
+        )
+        raise StrathonPolicyThrottled(
+            decision.message or f"Tool '{tool_name}' rate-limited by Strathon policy",
+            policy_id=decision.policy_id,
+            policy_name=decision.policy_name,
+            retry_after_seconds=decision.retry_after_seconds,
+        )
+
+    if decision.is_steer:
+        replacement = decision.replacement or (
+            f"[Strathon: tool '{tool_name}' redirected by policy"
+            + (f" '{decision.policy_name}'" if decision.policy_name else "")
+            + "]"
+        )
+        _emit_intervention_span(
+            client, span_name=span_name, attrs=attrs,
+            decision_kind="steered", decision=decision, replacement=replacement,
+        )
+        return replacement
+
+    if decision.is_require_approval:
+        _emit_intervention_span(
+            client, span_name=span_name, attrs=attrs,
+            decision_kind="approval_requested", decision=decision,
+        )
+        from strathon.policy.approval import await_for_approval
+        try:
+            await await_for_approval(
+                client, decision,
+                {"name": span_name, "attrs": attrs},
+                on_timeout="deny",
+            )
+        except StrathonApprovalDenied:
+            raise
+        except Exception:
+            logger.exception(
+                "approval workflow failed for %s; denying tool", tool_name
+            )
+            raise StrathonApprovalDenied(
+                f"Approval workflow failed for tool '{tool_name}'",
+                policy_id=decision.policy_id,
+                policy_name=decision.policy_name,
+                status="error",
+            )
+        return await _run_allow()
+
+    # is_allow: run the tool body. Any non-allow decision that reaches here is
+    # an action this SDK version doesn't recognize — fail closed rather than
+    # silently run the tool (matrix test asserts no unrecognized decision
+    # reaches a live surface).
+    if decision.is_allow:
+        return await _run_allow()
+    _emit_intervention_span(
+        client, span_name=span_name, attrs=attrs,
+        decision_kind="blocked", decision=decision,
+    )
+    raise StrathonPolicyBlocked(
+        f"Tool '{tool_name}' blocked: unrecognized policy decision "
+        f"'{getattr(decision, 'action', '?')}' (SDK cannot enforce it)",
+        policy_id=getattr(decision, "policy_id", None),
+        policy_name=getattr(decision, "policy_name", None),
+    )
 
 
 # ===========================================================================
@@ -498,62 +706,17 @@ def _install_class_patch(cls: Type[Any]) -> None:
             tool_name = attrs["strathon.tool.name"]
             span_name = f"tool.{tool_name}"
 
-            # The policy check itself is sync; we run the dispatcher up
-            # to the on_allow boundary and only await if we got there.
-            # Block/steer return synchronously (raise or return string).
-            try:
-                decision = client.check_policy({"name": span_name, "attrs": attrs})
-            except Exception:
-                logger.exception(
-                    "policy check raised for %s; allowing tool", tool_name
-                )
-                result = original_ainvoke(self, input, config, **kwargs)
-                if asyncio.iscoroutine(result):
-                    return await result
-                return result
-
-            if decision.is_block:
-                _emit_intervention_span(
-                    client, span_name=span_name, attrs=attrs,
-                    decision_kind="blocked", decision=decision,
-                )
-                raise StrathonPolicyBlocked(
-                    decision.message or f"Tool '{tool_name}' blocked by Strathon policy",
-                    policy_id=decision.policy_id,
-                    policy_name=decision.policy_name,
-                )
-
-            if decision.is_throttle:
-                _emit_intervention_span(
-                    client, span_name=span_name, attrs=attrs,
-                    decision_kind="throttled", decision=decision,
-                )
-                raise StrathonPolicyThrottled(
-                    decision.message
-                    or f"Tool '{tool_name}' rate-limited by Strathon policy",
-                    policy_id=decision.policy_id,
-                    policy_name=decision.policy_name,
-                    retry_after_seconds=decision.retry_after_seconds,
-                )
-
-            if decision.is_steer:
-                replacement = decision.replacement or (
-                    f"[Strathon: tool '{tool_name}' redirected by policy"
-                    + (f" '{decision.policy_name}'" if decision.policy_name else "")
-                    + "]"
-                )
-                _emit_intervention_span(
-                    client, span_name=span_name, attrs=attrs,
-                    decision_kind="steered", decision=decision,
-                    replacement=replacement,
-                )
-                return replacement
-
-            # Allow: run the real async body.
-            result = original_ainvoke(self, input, config, **kwargs)
-            if asyncio.iscoroutine(result):
-                return await result
-            return result
+            # Route through the async dispatcher so this surface enforces the
+            # full action set — halt check, block, throttle, steer, AND real
+            # interactive require_approval — identically to the sync path.
+            # Previously this hand-rolled only block/throttle/steer and ran the
+            # body for approval/halt (a silent-allow gap).
+            return await dispatch_policy_decision_async(
+                client,
+                span_name=span_name,
+                attrs=attrs,
+                on_allow=lambda: original_ainvoke(self, input, config, **kwargs),
+            )
 
         cls.ainvoke = _patched_ainvoke  # type: ignore[assignment]
 

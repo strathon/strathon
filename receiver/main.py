@@ -520,11 +520,14 @@ async def lifespan(app: FastAPI):
         name="strathon.heartbeat",
     )
 
-    # Retention cleanup: daily deletion of expired data.
+    # Retention cleanup: daily deletion of expired sessions/keys/approvals.
+    # Separate handle from the partition-based span retention task above, so
+    # both are awaited/cancelled correctly on shutdown (previously this
+    # overwrote app.state.retention_task, orphaning the span-retention loop).
     from retention_cleanup import retention_cleanup_loop
-    app.state.retention_task = asyncio.create_task(
+    app.state.retention_cleanup_task = asyncio.create_task(
         retention_cleanup_loop(async_session_maker),
-        name="strathon.retention",
+        name="strathon.retention_cleanup",
     )
 
     yield
@@ -540,6 +543,15 @@ async def lifespan(app: FastAPI):
         app.state.retention_task.cancel()
         try:
             await app.state.retention_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    # Stop the retention cleanup loop. It has no shutdown Event (it sleeps
+    # between daily runs), so cancel it directly.
+    if getattr(app.state, "retention_cleanup_task", None) is not None:
+        app.state.retention_cleanup_task.cancel()
+        try:
+            await app.state.retention_cleanup_task
         except (asyncio.CancelledError, Exception):
             pass
 
@@ -629,6 +641,13 @@ async def lifespan(app: FastAPI):
         app.state.retention_task.cancel()
         try:
             await app.state.retention_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    if hasattr(app.state, "retention_cleanup_task"):
+        app.state.retention_cleanup_task.cancel()
+        try:
+            await app.state.retention_cleanup_task
         except (asyncio.CancelledError, Exception):
             pass
     metrics_mod.reset_global_metrics_for_testing()

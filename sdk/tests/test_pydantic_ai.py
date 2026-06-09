@@ -89,8 +89,11 @@ class TestToolSpanAttrs:
         assert "strathon.tool.args" in attrs
 
     def test_none_args(self):
+        # strathon.tool.args is now ALWAYS present (default "") so an
+        # args-based policy matches consistently across every surface; a
+        # missing key would make a CEL index error and silently not match.
         attrs = _tool_span_attrs("search", None)
-        assert "strathon.tool.args" not in attrs
+        assert attrs["strathon.tool.args"] == ""
 
 
 class TestModelRequestAttrs:
@@ -178,6 +181,9 @@ class TestStrathonFirewallBeforeToolExecute:
         decision.retry_after_seconds = 30 if throttle else None
 
         client.check_policy.return_value = decision
+        no_halt = MagicMock()
+        no_halt.is_halt = False
+        client.check_halt.return_value = no_halt
         client._policy_enforcer = MagicMock()
         client.tracer = MagicMock()
 
@@ -259,6 +265,9 @@ class TestStrathonFirewallBeforeToolExecute:
         cls = _try_import_firewall()
         client = MagicMock()
         client._policy_enforcer = MagicMock()
+        no_halt = MagicMock()
+        no_halt.is_halt = False
+        client.check_halt.return_value = no_halt
         client.check_policy.side_effect = RuntimeError("Policy service down")
         fw = cls(client=client)
         ctx, call, tool_def, args = self._make_mocks()

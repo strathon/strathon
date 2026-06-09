@@ -388,6 +388,8 @@ def _build_strathon_run_hooks(client, user_hooks):
                 "strathon.tool.args": _truncate(_safe_json(args), 1500),
             }
 
+            from strathon.policy.steer import check_halt_or_raise
+            check_halt_or_raise(client, f"agents.tool.{tool_name}", attrs)
             try:
                 decision = client.check_policy({
                     "name": f"agents.tool.{tool_name}",
@@ -763,6 +765,24 @@ def _build_strathon_guardrail_function(client):
             "strathon.tool.args": _truncate(_safe_str(raw_args), 1500),
         }
 
+        # Halt check first: an operator kill-switch overrides any policy.
+        try:
+            halt_decision = client.check_halt({
+                "name": f"agents.tool.{tool_name}", "attrs": attrs,
+            })
+        except Exception:
+            logger.exception("Strathon guardrail halt check raised; continuing")
+            halt_decision = None
+        if halt_decision is not None and halt_decision.is_halt:
+            return ToolGuardrailFunctionOutput.raise_exception(
+                output_info={
+                    "halt_id": halt_decision.halt_id,
+                    "scope": halt_decision.scope,
+                    "reason": halt_decision.reason,
+                    "halted": True,
+                },
+            )
+
         try:
             decision = client.check_policy({
                 "name": f"agents.tool.{tool_name}",
@@ -815,6 +835,31 @@ def _build_strathon_guardrail_function(client):
                     "policy_name": decision.policy_name,
                 },
             )
+
+        if decision.is_require_approval:
+            # The guardrail is async, so we do REAL interactive approval:
+            # wait for the operator off the event loop. Approved -> allow the
+            # tool to run; denied/expired/timed out -> raise_exception so the
+            # tool body never runs. Previously require_approval fell through to
+            # allow() here (a silent-allow gap).
+            from strathon.policy import await_for_approval
+            try:
+                await await_for_approval(
+                    client, decision,
+                    {"name": f"agents.tool.{tool_name}", "attrs": attrs},
+                    on_timeout="deny",
+                )
+            except Exception as approval_exc:
+                status = getattr(approval_exc, "status", "denied")
+                return ToolGuardrailFunctionOutput.raise_exception(
+                    output_info={
+                        "policy_id": decision.policy_id,
+                        "policy_name": decision.policy_name,
+                        "message": str(approval_exc) or "approval denied",
+                        "approval_status": status,
+                    },
+                )
+            return ToolGuardrailFunctionOutput.allow()
 
         return ToolGuardrailFunctionOutput.allow()
 

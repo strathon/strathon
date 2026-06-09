@@ -75,6 +75,7 @@ class MCPSecurityGateway:
         blocked_tools: Optional[list[str]] = None,
         scan_responses: bool = True,
         fail_open: bool = False,
+        default_action: str = "allow",
         http_timeout: float = 30.0,
     ):
         self.upstream_url = upstream_url
@@ -82,6 +83,10 @@ class MCPSecurityGateway:
         self.blocked_tools = set(blocked_tools or [])
         self.scan_responses = scan_responses
         self.fail_open = fail_open
+        # Allow-list (default-deny) mode: when "block", a tools/call that
+        # matches no policy is denied — same project posture as the SDK
+        # enforcer and egress proxy, so allow-list mode holds at every surface.
+        self.default_action = default_action
         self.http_timeout = http_timeout
 
     async def handle_request(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -121,6 +126,11 @@ class MCPSecurityGateway:
             }
             matches = evaluate_for_span(self.policies, tool_name, attrs)
             if not matches:
+                # Allow-list mode: deny unmatched tool calls when the project
+                # is default-deny.
+                if self.default_action == "block":
+                    return {"action": "block", "policy_name": "_default_deny",
+                            "reason": "no policy explicitly allowed this tool"}
                 return {"action": "allow"}
             # list_policies returns priority-DESC, evaluate_for_span preserves
             # order, so the first match is the highest-priority action.

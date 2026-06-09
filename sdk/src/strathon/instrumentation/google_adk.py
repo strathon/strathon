@@ -91,8 +91,10 @@ def _tool_span_attrs(
         "gen_ai.tool.name": tool_name,
         "strathon.tool.name": tool_name,
     }
-    if tool_args is not None:
-        attrs["strathon.tool.args"] = _truncate(_json_or_str(tool_args))
+    # Always set strathon.tool.args (default "") for consistent matching.
+    attrs["strathon.tool.args"] = (
+        _truncate(_json_or_str(tool_args)) if tool_args is not None else ""
+    )
     if agent_name:
         attrs["strathon.agent.name"] = agent_name
     return attrs
@@ -227,6 +229,12 @@ def _build_plugin_class():
 
             span_attrs = _tool_span_attrs(tool_name, tool_args, agent_name)
 
+            # Halt check before the policy try/except so an operator
+            # kill-switch propagates rather than being swallowed by fail-open.
+            from strathon.policy.steer import check_halt_or_raise
+            check_halt_or_raise(
+                self.client, f"google_adk.tool.{tool_name}", span_attrs
+            )
             try:
                 span_context = {
                     "name": f"google_adk.tool.{tool_name}",

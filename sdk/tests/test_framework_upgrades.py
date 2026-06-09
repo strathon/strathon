@@ -47,6 +47,9 @@ class TestClaudePreToolUseHook:
         decision.policy_name = policy_name or "test-policy"
         decision.retry_after_seconds = 30 if throttle else None
         client.check_policy.return_value = decision
+        no_halt = MagicMock()
+        no_halt.is_halt = False
+        client.check_halt.return_value = no_halt
         client._policy_enforcer = MagicMock()
         client.tracer = MagicMock()
         hook = _build_pre_tool_use_hook(client)
@@ -92,6 +95,9 @@ class TestClaudePreToolUseHook:
         client = MagicMock()
         client._policy_enforcer = MagicMock()
         client.check_policy.side_effect = RuntimeError("down")
+        no_halt = MagicMock()
+        no_halt.is_halt = False
+        client.check_halt.return_value = no_halt
         hook = _build_pre_tool_use_hook(client)
         result = asyncio.run(hook(self._input_data(), "tid_6", MagicMock()))
         assert result == {}

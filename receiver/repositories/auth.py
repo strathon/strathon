@@ -34,6 +34,11 @@ from auth import _sha256_hex, generate_api_key  # pure helpers, no DB
 from models import ApiKey
 from schemas.api_keys import ApiKeyCreateResponse, ApiKeyRead
 
+# A fixed, valid-length SHA-256 hex used only to spend one constant-time
+# comparison when no key matches the prefix, so the no-match path costs the
+# same as a match-but-wrong-hash path (no timing leak of prefix existence).
+_DUMMY_KEY_HASH = _sha256_hex("strathon-nonexistent-key-timing-equalizer")
+
 logger = logging.getLogger("strathon.receiver.repositories.auth")
 
 
@@ -197,6 +202,11 @@ async def verify_token_and_touch(
                 logger.debug("failed to update last_used_at for key %s", key.id)
             return key
 
+    # No prefix match: still perform one comparison against a dummy hash so the
+    # "no key with this prefix" path costs the same as "prefix exists but hash
+    # differs". Otherwise the timing delta would reveal whether a given prefix
+    # is in use (the docstring promises uniform timing across failure modes).
+    hmac.compare_digest(_DUMMY_KEY_HASH, incoming_hash)
     return None
 
 

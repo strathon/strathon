@@ -1,16 +1,18 @@
 """Data retention cleanup task.
 
-Runs daily. Deletes data older than the project's retention settings.
+Runs daily. Deletes auxiliary data older than retention settings.
 Never deletes audit entries (compliance requirement).
 
 Cleans:
-  - Spans older than retention_spans_days
   - Expired sessions
   - Expired API keys
   - Resolved approvals older than 90 days
 
-Research: GDPR Article 5(1)(e) storage limitation principle,
-Postgres partition DROP for efficient bulk deletion.
+Span retention is handled separately by the partition-based
+``retention.retention_loop`` (efficient partition drops, honors shutdown,
+emits metrics) — this loop intentionally does not delete spans.
+
+Research: GDPR Article 5(1)(e) storage limitation principle.
 """
 
 from __future__ import annotations
@@ -37,10 +39,9 @@ async def retention_cleanup_loop(session_maker) -> None:
             async with session_maker() as session:
                 deleted = await _run_cleanup(session)
             logger.info(
-                "Retention cleanup complete: %d spans, %d sessions, "
+                "Retention cleanup complete: %d sessions, "
                 "%d expired keys, %d old approvals deleted",
-                deleted["spans"], deleted["sessions"],
-                deleted["keys"], deleted["approvals"],
+                deleted["sessions"], deleted["keys"], deleted["approvals"],
             )
         except asyncio.CancelledError:
             logger.info("Retention cleanup shutting down")
@@ -52,8 +53,15 @@ async def retention_cleanup_loop(session_maker) -> None:
 
 
 async def _run_cleanup(session: AsyncSession) -> dict[str, int]:
-    """Execute all cleanup tasks. Returns counts of deleted rows."""
-    counts = {"spans": 0, "sessions": 0, "keys": 0, "approvals": 0}
+    """Execute all cleanup tasks. Returns counts of deleted rows.
+
+    Spans are intentionally NOT handled here — span retention is owned by the
+    partition-based ``retention.retention_loop`` (efficient partition drops,
+    honors shutdown, emits metrics). This loop covers the auxiliary tables that
+    loop does not: sessions, API keys, and old resolved approvals. Audit entries
+    are never deleted (compliance requirement).
+    """
+    counts = {"sessions": 0, "keys": 0, "approvals": 0}
 
     # 1. Delete expired sessions.
     result = await session.execute(text(
@@ -73,26 +81,6 @@ async def _run_cleanup(session: AsyncSession) -> dict[str, int]:
         "AND resolved_at < NOW() - INTERVAL '90 days'"
     ))
     counts["approvals"] = result.rowcount or 0
-
-    # 4. Drop old span partitions based on retention.
-    # Get all projects and their retention settings.
-    projects = await session.execute(text("""
-        SELECT p.id, COALESCE(ps.trace_retention_days, 30) AS retention_days
-        FROM projects p
-        LEFT JOIN project_settings ps ON ps.project_id = p.id
-        WHERE p.deleted_at IS NULL
-    """))
-
-    for row in projects.all():
-        retention_days = row[1]
-        # Delete spans older than retention (partition DROP is more
-        # efficient but requires knowing partition boundaries).
-        result = await session.execute(text(
-            "DELETE FROM spans WHERE project_id = :pid "
-            "AND start_time_unix_nano < "
-            "EXTRACT(EPOCH FROM NOW() - make_interval(days => :days))::BIGINT * 1000000000"
-        ), {"pid": row[0], "days": retention_days})
-        counts["spans"] += result.rowcount or 0
 
     # NEVER delete audit entries. Compliance requirement.
 

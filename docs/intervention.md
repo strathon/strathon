@@ -107,10 +107,10 @@ human:
 | Anthropic / OpenAI LLM integrations | Observability-only — no tool-call enforcement; use `log`/`alert` here |
 
 The same async/sync distinction applies to `steer`: surfaces that control
-the return value (Tier-1 tool-invoke, async hooks, the gateway) substitute
-the replacement; the synchronous callback surfaces (LangGraph, LangChain,
-Pydantic AI) record the steer but the original tool still runs, so use
-`block` there for hard prevention.
+the return value (direct tool-invoke wrapping, async hooks, the gateway)
+substitute the replacement; the synchronous callback surfaces (LangGraph,
+LangChain, Pydantic AI) record the steer but the original tool still runs, so
+use `block` there for hard prevention.
 
 ### Throttle action config
 
@@ -198,6 +198,12 @@ explicit `action: "allow"` policy or it is denied. The SDK raises
 `StrathonPolicyBlocked` with `policy_id=None` and a message that names
 allow-list mode, so operators reading exception logs see the cause
 immediately.
+
+Allow-list mode is honored at every enforcement surface, not just the SDK: the
+MCP gateway denies an unmatched `tools/call`, and the egress proxy denies an
+unmatched outbound request, both with the same default-deny posture. A project's
+allow-list stance is therefore consistent across the SDK, the gateway, and the
+egress proxy.
 
 Example allow policy:
 

@@ -230,7 +230,7 @@ class PolicyEnforcer:
 
             if policy.action == "block":
                 message = (
-                    policy.action_config.get("message")
+                    (policy.action_config or {}).get("message")
                     or f"Blocked by Strathon policy '{policy.name}'"
                 )
                 return PolicyDecision(
@@ -261,9 +261,21 @@ class PolicyEnforcer:
                     continue
                 return decision
             if policy.action == "require_approval":
-                timeout = int(
-                    (policy.action_config or {}).get("timeout_seconds", 300)
-                )
+                # Defensively coerce timeout_seconds: a malformed value (None,
+                # a non-numeric string, a bool) must NOT raise out of
+                # check_policy, because every adapter's policy-check handler
+                # fails OPEN on exception — so a bad config value would silently
+                # disable approval. Fall back to 300s on anything invalid, the
+                # same posture _evaluate_throttle takes for window_seconds.
+                raw_timeout = (policy.action_config or {}).get("timeout_seconds", 300)
+                if isinstance(raw_timeout, bool) or not isinstance(
+                    raw_timeout, (int, float)
+                ):
+                    timeout = 300
+                else:
+                    timeout = int(raw_timeout)
+                    if timeout <= 0:
+                        timeout = 300
                 return PolicyDecision(
                     action="require_approval",
                     policy_id=policy.id,
@@ -276,7 +288,7 @@ class PolicyEnforcer:
                 )
             # steer
             replacement = (
-                policy.action_config.get("replacement")
+                (policy.action_config or {}).get("replacement")
                 or f"[Strathon policy '{policy.name}' redirected this call]"
             )
             return PolicyDecision(

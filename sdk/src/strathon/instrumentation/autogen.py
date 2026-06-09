@@ -241,10 +241,17 @@ def _install_tool_patch(client) -> bool:
             "gen_ai.tool.name": tool_name,
             "strathon.tool.name": tool_name,
         }
-        if args:
-            span_attrs["strathon.tool.args"] = _truncate(
-                _json_or_str(dict(args) if hasattr(args, "items") else args)
-            )
+        # Always set strathon.tool.args (default "") so an args-based policy
+        # matches consistently across every surface — a missing key makes a
+        # CEL index error and the policy silently never matches here.
+        span_attrs["strathon.tool.args"] = _truncate(
+            _json_or_str(dict(args) if hasattr(args, "items") else args)
+        ) if args else ""
+
+        # Halt check OUTSIDE the policy try/except: an operator kill-switch
+        # must propagate, not be swallowed by the fail-open policy handler.
+        from strathon.policy.steer import check_halt_or_raise
+        check_halt_or_raise(current_client, f"autogen.tool.{tool_name}", span_attrs)
 
         try:
             decision = current_client.check_policy({

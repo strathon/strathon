@@ -8,6 +8,12 @@ Different from halts: halts are manual kill switches. Circuit breakers
 are automatic and self-recovering. They contain blast radius when an
 agent or tool starts failing without requiring operator intervention.
 
+Execution model: this is request-path, NOT a background loop. State lives
+in-memory and is updated synchronously where calls happen — span ingest
+(api/traces.py) records outcomes and consults check_circuit, and the
+security-tools API lists/resets breakers. There is intentionally no
+asyncio task to schedule in main.py; do not add one.
+
 Research:
 Martin Fowler circuit breaker pattern, Netflix Hystrix (retired but
 pattern is canonical), resilience4j.

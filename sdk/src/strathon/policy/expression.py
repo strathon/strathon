@@ -161,8 +161,17 @@ def evaluate(
     """Evaluate a CEL expression against a span context.
 
     Returns True only when the expression evaluates to boolean True. Any
-    runtime evaluation error is logged and returns False — we prefer
-    silent-deny over crashing the receiver / SDK.
+    runtime evaluation error is logged and returns False.
+
+    Important: returning False on error means the policy does NOT match. For a
+    block / require_approval policy that means the call is ADMITTED, not denied
+    — so this is fail-OPEN at the expression level, not "silent-deny". This is
+    acceptable because malformed expressions are rejected at write time by
+    validate_expression (a bad expression can't normally reach evaluation), and
+    because crashing the evaluator on every span would be worse. If a caller
+    needs an eval error on a control-flow policy to fail closed, it must
+    special-case the error at the call site (the evaluator only returns a
+    bool and does not know the action). Do not read this False as "denied".
 
     The ``now`` parameter pins the timestamp bound to the CEL ``now``
     variable. Tests pass a deterministic value; production callers omit

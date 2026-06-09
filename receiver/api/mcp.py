@@ -27,6 +27,7 @@ import auth as auth_mod
 from database import get_db_session
 from mcp_gateway import MCPSecurityGateway
 from repositories import policies as policies_repo
+import repositories.project_settings as project_settings_repo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ._deps import require_scope
@@ -76,6 +77,8 @@ async def mcp_proxy(
     """Evaluate an MCP request against project policies, then proxy it."""
     # Load the project's enabled policies — the same call the ingest path
     # uses, so MCP tool calls are judged by the identical policy set/order.
+    # default_action carries the project's allow-list posture so a default-deny
+    # project denies unmatched tool calls at the gateway too, not just the SDK.
     try:
         policy_models = await policies_repo.list_policies(
             session, ctx.project_id, only_enabled=True
@@ -84,17 +87,21 @@ async def mcp_proxy(
             {**p.model_dump(mode="python"), "id": str(p.id)}
             for p in policy_models
         ]
+        default_action = await project_settings_repo.load_intervention_default_action(
+            session, ctx.project_id,
+        )
     except Exception:
         logger.exception(
             "failed to load policies for MCP proxy (project %s)", ctx.project_id
         )
-        # Fail-closed posture: if we cannot load policies, hand the gateway an
-        # empty set AND leave fail_open as requested. With no policies and
-        # fail_open=False the gateway still forwards non-tools/call methods but
-        # a tools/call evaluates to allow only if no policy would block — which
-        # with zero policies means allow. To stay strict we force fail_open off
-        # here so the gateway's own evaluation-error path (fail-closed) governs.
+        # Fail-closed posture: if we cannot load the policy set or the project's
+        # allow-list setting, hand the gateway an empty policy list AND a
+        # default_action of "block" so an unmatched tools/call is denied rather
+        # than admitted. Previously the empty-list + no-error path took the
+        # gateway's no-match branch and returned allow (a silent admit on a
+        # control-plane failure).
         active_policies = []
+        default_action = "block"
 
     gateway = MCPSecurityGateway(
         upstream_url=body.upstream_url,
@@ -102,5 +109,6 @@ async def mcp_proxy(
         blocked_tools=body.blocked_tools,
         scan_responses=body.scan_responses,
         fail_open=body.fail_open,
+        default_action=default_action,
     )
     return await gateway.handle_request(body.request)

@@ -476,10 +476,20 @@ _REGISTERED_LISTENER = None
 # and catches handler exceptions internally — none of which can stop the
 # tool from running.
 #
-# CrewStructuredTool.invoke() is the single documented entry point every tool
-# call goes through; patching it once is far less risky than the 4-method
-# monkey-patch we considered (and rejected) for observability. The original
-# observability instrumentation continues via the event listener.
+# CrewStructuredTool.invoke() is the single entry point every tool call goes
+# through; patching it once is far less risky than the 4-method monkey-patch we
+# considered (and rejected) for observability. The original observability
+# instrumentation continues via the event listener.
+#
+# Async tools are covered by this same patch, not a separate path. CrewAI does
+# NOT expose a tool-level ainvoke that bypasses invoke: CrewStructuredTool.invoke
+# itself detects a coroutine tool function and runs it (asyncio.run on the
+# coroutine) inside invoke. The ainvoke() that exists in CrewAI is on the agent
+# EXECUTOR (its async iteration loop), and that loop still dispatches tool calls
+# through CrewStructuredTool.invoke. So patching invoke enforces policy on every
+# tool call regardless of sync/async tool function or sync/async crew. (Verified
+# against CrewAI's structured_tool.invoke and crew_agent_executor; revisit if a
+# future CrewAI version adds a tool-level async entry point that skips invoke.)
 _ORIGINAL_INVOKE = None
 _PATCHED_CLIENT = None
 

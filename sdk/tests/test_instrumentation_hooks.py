@@ -63,6 +63,12 @@ class TestClaudePreToolUseHook:
         decision.timeout_seconds = 60
         decision.retry_after_seconds = 30 if throttle else None
         client.check_policy.return_value = decision
+        # check_halt is now called by every adapter pre-hook (operator
+        # kill-switch). Default the mock to "no active halt" so these
+        # policy-focused tests exercise the policy path, not the halt path.
+        no_halt = MagicMock()
+        no_halt.is_halt = False
+        client.check_halt.return_value = no_halt
         client._policy_enforcer = MagicMock()
         client.tracer = MagicMock()
         hook = _build_pre_tool_use_hook(client)
@@ -143,6 +149,9 @@ class TestClaudePreToolUseHook:
     def test_policy_exception_returns_empty(self):
         client = MagicMock()
         client._policy_enforcer = MagicMock()
+        no_halt = MagicMock()
+        no_halt.is_halt = False
+        client.check_halt.return_value = no_halt
         client.check_policy.side_effect = RuntimeError("down")
         hook = _build_pre_tool_use_hook(client)
         result = asyncio.run(hook(self._input_data(), "tid_6", MagicMock()))

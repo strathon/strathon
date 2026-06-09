@@ -48,6 +48,9 @@ try:
             # /v1/policies, evaluate CEL locally, refresh periodically).
             self._policies: list[dict[str, Any]] = []
             self._policies_loaded = False
+            # Project-level allow-list toggle from /v1/policies; "allow"
+            # (admit unmatched) or "block" (default-deny). Set on refresh.
+            self._default_action = "allow"
 
         def load(self, loader):
             loader.add_option(
@@ -83,7 +86,16 @@ try:
                         params={"enabled": "true"},
                     )
                 if resp.status_code == 200:
-                    self._policies = resp.json().get("policies", [])
+                    payload = resp.json()
+                    self._policies = payload.get("policies", [])
+                    # Honor allow-list (default-deny) mode: a project whose
+                    # intervention_default_action is "block" denies any request
+                    # that matches no policy. Same posture as the SDK enforcer
+                    # so a project's security stance is identical across every
+                    # surface, not allow-by-default only at the egress boundary.
+                    self._default_action = payload.get(
+                        "intervention_default_action", "allow"
+                    )
                     self._policies_loaded = True
             except Exception:
                 logger.exception("egress: failed to refresh policies")
@@ -176,6 +188,13 @@ try:
                 }
                 matches = evaluate_for_span(self._policies, tool_name, attrs)
                 if not matches:
+                    # Allow-list mode: no policy matched and the project is
+                    # default-deny, so fall closed.
+                    if getattr(self, "_default_action", "allow") == "block":
+                        return {
+                            "action": "block",
+                            "policy_name": "_default_deny",
+                        }
                     return {"action": "allow"}
                 top = matches[0]
                 return {"action": top.get("action", "allow"),

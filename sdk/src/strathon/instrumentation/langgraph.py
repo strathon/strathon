@@ -461,8 +461,11 @@ class StrathonLangGraphHandler:
         # exception as a tool error). on_tool_start is a synchronous callback
         # that cannot substitute a return value or suspend-and-resume, so steer
         # is observe-only here and require_approval falls closed (raises) —
-        # real steer/approval need a Tier-1 surface (enforce_steer / CrewAI /
-        # the decorator). The callback never silently allows a matched policy.
+        # real steer/approval need a surface that wraps the tool invocation
+        # directly (enforce_steer / CrewAI / the decorator). The callback never
+        # silently allows a matched policy.
+        from strathon.policy.steer import check_halt_or_raise
+        check_halt_or_raise(self.client, f"langgraph.tool.{tool_name}", attrs)
         try:
             decision = self.client.check_policy({
                 "name": f"langgraph.tool.{tool_name}",
@@ -518,8 +521,9 @@ class StrathonLangGraphHandler:
                 # potentially deadlocking. So a matched require_approval policy
                 # falls closed: deny the call with a loud, observable block
                 # rather than silently allowing it. Real interactive approval
-                # on LangGraph requires a Tier-1 surface (enforce_steer / the
-                # @enforcer decorator / tool-invoke patching), which can await.
+                # on LangGraph requires a surface that wraps the tool
+                # invocation directly (enforce_steer / the @enforcer decorator /
+                # tool-invoke patching), which can await.
                 attrs["strathon.policy.approval_required"] = True
                 attrs["strathon.policy.id"] = decision.policy_id or ""
                 attrs["strathon.policy.name"] = decision.policy_name or ""
