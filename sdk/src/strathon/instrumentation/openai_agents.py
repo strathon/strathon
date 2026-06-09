@@ -433,6 +433,41 @@ def _build_strathon_run_hooks(client, user_hooks):
                     retry_after_seconds=decision.retry_after_seconds,
                 )
 
+            if decision.is_require_approval:
+                # on_tool_start is async and is awaited before the tool body
+                # runs, so we can block here for a human decision without
+                # freezing the event loop (await_for_approval runs the poll
+                # off-loop). Approved -> fall through and run the tool. Denied,
+                # expired, or timed out -> StrathonApprovalDenied (a
+                # StrathonPolicyBlocked subclass) propagates and the tool body
+                # never runs. This is real approval enforcement, not observe.
+                from strathon.policy import await_for_approval
+                try:
+                    await await_for_approval(
+                        client,
+                        decision,
+                        {"name": f"agents.tool.{tool_name}", "attrs": attrs},
+                    )
+                except Exception as approval_exc:
+                    _emit_intervention_span_oai(
+                        client,
+                        tool_name=tool_name,
+                        attrs=attrs,
+                        decision_kind="approval_denied",
+                        decision=decision,
+                        error_message=str(approval_exc) or "approval denied",
+                    )
+                    raise
+                _emit_intervention_span_oai(
+                    client,
+                    tool_name=tool_name,
+                    attrs=attrs,
+                    decision_kind="approval_granted",
+                    decision=decision,
+                    error_message=None,
+                )
+                # Approved: continue to run the tool (fall through below).
+
             if decision.is_steer:
                 # on_tool_start cannot substitute the tool's return value, so
                 # full steer semantics aren't possible without a deeper hook.
@@ -527,7 +562,7 @@ def _emit_intervention_span_oai(
             attributes=span_attrs,
         )
         try:
-            if decision_kind == "blocked":
+            if decision_kind in ("blocked", "throttled", "approval_denied"):
                 span.set_status(Status(StatusCode.ERROR, error_message or "policy blocked"))
             else:
                 span.set_status(Status(StatusCode.OK))

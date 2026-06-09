@@ -456,10 +456,13 @@ class StrathonLangGraphHandler:
             "strathon.tool.args": tool_args,
         }
 
-        # Runtime intervention: ask the client's policy enforcer if this tool
-        # call is allowed. block raises (LangChain propagates it as a tool
-        # error); steer raises a special exception the user-level wrapper can
-        # catch (covered in docs). For now we only support hard block here.
+        # Runtime intervention: ask the client's policy enforcer how to handle
+        # this tool call. block and throttle raise (LangChain propagates the
+        # exception as a tool error). on_tool_start is a synchronous callback
+        # that cannot substitute a return value or suspend-and-resume, so steer
+        # is observe-only here and require_approval falls closed (raises) —
+        # real steer/approval need a Tier-1 surface (enforce_steer / CrewAI /
+        # the decorator). The callback never silently allows a matched policy.
         try:
             decision = self.client.check_policy({
                 "name": f"langgraph.tool.{tool_name}",
@@ -507,6 +510,39 @@ class StrathonLangGraphHandler:
                     policy_id=decision.policy_id,
                     policy_name=decision.policy_name,
                     retry_after_seconds=decision.retry_after_seconds,
+                )
+            if decision.is_require_approval:
+                # on_tool_start is a SYNCHRONOUS callback. Waiting for a human
+                # decision here would mean blocking the thread (and likely the
+                # event loop the agent runs on) with a poll loop — unsafe and
+                # potentially deadlocking. So a matched require_approval policy
+                # falls closed: deny the call with a loud, observable block
+                # rather than silently allowing it. Real interactive approval
+                # on LangGraph requires a Tier-1 surface (enforce_steer / the
+                # @enforcer decorator / tool-invoke patching), which can await.
+                attrs["strathon.policy.approval_required"] = True
+                attrs["strathon.policy.id"] = decision.policy_id or ""
+                attrs["strathon.policy.name"] = decision.policy_name or ""
+                attrs["strathon.policy.message"] = decision.message or ""
+                self._start_span(
+                    f"langgraph.tool.{tool_name}", run_id, parent_run_id, attrs
+                )
+                self._end_span(
+                    run_id,
+                    error=decision.message
+                    or "approval required; not enforceable on the LangGraph "
+                    "callback path (use enforce_steer or the @enforcer "
+                    "decorator for interactive approval)",
+                )
+                from strathon.policy import StrathonPolicyBlocked
+                raise StrathonPolicyBlocked(
+                    decision.message
+                    or f"Tool '{tool_name}' requires approval, which cannot be "
+                    "served on the LangGraph auto-instrument path; blocked. "
+                    "Use enforce_steer or the @enforcer decorator for "
+                    "interactive approval.",
+                    policy_id=decision.policy_id,
+                    policy_name=decision.policy_name,
                 )
             if decision.is_steer:
                 # The on_tool_start callback cannot substitute a tool's

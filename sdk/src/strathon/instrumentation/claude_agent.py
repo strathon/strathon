@@ -252,6 +252,49 @@ def _build_pre_tool_use_hook(client):
                 }
             }
 
+        if decision.is_require_approval:
+            # PreToolUse is async and runs before the tool executes; its
+            # permissionDecision controls whether the tool runs. So we await a
+            # human decision off-loop: approved -> return {} (proceed); denied/
+            # expired/timed out -> return a deny decision so the tool never
+            # runs. Real approval enforcement (never a silent allow).
+            from strathon.policy import await_for_approval
+            from strathon.policy.steer import _emit_intervention_span
+            try:
+                await await_for_approval(
+                    client,
+                    decision,
+                    {"name": f"claude_agent.tool.{tool_name}", "attrs": span_attrs},
+                )
+            except Exception as approval_exc:
+                _emit_intervention_span(
+                    client,
+                    span_name=f"claude_agent.tool.{tool_name}",
+                    attrs=span_attrs,
+                    decision_kind="approval_denied",
+                    decision=decision,
+                )
+                reason = (
+                    decision.message
+                    or str(approval_exc)
+                    or f"Tool '{tool_name}' denied by Strathon approval policy"
+                )
+                return {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": reason,
+                    }
+                }
+            _emit_intervention_span(
+                client,
+                span_name=f"claude_agent.tool.{tool_name}",
+                attrs=span_attrs,
+                decision_kind="approval_granted",
+                decision=decision,
+            )
+            # Approved: fall through to proceed (return {} below).
+
         if decision.is_steer:
             from strathon.policy.steer import _emit_intervention_span
             replacement = decision.replacement or (

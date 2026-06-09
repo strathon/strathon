@@ -379,3 +379,59 @@ def test_instrument_is_idempotent():
 
     assert h1 is h2
     assert h2.client is client2
+
+
+# ---- Policy enforcement on the sync callback path ----
+
+
+def _decision(**flags):
+    d = MagicMock()
+    d.is_block = flags.get("block", False)
+    d.is_throttle = flags.get("throttle", False)
+    d.is_steer = flags.get("steer", False)
+    d.is_require_approval = flags.get("approval", False)
+    d.message = flags.get("message")
+    d.replacement = flags.get("replacement")
+    d.policy_id = "pol_lg"
+    d.policy_name = "lg-policy"
+    d.retry_after_seconds = None
+    return d
+
+
+def test_block_raises_on_tool_start():
+    handler = make_handler()
+    handler.client.check_policy = MagicMock(return_value=_decision(block=True, message="no"))
+    from strathon.policy import StrathonPolicyBlocked
+    with pytest.raises(StrathonPolicyBlocked):
+        handler.on_tool_start(
+            serialized={"name": "send_email"}, input_str="{}", run_id=uuid4(),
+        )
+
+
+def test_require_approval_falls_closed_on_sync_callback():
+    # Regression for the D1 defect class: the LangGraph on_tool_start callback
+    # is synchronous and cannot await a human decision, so a matched
+    # require_approval policy MUST fall closed (raise), never silently allow.
+    handler = make_handler()
+    handler.client.check_policy = MagicMock(return_value=_decision(approval=True))
+    from strathon.policy import StrathonPolicyBlocked
+    with pytest.raises(StrathonPolicyBlocked):
+        handler.on_tool_start(
+            serialized={"name": "wire_transfer"}, input_str="{}", run_id=uuid4(),
+        )
+
+
+def test_require_approval_never_silently_allows_on_langgraph():
+    # The core invariant: require_approval on the sync path must raise, not
+    # return normally (which would let the tool run).
+    handler = make_handler()
+    handler.client.check_policy = MagicMock(return_value=_decision(approval=True))
+    from strathon.policy import StrathonPolicyBlocked
+    raised = False
+    try:
+        handler.on_tool_start(
+            serialized={"name": "wire_transfer"}, input_str="{}", run_id=uuid4(),
+        )
+    except StrathonPolicyBlocked:
+        raised = True
+    assert raised, "SILENT ALLOW: require_approval returned normally on LangGraph"

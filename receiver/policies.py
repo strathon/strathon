@@ -25,9 +25,11 @@ from policies_eval import evaluate as _evaluate
 logger = logging.getLogger("strathon.receiver.policies")
 
 
-# Constants previously here for the CRUD layer. Kept exported for back-compat
-# but the canonical source is schemas/policies.py.
-VALID_ACTIONS = {"log", "alert", "block", "steer"}
+# Constants previously here for the CRUD layer. Kept exported for back-compat;
+# the canonical source is schemas/policies.py. Kept in sync with it so a caller
+# importing from here cannot get a narrower (stale) set that would wrongly
+# reject throttle / require_approval policies.
+VALID_ACTIONS = {"log", "alert", "block", "steer", "throttle", "allow", "require_approval"}
 
 
 # ---- Ingest-time evaluation (pure) --------------------------------------

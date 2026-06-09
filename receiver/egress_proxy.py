@@ -124,17 +124,35 @@ try:
 
             # Evaluate against pulled policies LOCALLY (no per-request HTTP).
             verdict = self._evaluate_policies(method, url)
-            if verdict.get("action") == "block":
+            action = verdict.get("action", "allow")
+            # block: hard 403. throttle / require_approval / steer cannot be
+            # meaningfully serviced on a synchronous in-flight network request
+            # (no rate-bucket wait, no interactive approval, no result to
+            # substitute for a raw egress connection), so they fall CLOSED to
+            # a 403 rather than silently forwarding. Only "allow" (and "log",
+            # which is allow-with-record) proceeds. This mirrors the fail-
+            # closed posture on the policy-eval error path below.
+            if action not in ("allow", "log"):
+                reason_map = {
+                    "block": "policy",
+                    "throttle": "policy-throttle",
+                    "require_approval": "policy-approval-required",
+                    "steer": "policy-steer-unenforceable",
+                }
+                block_reason = reason_map.get(action, "policy")
                 flow.response = http.Response.make(
                     403,
                     json.dumps({
                         "error": f"Blocked by policy: {verdict.get('policy_name', 'unknown')}",
+                        "action": action,
                     }).encode(),
                     {"Content-Type": "application/json",
-                     "X-Strathon-Block-Reason": "policy"},
+                     "X-Strathon-Block-Reason": block_reason},
                 )
-                logger.warning("Blocked request to %s by policy %s",
-                               url, verdict.get("policy_name", ""))
+                logger.warning(
+                    "Egress request to %s denied (action=%s) by policy %s",
+                    url, action, verdict.get("policy_name", ""),
+                )
                 return
 
         def _evaluate_policies(self, method: str, url: str) -> dict[str, Any]:

@@ -215,7 +215,7 @@ def _emit_intervention_span(
     try:
         span = tracer.start_span(name=span_name, attributes=span_attrs)
         try:
-            if decision_kind == "blocked":
+            if decision_kind in ("blocked", "approval_denied"):
                 span.set_status(
                     Status(StatusCode.ERROR, decision.message or "policy blocked")
                 )

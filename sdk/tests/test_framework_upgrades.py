@@ -40,6 +40,7 @@ class TestClaudePreToolUseHook:
         decision.is_block = block
         decision.is_steer = steer
         decision.is_throttle = throttle
+        decision.is_require_approval = False
         decision.message = message
         decision.replacement = replacement
         decision.policy_id = "pol_001"

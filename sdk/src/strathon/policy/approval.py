@@ -200,3 +200,47 @@ def wait_for_approval(
         approval_id=approval_id,
         status=status,
     )
+
+
+# ---------------------------------------------------------------------------
+# Async approval path
+# ---------------------------------------------------------------------------
+# The functions above (request_approval, poll_approval, wait_for_approval) are
+# synchronous and block via time.sleep. They are correct for synchronous call
+# sites (the decorator, Tier-1 tool-invoke patching). Async framework hooks
+# (openai_agents, autogen, google_adk, claude_agent, pydantic_ai) must NOT call
+# the blocking version: time.sleep inside a coroutine would freeze the event
+# loop the agent runs on. await_for_approval below runs the same proven,
+# blocking workflow in a worker thread via asyncio.to_thread, so the event loop
+# stays responsive while a human decides. Reusing the sync workflow verbatim
+# (rather than a parallel async-HTTP implementation) keeps a single source of
+# truth for the approval semantics and adds no new dependency.
+
+
+async def await_for_approval(
+    client,
+    decision: "PolicyDecision",
+    span_context: Dict[str, Any],
+    on_timeout: str = "deny",
+    poll_interval: float = _DEFAULT_POLL_INTERVAL,
+) -> bool:
+    """Async sibling of ``wait_for_approval`` for use inside coroutine hooks.
+
+    Runs the identical create + poll + resolve workflow as
+    ``wait_for_approval`` but off the event loop, so awaiting a human
+    decision never blocks the agent's loop.
+
+    Returns True if approved. Raises ``StrathonApprovalDenied`` if denied,
+    expired, or timed out (when ``on_timeout="deny"``). Semantics are
+    identical to the synchronous version.
+    """
+    import asyncio
+
+    return await asyncio.to_thread(
+        wait_for_approval,
+        client,
+        decision,
+        span_context,
+        on_timeout,
+        poll_interval,
+    )

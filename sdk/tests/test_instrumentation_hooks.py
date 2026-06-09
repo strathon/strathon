@@ -32,18 +32,35 @@ from strathon.instrumentation.autogen import (
 )
 
 
+def _async_return(value):
+    """Build an async function that returns `value` (to patch await_for_approval)."""
+    async def _fn(*args, **kwargs):
+        return value
+    return _fn
+
+
+def _async_raise(exc):
+    """Build an async function that raises `exc` (to patch await_for_approval)."""
+    async def _fn(*args, **kwargs):
+        raise exc
+    return _fn
+
+
 class TestClaudePreToolUseHook:
     def _make_hook(self, *, block=False, steer=False, throttle=False,
-                   message=None, replacement=None, policy_name=None):
+                   approval=False, message=None, replacement=None,
+                   policy_name=None):
         client = MagicMock()
         decision = MagicMock()
         decision.is_block = block
         decision.is_steer = steer
         decision.is_throttle = throttle
+        decision.is_require_approval = approval
         decision.message = message
         decision.replacement = replacement
         decision.policy_id = "pol_001"
         decision.policy_name = policy_name or "test-policy"
+        decision.timeout_seconds = 60
         decision.retry_after_seconds = 30 if throttle else None
         client.check_policy.return_value = decision
         client._policy_enforcer = MagicMock()
@@ -79,6 +96,42 @@ class TestClaudePreToolUseHook:
         result = asyncio.run(hook(self._input_data(), "tid_4", MagicMock()))
         assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
         assert "Use safe command" in result["hookSpecificOutput"]["permissionDecisionReason"]
+
+    def test_require_approval_granted_proceeds(self):
+        # Regression for the D1 defect class: require_approval must be enforced,
+        # never silently allowed. On grant, the hook proceeds (empty dict).
+        hook, _ = self._make_hook(approval=True)
+        with patch(
+            "strathon.policy.await_for_approval",
+            new=_async_return(True),
+        ):
+            result = asyncio.run(hook(self._input_data(), "tid_a1", MagicMock()))
+        assert result == {}, result
+
+    def test_require_approval_denied_blocks(self):
+        # On denial, the hook must return a deny decision — the tool never runs.
+        from strathon.policy import StrathonApprovalDenied
+        hook, _ = self._make_hook(approval=True, message="needs sign-off")
+        with patch(
+            "strathon.policy.await_for_approval",
+            new=_async_raise(StrathonApprovalDenied("denied", status="denied")),
+        ):
+            result = asyncio.run(hook(self._input_data(), "tid_a2", MagicMock()))
+        assert result["hookSpecificOutput"]["permissionDecision"] == "deny", result
+
+    def test_require_approval_never_silently_allows(self):
+        # The core invariant: a matched require_approval policy must NOT produce
+        # an empty/allow result without an approval decision having been made.
+        from strathon.policy import StrathonApprovalDenied
+        hook, _ = self._make_hook(approval=True)
+        with patch(
+            "strathon.policy.await_for_approval",
+            new=_async_raise(StrathonApprovalDenied("timeout", status="timeout")),
+        ):
+            result = asyncio.run(hook(self._input_data(), "tid_a3", MagicMock()))
+        # Must be a deny, never {} (which would mean the tool ran).
+        assert result != {}, "SILENT ALLOW: require_approval produced an allow"
+        assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
 
     def test_no_enforcer_returns_empty(self):
         client = MagicMock()

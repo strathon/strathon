@@ -25,11 +25,11 @@ Design notes:
     match MCP calls identically to framework-instrumented calls.
 
 Supported MCP methods:
-  tools/call     -> evaluated (block / require_approval / allow). Main
-                    enforcement point. throttle/steer are treated as
-                    allow-with-log at the gateway (the gateway cannot
-                    substitute a tool result the way an in-process SDK
-                    adapter can; that enforcement stays in the SDK).
+  tools/call     -> evaluated (block / require_approval / throttle / steer /
+                    allow). Main enforcement point. block and require_approval
+                    return errors; throttle refuses with a throttle error at
+                    the choke point; steer returns the policy's replacement as
+                    the result without forwarding to the upstream server.
   tools/list     -> forwarded; blocked tools filtered from the result.
   resources/read -> forwarded; response scanned for leaked credentials.
   everything else -> forwarded unchanged.
@@ -53,6 +53,7 @@ logger = logging.getLogger("strathon.mcp_gateway")
 _ERR_BLOCKED = -32040          # policy block (custom application range)
 _ERR_APPROVAL_REQUIRED = -32041
 _ERR_POLICY_UNAVAILABLE = -32042
+_ERR_THROTTLED = -32043        # policy throttle (rate-limited at the gateway)
 _ERR_UPSTREAM = -32603         # JSON-RPC internal error
 
 
@@ -124,10 +125,14 @@ class MCPSecurityGateway:
             # list_policies returns priority-DESC, evaluate_for_span preserves
             # order, so the first match is the highest-priority action.
             top = matches[0]
+            action_config = top.get("action_config") or {}
             return {
                 "action": top.get("action", "allow"),
                 "policy_name": top.get("name", ""),
                 "id": str(top.get("id", "")),
+                "replacement": action_config.get("replacement"),
+                "retry_after_seconds": action_config.get("window_seconds"),
+                "reason": action_config.get("message") or top.get("message"),
             }
         except Exception:
             logger.exception(
@@ -170,9 +175,41 @@ class MCPSecurityGateway:
                 f"Tool call '{tool_name}' requires human approval before it can run.",
             )
 
-        # allow / throttle / steer / log all forward at the gateway layer.
-        # (throttle and steer require in-process result substitution, which
-        # the SDK adapters do; the gateway logs and forwards.)
+        if action == "throttle":
+            # The gateway is the choke point and can refuse a rate-limited call
+            # directly — no in-process result substitution needed. Refuse with
+            # a throttle error rather than forwarding.
+            logger.info("MCP tool call throttled by policy: %s", tool_name)
+            retry = verdict.get("retry_after_seconds")
+            msg = (
+                f"Tool call '{tool_name}' rate-limited by policy "
+                f"'{verdict.get('policy_name', 'unknown')}'."
+            )
+            if retry is not None:
+                msg += f" Retry after {retry}s."
+            return self._error(req_id, _ERR_THROTTLED, msg)
+
+        if action == "steer":
+            # Apply the policy's replacement as the tool result without
+            # forwarding to the upstream MCP server, so the steered value is
+            # what the agent receives and the real tool never runs.
+            replacement = verdict.get("replacement") or (
+                f"[Strathon: tool '{tool_name}' redirected by policy "
+                f"'{verdict.get('policy_name', 'unknown')}']"
+            )
+            logger.info("MCP tool call steered by policy: %s", tool_name)
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "content": [{"type": "text", "text": str(replacement)}],
+                    "isError": False,
+                    "_strathon": {"steered_by": verdict.get("policy_name", "")},
+                },
+            }
+
+        # allow / log forward at the gateway layer (block, require_approval,
+        # throttle, and steer are all handled above and never reach here).
         response = await self._forward(original)
         if self.scan_responses:
             response = self._scan_response(response)

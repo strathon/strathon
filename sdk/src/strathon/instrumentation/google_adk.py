@@ -267,6 +267,44 @@ def _build_plugin_class():
                 )
                 return {"error": message, "throttled_by": "strathon_policy"}
 
+            if decision.is_require_approval:
+                # before_tool_callback is async and runs before the tool body;
+                # returning a dict here substitutes the result and the tool
+                # does not run. So we await a human decision off-loop: approved
+                # -> return None (tool runs); denied/expired/timed out -> return
+                # an error dict so the tool body never runs. Real approval
+                # enforcement (never a silent allow).
+                from strathon.policy import await_for_approval
+                from strathon.policy.steer import _emit_intervention_span
+                try:
+                    await await_for_approval(
+                        self.client,
+                        decision,
+                        span_context,
+                    )
+                except Exception as approval_exc:
+                    _emit_intervention_span(
+                        self.client,
+                        span_name=f"google_adk.tool.{tool_name}",
+                        attrs=span_attrs,
+                        decision_kind="approval_denied",
+                        decision=decision,
+                    )
+                    message = (
+                        decision.message
+                        or str(approval_exc)
+                        or f"[Strathon: tool '{tool_name}' denied by approval policy]"
+                    )
+                    return {"error": message, "approval_denied_by": "strathon_policy"}
+                _emit_intervention_span(
+                    self.client,
+                    span_name=f"google_adk.tool.{tool_name}",
+                    attrs=span_attrs,
+                    decision_kind="approval_granted",
+                    decision=decision,
+                )
+                # Approved: fall through to allow (return None below).
+
             if decision.is_steer:
                 from strathon.policy.steer import _emit_intervention_span
                 replacement = decision.replacement or (

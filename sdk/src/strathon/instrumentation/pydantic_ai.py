@@ -273,6 +273,32 @@ def _build_firewall_class():
                 )
                 raise SkipToolExecution(message)
 
+            if decision.is_require_approval:
+                # before_tool_execute is the SYNC enforcement hook and can only
+                # raise — it cannot await a human decision. Re-deriving approval
+                # in the async wrap_tool_execute would mean evaluating the policy
+                # twice (risking divergent decisions and duplicate spans), so a
+                # matched require_approval falls closed here: deny with a loud,
+                # observable block rather than silently allowing. Interactive
+                # approval on pydantic-ai needs a Tier-1 surface (enforce_steer /
+                # the @enforcer decorator), which can await.
+                from strathon.policy.steer import _emit_intervention_span
+                _emit_intervention_span(
+                    self.client,
+                    span_name=f"pydantic_ai.tool.{tool_name}",
+                    attrs=span_attrs,
+                    decision_kind="approval_denied",
+                    decision=decision,
+                )
+                message = (
+                    decision.message
+                    or f"Tool '{tool_name}' requires approval, which cannot be "
+                    "served on the pydantic-ai auto-instrument path; blocked. "
+                    "Use enforce_steer or the @enforcer decorator for "
+                    "interactive approval."
+                )
+                raise SkipToolExecution(message)
+
             if decision.is_steer:
                 from strathon.policy.steer import _emit_intervention_span
                 replacement = decision.replacement or (

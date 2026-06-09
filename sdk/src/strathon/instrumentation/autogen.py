@@ -289,6 +289,39 @@ def _install_tool_patch(client) -> bool:
                 retry_after_seconds=decision.retry_after_seconds,
             )
 
+        if decision.is_require_approval:
+            # This patch wraps the async run_json and is awaited before the
+            # tool body executes, so we can block for a human decision without
+            # freezing the event loop (await_for_approval polls off-loop).
+            # Approved -> fall through to run the real tool. Denied/expired/
+            # timed out -> StrathonApprovalDenied propagates and the tool body
+            # never runs. Real approval enforcement.
+            from strathon.policy import await_for_approval
+            from strathon.policy.steer import _emit_intervention_span
+            try:
+                await await_for_approval(
+                    current_client,
+                    decision,
+                    {"name": f"autogen.tool.{tool_name}", "attrs": span_attrs},
+                )
+            except Exception:
+                _emit_intervention_span(
+                    current_client,
+                    span_name=f"autogen.tool.{tool_name}",
+                    attrs=span_attrs,
+                    decision_kind="approval_denied",
+                    decision=decision,
+                )
+                raise
+            _emit_intervention_span(
+                current_client,
+                span_name=f"autogen.tool.{tool_name}",
+                attrs=span_attrs,
+                decision_kind="approval_granted",
+                decision=decision,
+            )
+            # Approved: fall through to run the real tool below.
+
         if decision.is_steer:
             from strathon.policy.steer import _emit_intervention_span
             replacement = decision.replacement or (
