@@ -72,20 +72,45 @@ isn't guaranteed to exist on every span.
 
 ## Actions
 
-A policy has one of six actions:
+A policy has one of seven actions:
 
 | Action     | What happens                                                                                                                          | Where it runs |
 |------------|---------------------------------------------------------------------------------------------------------------------------------------|---------------|
 | `log`      | Annotate the matching span with `strathon.policy.*` attributes. Passive.                                                              | Server        |
 | `alert`    | Fire a signed webhook (`action_config.webhook_url`). Durable, retried with exponential backoff, dead-lettered after exhaustion.       | Server        |
-| `block`    | SDK raises `StrathonPolicyBlocked` before the tool/LLM call executes. Agent sees an error and adapts.                                 | SDK (client)  |
-| `steer`    | SDK returns a corrective string (`action_config.replacement`) in place of real output. Agent self-corrects.                           | SDK (client)  |
-| `throttle` | SDK consults a per-policy token bucket. Calls under the cap proceed; calls over it raise `StrathonPolicyThrottled` with `retry_after_seconds`. | SDK (client)  |
-| `allow`    | SDK admits the call and short-circuits subsequent policies. Useful for carve-outs and required for allow-list mode.                   | SDK (client)  |
+| `block`    | Raises `StrathonPolicyBlocked` before the tool/LLM call executes. Agent sees an error and adapts.                                     | SDK / gateway / egress |
+| `steer`    | Returns a corrective string (`action_config.replacement`) in place of real output. Agent self-corrects.                              | SDK / gateway |
+| `throttle` | Consults a per-policy token bucket. Calls under the cap proceed; calls over it are refused with `retry_after_seconds`.                | SDK / gateway |
+| `require_approval` | Holds the call for human approval. Where the surface can wait, it pauses until an operator approves or denies; where it cannot, it **fails closed** (blocks). Never silently allows. See the support matrix below. | SDK / gateway |
+| `allow`    | Admits the call and short-circuits subsequent policies. Useful for carve-outs and required for allow-list mode.                       | SDK (client)  |
 
-`block`, `steer`, `throttle`, and `allow` actually affect the call —
-these are SDK-side because by the time a span reaches the server, the
-action has already happened.
+`block`, `steer`, `throttle`, `require_approval`, and `allow` actually
+affect the call. They are enforced at the point the action happens — in
+the SDK for instrumented agents, at the [MCP gateway](https://getstrathon.com/docs/mcp)
+for MCP tool calls, and at the [egress proxy](https://getstrathon.com/docs/egress)
+for outbound network requests. By the time a span reaches the server, the
+action has already happened, so `log` and `alert` are the only server-side
+actions.
+
+### Approval support by surface {#approval-support}
+
+`require_approval` always enforces — it never silently allows. *How* it
+enforces depends on whether the surface can suspend execution to wait for a
+human:
+
+| Surface | `require_approval` behavior |
+|---------|------------------------------|
+| `@enforcer` decorator, `enforce_steer`, CrewAI (tool-invoke) | **Interactive** — pauses until an operator approves or denies in the dashboard or Slack |
+| OpenAI Agents SDK, AutoGen, Google ADK, Claude Agent SDK | **Interactive** — async pre-execution hooks pause for the operator decision |
+| LangGraph, LangChain, Pydantic AI | **Fails closed** — the synchronous callback cannot pause, so the call is blocked and recorded (use a surface above for interactive approval) |
+| MCP gateway | Returns an approval-required error to the caller |
+| Anthropic / OpenAI LLM integrations | Observability-only — no tool-call enforcement; use `log`/`alert` here |
+
+The same async/sync distinction applies to `steer`: surfaces that control
+the return value (Tier-1 tool-invoke, async hooks, the gateway) substitute
+the replacement; the synchronous callback surfaces (LangGraph, LangChain,
+Pydantic AI) record the steer but the original tool still runs, so use
+`block` there for hard prevention.
 
 ### Throttle action config
 
@@ -695,9 +720,19 @@ replacement in place of the tool body) needs the one-line per-tool
 `enforce_steer` opt-in. CrewAI's class patch sits at a boundary that covers
 both, so its per-tool call is optional.
 
-The raw model-SDK integrations (OpenAI, Anthropic, LangChain core) are
-**observe-only**: they emit spans for visibility but do not enforce, because at
-the raw model-call layer there is no tool call to intercept. Enforcement
+**Approval** follows the same async/sync split. Surfaces with an async
+pre-execution hook or a tool-invoke boundary (OpenAI Agents SDK, AutoGen,
+Google ADK, Claude Agent SDK, CrewAI, and the `@enforcer`/`enforce_steer`
+paths) can pause the call for an interactive human decision. The synchronous
+callback surfaces (LangGraph, LangChain, Pydantic AI) cannot pause, so a
+matched `require_approval` policy there **fails closed** — it blocks the call
+and records the intervention rather than silently allowing it. See the
+[approval support matrix](#approval-support).
+
+The raw model-SDK integrations (OpenAI, Anthropic) are **observe-only**: they
+emit spans for visibility but do not enforce, because at the raw model-call
+layer there is no tool call to intercept. (LangChain is *not* in this group —
+it runs through the same enforcing handler as LangGraph.) Enforcement
 happens at the tool-call boundary on the agent frameworks above. If you drive
 tools yourself on top of a raw model SDK, add enforcement at your own tool
 dispatch.

@@ -71,17 +71,20 @@ For `tools/call`, the matching policy's action determines the outcome:
   upstream server is never contacted.
 - **require_approval** -> rejected with code `-32041`; the agent is told the
   call needs human approval.
-- **allow / log / throttle / steer** -> forwarded to the upstream server.
-  (Note: `throttle` and `steer` need in-process result substitution, which the
-  language SDK adapters perform. At the gateway layer they forward-and-log;
-  for full throttle/steer semantics use the SDK instrumentation in-process.)
+- **throttle** -> the gateway is the choke point and refuses rate-limited calls
+  directly with a throttle error (code `-32043`, including `retry_after`); the
+  upstream server is not contacted.
+- **steer** -> the gateway returns the policy's `replacement` as the tool result
+  without forwarding to the upstream server, so the agent receives the steered
+  value instead of the real tool output.
+- **allow / log** -> forwarded to the upstream server.
 
 The policy match is evaluated against a span-shaped context where the span
-name is the tool name and the attributes carry `strathon.tool.name` and the
+name is the tool name and the attributes carry `gen_ai.tool.name` and the
 JSON-encoded `strathon.tool.args`. So a policy like
 
 ```
-attrs["strathon.tool.name"] == "send_email"
+attrs["gen_ai.tool.name"] == "send_email"
 ```
 
 matches MCP calls and framework-captured calls identically.

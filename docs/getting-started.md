@@ -90,8 +90,9 @@ sends the message. Open the dashboard:
 
 ## What's next
 
-- **[Policy Engine](intervention.md)** — all five actions (block, steer,
-  throttle, log, alert), allow-list mode, time-based rules, versioning.
+- **[Policy Engine](intervention.md)** — all seven actions (block, steer,
+  throttle, require_approval, allow, log, alert), allow-list mode, time-based
+  rules, versioning.
 - **[CEL Reference](cel-reference.md)** — the policy language, with 20+ examples.
 - **[Human Approval Workflows](intervention.md)** — pause high-risk calls for
   operator sign-off in the dashboard or Slack.

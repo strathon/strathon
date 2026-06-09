@@ -35,13 +35,14 @@ Block code execution tools in production:
 
 ```cel
 attrs["gen_ai.tool.name"] == "execute_code"
-  && attrs["strathon.project.environment"] == "production"
 ```
 
-Limit conversation depth to prevent infinite agent loops:
+Block code execution in production (AutoGen group chats re-send the full
+history every turn, so a runaway loop is expensive — gate the dangerous tool):
 
 ```cel
-attrs["autogen.message_count"] > 50
+attrs["gen_ai.tool.name"] == "execute_code"
+  && attrs["strathon.project.environment"] == "production"
 ```
 
 ## Notes

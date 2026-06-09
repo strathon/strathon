@@ -3,6 +3,14 @@
 Strathon integrates with Pydantic AI via its `AbstractCapability`
 plugin system. This is a first-class integration — no monkey-patching.
 
+> **Enforcement scope:** Pydantic AI is instrumented through a synchronous
+> pre-execution hook. It enforces `block` and `throttle` (which raise) and
+> records `steer`; `require_approval` **fails closed** (the call is blocked
+> and recorded) because a sync hook cannot pause for a human decision. For
+> interactive approval or true steer substitution, use the `@enforcer`
+> decorator, `enforce_steer`, or an async tool-executing surface. See the
+> [approval matrix](https://getstrathon.com/docs/intervention#approval-support).
+
 ## Installation
 
 ```bash
@@ -39,10 +47,11 @@ Block tools that send external network requests:
 attrs["gen_ai.tool.name"] in ["http_get", "http_post", "fetch_url"]
 ```
 
-Alert when structured output validation fails:
+Require approval before a sensitive tool runs (replace `fetch_record` with
+your tool's name):
 
 ```cel
-attrs["pydantic_ai.validation_error"] == true
+attrs["gen_ai.tool.name"] == "fetch_record"
 ```
 
 ## Notes

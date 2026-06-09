@@ -39,7 +39,7 @@ records who changed what and when.
 
 ## Actions
 
-There are six actions. The critical distinction is *where* each one takes
+There are seven actions. The critical distinction is *where* each one takes
 effect — and therefore whether it can actually stop a call.
 
 | Action | What it does | Affects the call? |
@@ -49,9 +49,11 @@ effect — and therefore whether it can actually stop a call.
 | `block` | SDK raises `StrathonPolicyBlocked` before the call executes. | **Yes** — client-side |
 | `steer` | SDK returns a corrective string in place of the real output, so the agent self-corrects. | **Yes** — client-side |
 | `throttle` | SDK consults a per-policy token bucket; calls over the cap are denied with a retry hint. | **Yes** — client-side |
+| `require_approval` | Holds the call for human approval. Pauses for an operator decision where the surface can wait; otherwise fails closed (blocks). Never silently allows. | **Yes** — client-side |
 | `allow` | Admits the call and short-circuits lower-priority policies. Used for carve-outs and required for allow-list mode. | **Yes** — client-side |
 
-The four call-affecting actions (`block`, `steer`, `throttle`, `allow`) run in
+The five call-affecting actions (`block`, `steer`, `throttle`, `require_approval`,
+`allow`) run in
 the SDK, in-process, *before* the tool or model call executes. That is what
 makes Strathon a firewall rather than an observability tool: enforcement is
 inline, not after the fact.

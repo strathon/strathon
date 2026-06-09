@@ -88,7 +88,7 @@ human-in-the-loop, human-on-the-loop, or human-in-command capability.
 
 | Requirement | Strathon implementation |
 |---|---|
-| Human-in-the-loop | Kill-switch halts (`POST /v1/halts`) immediately stop agent execution at project or agent scope. Operators can intervene at any point. |
+| Human-in-the-loop | `require_approval` policies gate high-risk tool calls on an operator decision (interactive where the surface can pause; otherwise fail-closed). Kill-switch halts (`POST /v1/halts`) immediately stop agent execution at project or agent scope. Operators can intervene at any point. |
 | Human-on-the-loop | Real-time policy enforcement evaluates every tool call. Alert action triggers webhooks for operator notification. Budget monitor auto-halts agents exceeding cost or iteration thresholds. |
 | Human-in-command | Deny-by-default policy mode (allow-list). Only explicitly permitted tool calls proceed. All others are blocked before execution. |
 | Override and disable | Halts CRUD API. Budget CRUD API. Policy enable/disable/delete with batch operations. |

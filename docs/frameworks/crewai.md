@@ -43,10 +43,12 @@ Block any tool call that sends outbound HTTP requests:
 attrs["gen_ai.tool.name"] in ["http_request", "web_request", "api_call"]
 ```
 
-Prevent an agent from delegating to another agent beyond a depth limit:
+Flag tool calls made by agents that have delegation enabled — delegation is a
+common source of loops and cost overruns in CrewAI, so you may want stricter
+policies on those agents:
 
 ```cel
-attrs["crewai.delegation_depth"] > 3
+attrs["strathon.agent.allow_delegation"] == true
 ```
 
 ## Approval Workflow

@@ -27,7 +27,12 @@ Two usual reasons:
 1. The policy is in **shadow** status. Shadow mode evaluates and records but
    does not block. Switch it to `enabled`.
 2. The action is `log` or `alert`. Those are passive (server-side) and never
-   affect the call. To stop a call you need `block`, `steer`, or `throttle`.
+   affect the call. To stop a call you need `block`, `throttle`, or
+   `require_approval` (or `steer` to substitute a result). Note that `steer`
+   and `require_approval` behavior depends on the framework surface: on the
+   synchronous callback surfaces (LangGraph, LangChain, Pydantic AI), `steer`
+   is observe-only and `require_approval` fails closed (blocks). See the
+   [approval support matrix](https://getstrathon.com/docs/intervention#approval-support).
 
 See [Concepts → Actions](concepts.md) for which actions affect the call.
 

@@ -4,6 +4,16 @@ Strathon instruments the Anthropic Python SDK by wrapping
 `messages.create`. Every Claude call is traced with model parameters,
 token usage, and response content.
 
+> **Enforcement scope:** this integration is observability-only. It wraps
+> the LLM call (`messages.create`), not tool execution, so it records what
+> the model does but does not block, throttle, steer, or gate tool calls.
+> Use it for tracing, `log`, and `alert` policies. To *enforce* policies on
+> tool calls (block / throttle / steer / require_approval), instrument the
+> agent framework that runs the tools — for example the
+> [Claude Agent SDK](https://getstrathon.com/docs/frameworks/claude-agent-sdk),
+> [LangGraph](https://getstrathon.com/docs/frameworks/langgraph), or another
+> tool-executing integration.
+
 ## Installation
 
 ```bash
@@ -38,14 +48,18 @@ message = client.messages.create(
 - **Token usage**: input tokens, output tokens
 - **Latency**: request duration
 - **Messages**: user and assistant messages
-- **Tool use**: tool name, arguments, results (if using tools)
+- **Tool use**: the tool calls the model *requests* (name, arguments) as
+  seen in the LLM response — not the tool's actual execution
 
 ## Example Policy
 
-Require approval for tool calls that modify data:
+Because this surface is observability-only, use it with `log` or `alert`
+actions rather than blocking actions.
+
+Alert on calls to an expensive model so you can watch spend:
 
 ```cel
-attrs["gen_ai.tool.name"] in ["update_database", "delete_record"]
+attrs["gen_ai.request.model"].contains("opus")
 ```
 
 Log all Claude API calls for audit purposes:
