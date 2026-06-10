@@ -57,24 +57,36 @@ logger = logging.getLogger("strathon.receiver.traces")
 _last_code_hash: dict[str, str] = {}
 
 
-def _check_code_hash(agent_name: str, code_hash: str) -> None:
-    """Check if agent's code hash changed (possible SDK tampering)."""
+async def _check_code_hash(
+    agent_name: str, code_hash: str, project_id: UUID
+) -> None:
+    """Check if agent's code hash changed (possible SDK tampering).
+
+    On a change, fire an sdk_integrity_violation alert. The alert opens its own
+    session (via async_session_maker) rather than reusing the request session,
+    because it is dispatched as a fire-and-forget task that may outlive the
+    request scope. Previously this passed None for session and project_id, so
+    dispatch_event raised AttributeError on ``session.execute`` and the alert —
+    swallowed by the outer except — never actually fired.
+    """
     prev = _last_code_hash.get(agent_name)
     _last_code_hash[agent_name] = code_hash
-    if prev and prev != code_hash:
-        logger.warning(
-            "SDK integrity violation: agent '%s' code_hash changed "
-            "from %s to %s",
-            agent_name, prev[:12], code_hash[:12],
-        )
+    if not (prev and prev != code_hash):
+        return
+
+    logger.warning(
+        "SDK integrity violation: agent '%s' code_hash changed "
+        "from %s to %s",
+        agent_name, prev[:12], code_hash[:12],
+    )
+
+    async def _fire_alert() -> None:
         try:
-            import asyncio
+            from database import async_session_maker
             from integrations.dispatcher import dispatch_event
-            # Fire alert asynchronously if inside an event loop.
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(dispatch_event(
-                    None, None,
+            async with async_session_maker() as alert_session:
+                await dispatch_event(
+                    alert_session, project_id,
                     "sdk_integrity_violation", {
                         "agent_name": agent_name,
                         "previous_hash": prev,
@@ -85,11 +97,16 @@ def _check_code_hash(agent_name: str, code_hash: str) -> None:
                             "This may indicate runtime code modification."
                         ),
                     },
-                ))
-            except RuntimeError:
-                pass  # No running event loop (e.g., in tests).
+                )
         except Exception:
-            pass  # Best-effort alert.
+            logger.exception("failed to dispatch sdk_integrity_violation alert")
+
+    try:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        loop.create_task(_fire_alert())
+    except RuntimeError:
+        pass  # No running event loop (e.g., in tests).
 
 
 router = APIRouter(tags=["traces"])
@@ -280,7 +297,7 @@ async def ingest_traces(
                     # SDK integrity check: compare code_hash.
                     code_hash = merged_attrs.get("strathon.sdk.code_hash")
                     if code_hash:
-                        _check_code_hash(hb_agent, code_hash)
+                        await _check_code_hash(hb_agent, code_hash, project_id)
 
                     continue  # Don't store heartbeat spans.
 

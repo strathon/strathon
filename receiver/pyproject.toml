@@ -73,3 +73,37 @@ target-version = "py312"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.10"
+# google-re2 ships no py.typed marker; it is a drop-in re replacement we call
+# dynamically. Its absence of stubs is not a defect in our code.
+[[tool.mypy.overrides]]
+module = "re2"
+ignore_missing_imports = true
+
+# SQLAlchemy async execute() is typed to return the base Result, but for
+# DML (DELETE/UPDATE) the runtime object is a CursorResult that does expose
+# .rowcount. mypy can't narrow this; the .rowcount reads are correct at
+# runtime. Scoped to the files that do DML-with-rowcount so a genuinely wrong
+# attribute access elsewhere still surfaces.
+[[tool.mypy.overrides]]
+module = [
+    "retention_cleanup",
+    "api.notification_channels",
+    "api.github_integration",
+    "api.projects",
+    "repositories.password_reset",
+    "repositories.mfa",
+    "repositories.approvals",
+]
+disable_error_code = ["attr-defined"]
+
+# mitmproxy is a third-party runtime dependency of the egress proxy addon and
+# contains 3.12-only syntax; following its source under python_version 3.10
+# aborts the whole run ("errors prevented further checking"), masking our own
+# findings. Treat it as an untyped external import.
+[[tool.mypy.overrides]]
+module = "mitmproxy.*"
+ignore_missing_imports = true
+follow_imports = "skip"

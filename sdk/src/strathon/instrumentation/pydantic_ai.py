@@ -206,7 +206,7 @@ def _build_firewall_class():
 
         def get_ordering(self) -> CapabilityOrdering:
             """Outermost: firewall sees raw input before other capabilities."""
-            return CapabilityOrdering.OUTERMOST
+            return CapabilityOrdering(position="outermost")
 
         # ---- Tool hooks: policy enforcement + observability ----
 

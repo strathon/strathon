@@ -33,13 +33,18 @@ check_pattern() {
     local exclude_pattern="${3:-}"
 
     for file in $STAGED; do
-        # Skip binary files, the hook script itself, and test files (which
+        # Skip binary files, the hook script itself, test files (which
         # legitimately contain example/placeholder secrets like AWS's
-        # documented AKIAIOSFODNN7EXAMPLE key used to test detection).
+        # documented AKIAIOSFODNN7EXAMPLE key used to test detection), and
+        # credential_patterns.py (which DEFINES the detection patterns, e.g.
+        # the PEM "-----BEGIN ... PRIVATE KEY-----" headers, as string
+        # literals — so it necessarily contains the very patterns this scanner
+        # searches for). The Python scanner exempts the same file.
         if [[ "$file" == *.png ]] || [[ "$file" == *.jpg ]] || \
            [[ "$file" == *.ico ]] || [[ "$file" == *.woff* ]] || \
            [[ "$file" == *.zip ]] || [[ "$file" == *.tar.gz ]] || \
            [[ "$file" == *test_* ]] || [[ "$file" == */tests/* ]] || \
+           [[ "$file" == *credential_patterns.py ]] || \
            [[ "$file" == "scripts/check-secrets.sh" ]]; then
             continue
         fi

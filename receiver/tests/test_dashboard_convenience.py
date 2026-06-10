@@ -315,16 +315,20 @@ def test_heartbeat_is_heartbeat_span():
 
 # ---- SDK integrity check -----------------------------------------------------
 
-def test_code_hash_change_detected():
+@pytest.mark.asyncio
+async def test_code_hash_change_detected():
     """Code hash change fires warning (check via logger)."""
+    import uuid as _uuid
+
     from api.traces import _last_code_hash, _check_code_hash
 
-    _check_code_hash("test-agent-int", "hash_aaa")
+    pid = _uuid.uuid4()
+    await _check_code_hash("test-agent-int", "hash_aaa", pid)
     assert _last_code_hash["test-agent-int"] == "hash_aaa"
 
     # Second call with same hash: no alert.
-    _check_code_hash("test-agent-int", "hash_aaa")
+    await _check_code_hash("test-agent-int", "hash_aaa", pid)
 
-    # Third call with different hash: should log warning.
-    _check_code_hash("test-agent-int", "hash_bbb")
+    # Third call with different hash: should log warning and attempt an alert.
+    await _check_code_hash("test-agent-int", "hash_bbb", pid)
     assert _last_code_hash["test-agent-int"] == "hash_bbb"

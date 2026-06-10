@@ -605,6 +605,7 @@ async def password_reset_confirm_alias(
     body = await request.json()
     return await confirm_password_reset(
         body=PasswordResetConfirmBody(**body),
+        request=request,
         session=session,
     )
 
@@ -617,4 +618,4 @@ async def mfa_enable_alias(
     """Alias: dashboard sends mfa/enable, receiver has mfa/setup."""
     from api.auth_endpoints import mfa_setup
     authorization = request.headers.get("authorization", "")
-    return await mfa_setup(authorization=authorization, session=session)
+    return await mfa_setup(request=request, authorization=authorization, session=session)

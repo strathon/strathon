@@ -463,9 +463,16 @@ def _build_plugin_class():
             self,
             *,
             callback_context,
+            llm_request=None,
             error: Exception,
         ):
-            """Mark the model span as errored."""
+            """Mark the model span as errored.
+
+            ``llm_request`` is part of the BasePlugin callback signature; we
+            accept it (the framework passes it as a keyword) even though the
+            error-span handling here doesn't need it. Omitting it raised a
+            TypeError when google-adk invoked the callback with llm_request set.
+            """
             span = self._active_model_spans.pop(id(callback_context), None)
             if span is not None:
                 try:

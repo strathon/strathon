@@ -78,3 +78,19 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.mypy]
+python_version = "3.10"
+# Agent frameworks are optional dependencies and most ship without type stubs.
+# We instrument them at runtime via lazy imports; their absence from the type
+# environment is expected, not a defect in our code.
+ignore_missing_imports = true
+
+# The instrumentation adapters work by reassigning framework methods
+# (monkey-patching) — that is the supported interception mechanism, not an
+# accident. mypy flags every such assignment as [method-assign]; we disable
+# that code ONLY for the adapter modules, so a stray method reassignment
+# anywhere else in the SDK still surfaces.
+[[tool.mypy.overrides]]
+module = "strathon.instrumentation.*"
+disable_error_code = ["method-assign"]

@@ -267,8 +267,42 @@ jobs:
   # dedicated burn-down pass plus a [tool.mypy] config that silences the
   # framework-import noise. Do not remove this job; tighten it.
   # ============================================================
-  typecheck:
-    name: Type check (mypy, non-blocking)
+  # SDK type check — BLOCKING. The SDK passes mypy clean: a scoped
+  # [tool.mypy] config in sdk/pyproject.toml ignores optional-framework
+  # missing imports and the intentional method-assign monkey-patching in the
+  # instrumentation adapters; everything else must type-check. Two real bugs
+  # were found and fixed while making this clean (a non-existent pydantic-ai
+  # enum member, and a google-adk callback signature mismatch), which is why
+  # it is worth gating on.
+  typecheck-sdk:
+    name: Type check — SDK (blocking)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install SDK with dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "./sdk[all,dev]"
+      - name: mypy (SDK)
+        working-directory: sdk
+        run: mypy src/strathon/
+
+  # Receiver type check — NON-BLOCKING for now (continue-on-error), but NOT
+  # silenced: failures are visible so the error count can be watched and cannot
+  # grow unnoticed. The receiver currently has ~50 mypy findings across mixed
+  # categories that need a real triage pass (some are framework false positives
+  # like Result.rowcount on the async cursor; a few look like genuine
+  # call-signature issues worth fixing). Triaging them safely is a dedicated
+  # task, not a launch-eve change — blanket-suppressing them would discard the
+  # signal that just found two real SDK bugs. Path to blocking: triage + fix
+  # the real ones, scope the false positives in receiver/pyproject.toml, then
+  # drop continue-on-error here.
+  typecheck-receiver:
+    name: Type check — receiver (non-blocking)
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -277,18 +311,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install SDK + receiver with dev deps
+      - name: Install receiver with dev deps
         run: |
           python -m pip install --upgrade pip
-          # Install separately, not in one resolution. Combining sdk[all]
-          # (8 framework extras) and receiver[dev] in a single pip command
-          # makes the resolver backtrack across the union of both dependency
-          # graphs and hit "resolution-too-deep". The other jobs install these
-          # in separate steps for the same reason.
-          pip install -e "./sdk[all]"
           pip install -e "./receiver[dev]"
-      - name: mypy (SDK)
-        run: mypy sdk/src/strathon/
       - name: mypy (receiver)
         working-directory: receiver
         run: mypy .

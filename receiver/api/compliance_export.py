@@ -41,7 +41,7 @@ OWASP_ASI_RISKS = [
 ]
 
 
-@router.post("/export")
+@router.post("/export", response_model=None)
 async def export_compliance(
     request: Request,
     body: dict[str, Any] | None = None,
@@ -49,7 +49,7 @@ async def export_compliance(
         require_scope(auth_mod.SCOPE_AUDIT_READ)
     ),
     session: AsyncSession = Depends(get_db_session),
-) -> dict[str, Any]:
+) -> Response | dict[str, Any]:
     """Generate structured EU AI Act compliance evidence package.
 
     Returns per-article compliance data with recommendations for gaps.

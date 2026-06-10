@@ -314,6 +314,6 @@ def redact_credentials(text: str) -> tuple[str, int]:
 # Summary for API / CLI.
 PATTERN_COUNT = len(PATTERNS)
 CATEGORIES = sorted(set(p.category for p in PATTERNS))
-SEVERITY_COUNTS = {}
+SEVERITY_COUNTS: dict[str, int] = {}
 for p in PATTERNS:
     SEVERITY_COUNTS[p.severity] = SEVERITY_COUNTS.get(p.severity, 0) + 1
