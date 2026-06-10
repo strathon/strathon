@@ -357,17 +357,38 @@ async def test_delete_stream_returns_false_when_missing(
 async def test_emit_fails_closed_with_empty_key_in_prod(
     monkeypatch, session, isolated_project
 ):
-    """Empty STRATHON_AUDIT_HMAC_KEY in prod must refuse to emit."""
+    """Empty STRATHON_AUDIT_HMAC_KEY in cloud mode must refuse to emit."""
     monkeypatch.setenv("STRATHON_AUDIT_HMAC_KEY", "")
-    monkeypatch.setenv("STRATHON_DEBUG", "false")
+    monkeypatch.setenv("STRATHON_MODE", "cloud")
     import config
     config.get_settings.cache_clear()
+    audit_repo._get_hmac_key.__dict__.pop("_warned", None)
     with pytest.raises(RuntimeError, match="STRATHON_AUDIT_HMAC_KEY"):
         await audit_repo.emit(
             session, audit_repo.EmitContext.system(isolated_project),
             POLICY_CREATE, CATEGORY_POLICY,
             resource_type="policy", resource_id="x",
         )
+    config.get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_emit_uses_dev_fallback_when_self_hosted(
+    monkeypatch, session, isolated_project
+):
+    """Empty key in self-hosted mode falls back to the dev key (no raise)."""
+    monkeypatch.setenv("STRATHON_AUDIT_HMAC_KEY", "")
+    monkeypatch.setenv("STRATHON_MODE", "self-hosted")
+    import config
+    config.get_settings.cache_clear()
+    audit_repo._get_hmac_key.__dict__.pop("_warned", None)
+    event_id = await audit_repo.emit(
+        session, audit_repo.EmitContext.system(isolated_project),
+        POLICY_CREATE, CATEGORY_POLICY,
+        resource_type="policy", resource_id="x",
+    )
+    assert event_id is not None
+    config.get_settings.cache_clear()
 
 
 @pytest.mark.asyncio
