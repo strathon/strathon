@@ -43,6 +43,9 @@ EMIT_DIRS = [
 # Files/dirs whose content USES attributes in policy expressions.
 USE_DOCS = REPO / "docs"
 USE_TEMPLATES = REPO / "receiver" / "policy_templates.py"
+# The root README and the package READMEs carry headline policy examples that a
+# user is especially likely to copy, so they're governed too.
+USE_READMES = [REPO / "README.md", REPO / "sdk" / "README.md", REPO / "cli" / "README.md"]
 
 # Attribute namespaces we govern. A used attribute must be in one of these and
 # must appear in the emitted set.
@@ -92,6 +95,9 @@ def collect_used() -> dict[str, list[str]]:
         sources.extend(USE_DOCS.rglob("*.md"))
     if USE_TEMPLATES.exists():
         sources.append(USE_TEMPLATES)
+    for readme in USE_READMES:
+        if readme.exists():
+            sources.append(readme)
     for p in sources:
         text = p.read_text(encoding="utf-8", errors="ignore")
         for attr in _USE_REF.findall(text):

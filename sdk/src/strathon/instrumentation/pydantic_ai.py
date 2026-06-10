@@ -355,7 +355,7 @@ def _build_firewall_class():
             elapsed_ms = (time.monotonic() - start) * 1000
             span.set_attribute("strathon.tool.duration_ms", round(elapsed_ms, 2))
             if result is not None:
-                span.set_attribute("strathon.tool.result", _truncate(_json_or_str(result)))
+                span.set_attribute("strathon.tool.output", _truncate(_json_or_str(result)))
             span.set_status(Status(StatusCode.OK))
             span.end()
             return result

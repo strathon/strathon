@@ -357,7 +357,7 @@ def _build_plugin_class():
                 span_attrs["strathon.tool.duration_ms"] = round(elapsed_ms, 2)
 
             if result is not None:
-                span_attrs["strathon.tool.result"] = _truncate(
+                span_attrs["strathon.tool.output"] = _truncate(
                     _json_or_str(result)
                 )
 

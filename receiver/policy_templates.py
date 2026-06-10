@@ -283,11 +283,11 @@ TEMPLATES: list[PolicyTemplate] = [
             '(attrs["gen_ai.tool.name"] in '
             '["memory_read", "memory_get", "memory_search", "memory_retrieve", '
             '"get_memory", "search_memory", "recall", "get_context"]) && '
-            '(attrs["strathon.tool.result"].contains("IGNORE PREVIOUS") || '
-            'attrs["strathon.tool.result"].contains("ignore all previous") || '
-            'attrs["strathon.tool.result"].contains("disregard instructions") || '
-            'attrs["strathon.tool.result"].contains("you are now") || '
-            'attrs["strathon.tool.result"].contains("new system prompt"))'
+            '(attrs["strathon.tool.output"].contains("IGNORE PREVIOUS") || '
+            'attrs["strathon.tool.output"].contains("ignore all previous") || '
+            'attrs["strathon.tool.output"].contains("disregard instructions") || '
+            'attrs["strathon.tool.output"].contains("you are now") || '
+            'attrs["strathon.tool.output"].contains("new system prompt"))'
         ),
         tags=["security", "memory-poisoning", "detection"],
     ),

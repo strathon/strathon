@@ -352,7 +352,7 @@ def _build_post_tool_use_hook(client):
 
         result = input_data.get("result")
         if result is not None:
-            span_attrs["strathon.tool.result"] = _truncate(
+            span_attrs["strathon.tool.output"] = _truncate(
                 _json_or_str(result)
             )
 

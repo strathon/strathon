@@ -92,6 +92,7 @@ async def ready(request: Request) -> Response:
     migration_check = await _check_migrations()
     partition_check = await _check_partitions()
     retention_check = _check_background_task(state, "retention_task")
+    retention_cleanup_check = _check_background_task(state, "retention_cleanup_task")
     sweeper_check = _check_background_task(state, "webhook_sweeper_task")
     monitor_check = _check_background_task(state, "budget_monitor_task")
     audit_part_check = _check_background_task(state, "audit_partition_task")
@@ -102,6 +103,7 @@ async def ready(request: Request) -> Response:
         "migrations": migration_check,
         "partitions": partition_check,
         "retention_task": retention_check,
+        "retention_cleanup_task": retention_cleanup_check,
         "webhook_sweeper_task": sweeper_check,
         "budget_monitor_task": monitor_check,
         "audit_partition_task": audit_part_check,

@@ -6,8 +6,8 @@ it takes you from zero to a running firewall blocking a real agent action.
 | Doc | Covers |
 |-----|--------|
 | [getting-started.md](getting-started.md) | Install, connect an agent, write your first policy, see it block a call |
-| [concepts.md](concepts.md) | The mental model: spans, traces, policies, the six actions, inline enforcement, audit log |
-| [intervention.md](intervention.md) | CEL policies, actions (block/steer/throttle/log/alert), allow-list mode, time-based rules, policy versioning, halts, budgets, webhooks |
+| [concepts.md](concepts.md) | The mental model: spans, traces, policies, the seven actions, inline enforcement, audit log |
+| [intervention.md](intervention.md) | CEL policies, the seven actions (block/steer/throttle/log/alert/require_approval/allow), allow-list mode, time-based rules, policy versioning, halts, budgets, webhooks |
 | [analytics.md](analytics.md) | Trace list, trace tree, span aggregation |
 | [spans.md](spans.md) | Span search, attribute filtering, partitioned storage |
 | [audit.md](audit.md) | Tamper-evident audit log, hash chain, SCIM filters, Merkle anchors |

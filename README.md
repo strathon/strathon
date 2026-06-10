@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/strathon/strathon/main/assets/banner.png" alt="Strathon" width="600" />
 
   <p><strong>Open-source AI agent firewall</strong></p>
-  <p>Open-source AI agent firewall. CEL policies, runtime enforcement at the tool-call boundary, and EU AI Act compliance.</p>
+  <p>CEL policies, runtime enforcement at the tool-call boundary, and EU AI Act compliance.</p>
 
   <div>
     <a href="https://getstrathon.com"><strong>Website</strong></a> ·
@@ -72,7 +72,7 @@ If you've created a policy like:
 
 ```cel
 attrs["gen_ai.tool.name"] == "send_email"
-  && attrs["gen_ai.tool.args"].contains("competitor.com")
+  && attrs["strathon.tool.args"].contains("competitor.com")
 ```
 
 Strathon raises `StrathonPolicyBlocked` **before** the tool call executes. The function body never runs. The block is logged in the audit trail with the matched policy, trace context, and timestamp.
@@ -130,11 +130,11 @@ For production deployments, see [Deploying with HTTPS](https://getstrathon.com/d
 
 ### Policy Engine
 
-Write rules in [CEL](https://cel.dev) (Common Expression Language — the same language used by Kubernetes, Firebase, and Google Cloud IAM). Six enforcement actions: **block**, **steer**, **throttle**, **log**, **alert**, **require_approval**. Policies evaluate inside the agent process with sub-millisecond overhead, not at a network gateway. 12 OWASP-mapped templates for one-click setup. Shadow mode lets you test policies against live traffic without enforcing them, so you can validate before going live. [Learn more → getstrathon.com/docs/intervention](https://getstrathon.com/docs/intervention)
+Write rules in [CEL](https://cel.dev) (Common Expression Language — the same language used by Kubernetes, Firebase, and Google Cloud IAM). Seven enforcement actions: **block**, **steer**, **throttle**, **log**, **alert**, **require_approval**, **allow**. Policies evaluate inside the agent process with sub-millisecond overhead, not at a network gateway. 12 OWASP-mapped templates for one-click setup. Shadow mode lets you test policies against live traffic without enforcing them, so you can validate before going live. [Learn more → getstrathon.com/docs/intervention](https://getstrathon.com/docs/intervention)
 
 ### Human Approval Workflows
 
-Pause agent execution until an operator approves or denies in the dashboard, Slack, or Discord. Multi-party approval (N-of-M) for high-risk actions like financial transactions or data deletion. Automatic expiry and escalation prevent stuck agents. The SDK polls the receiver and blocks the calling thread until a decision arrives, so no architectural changes are needed in your agent. [Learn more → getstrathon.com/docs/approvals](https://getstrathon.com/docs/approvals)
+Pause agent execution until an operator approves or denies in the dashboard, Slack, or Discord. Multi-party approval (N-of-M) for high-risk actions like financial transactions or data deletion. Automatic expiry and escalation prevent stuck agents. The SDK holds the call until a decision arrives — awaiting on async surfaces, blocking on synchronous ones — so no architectural changes are needed in your agent. [Learn more → getstrathon.com/docs/approvals](https://getstrathon.com/docs/approvals)
 
 ### 50+ Credential Patterns
 

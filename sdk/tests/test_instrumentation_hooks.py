@@ -104,7 +104,7 @@ class TestClaudePreToolUseHook:
         assert "Use safe command" in result["hookSpecificOutput"]["permissionDecisionReason"]
 
     def test_require_approval_granted_proceeds(self):
-        # Regression for the D1 defect class: require_approval must be enforced,
+        # Regression: require_approval must be enforced,
         # never silently allowed. On grant, the hook proceeds (empty dict).
         hook, _ = self._make_hook(approval=True)
         with patch(

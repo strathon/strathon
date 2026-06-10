@@ -409,7 +409,8 @@ def test_block_raises_on_tool_start():
 
 
 def test_require_approval_falls_closed_on_sync_callback():
-    # Regression for the D1 defect class: the LangGraph on_tool_start callback
+    # Regression: a matched policy must never be silently allowed. The
+    # LangGraph on_tool_start callback
     # is synchronous and cannot await a human decision, so a matched
     # require_approval policy MUST fall closed (raise), never silently allow.
     handler = make_handler()
