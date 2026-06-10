@@ -72,3 +72,69 @@ Parameters:
 - `limit` — 1–1000, default 100
 
 Requires `traces:read` scope.
+
+## Behavioral drift detection (Vigil)
+
+Vigil watches each agent's behavior against its own learned baseline and
+fires an alert when the behavior shifts. It runs as a background task in the
+receiver (60-second tick) and requires no configuration to start — it
+calibrates itself from production traffic.
+
+Four signals are tracked per agent, computed over a trailing 5-minute window:
+
+| Signal | Definition | Alert severity |
+|--------|------------|----------------|
+| `deny_rate` | Fraction of spans blocked or denied by policy | high |
+| `error_rate` | Fraction of spans with `ERROR` status | high |
+| `tool_call_rate` | Spans per minute | medium |
+| `cost_rate` | USD per minute | medium |
+
+### How it works
+
+EWMA (exponentially weighted moving average) establishes the baseline;
+CUSUM (cumulative sum) detects sustained shifts away from it. Together they
+catch both a sudden spike and a slow drift that no single threshold would.
+
+Each agent×signal baseline calibrates independently: Vigil accumulates one
+observation per tick in which the agent was active, and starts alerting only
+after 100 observations (configurable). Until then it learns silently — a new
+agent never alerts on its first day of normal behavior. After an alert fires,
+the CUSUM accumulators reset so one sustained shift produces one alert, not a
+storm.
+
+Baselines are held in receiver memory and rebuild from live traffic after a
+restart (the calibration window starts over).
+
+### Alerts
+
+A drift alert is dispatched through the notification system as a
+`behavioral_drift` event — the same channels (Slack, Discord, webhook) used
+for policy and approval events. The payload carries the agent, the signal,
+the current value, the baseline EWMA, a severity, and a human-readable
+message:
+
+```json
+{
+  "type": "behavioral_drift",
+  "agent_name": "support-agent",
+  "metric": "deny_rate",
+  "current_value": 0.42,
+  "baseline_ewma": 0.03,
+  "severity": "high",
+  "message": "Agent 'support-agent' deny_rate drifted significantly (current: 0.4200, baseline: 0.0300)"
+}
+```
+
+A rising `deny_rate` on a previously quiet agent is the classic signature of
+prompt injection or goal hijack: the agent starts attempting calls your
+policies exist to stop. Drift detection surfaces the pattern; the policies
+themselves remain the enforcement.
+
+### Configuration
+
+| Env var | Default | Meaning |
+|---------|---------|---------|
+| `STRATHON_VIGIL_MIN_SPANS` | `100` | Observations before a baseline calibrates and can alert |
+| `STRATHON_VIGIL_EWMA_ALPHA` | `0.3` | EWMA smoothing factor (higher = baseline adapts faster) |
+| `STRATHON_VIGIL_CUSUM_THRESHOLD` | `5.0` | CUSUM breach level that fires an alert |
+| `STRATHON_VIGIL_CUSUM_DRIFT` | `0.5` | CUSUM slack — drift smaller than this is absorbed as noise |

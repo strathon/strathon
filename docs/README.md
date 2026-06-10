@@ -9,12 +9,12 @@ it takes you from zero to a running firewall blocking a real agent action.
 | [concepts.md](concepts.md) | The mental model: spans, traces, policies, the seven actions, inline enforcement, audit log |
 | [scope.md](scope.md) | What the three enforcement layers do and don't do, and what's roadmap vs shipped |
 | [intervention.md](intervention.md) | CEL policies, the seven actions (block/steer/throttle/log/alert/require_approval/allow), allow-list mode, time-based rules, policy versioning, halts, budgets, webhooks |
-| [analytics.md](analytics.md) | Trace list, trace tree, span aggregation |
+| [analytics.md](analytics.md) | Trace list, trace tree, span aggregation, behavioral drift detection (Vigil) |
 | [spans.md](spans.md) | Span search, attribute filtering, partitioned storage |
 | [audit.md](audit.md) | Tamper-evident audit log, hash chain, SCIM filters, Merkle anchors |
 | [api_keys.md](api_keys.md) | Capability-scoped API keys, rotation, scopes reference |
 | [projects.md](projects.md) | Multi-project management, CRUD, auto-key minting |
-| [budgets.md](budgets.md) | Cost and iteration budgets, auto-halt |
+| [budgets.md](budgets.md) | Cost and iteration budgets, auto-halt, circuit breakers |
 | [redaction.md](redaction.md) | PII redaction at ingest |
 | [retention.md](retention.md) | Trace retention, per-project configuration |
 | [sampling.md](sampling.md) | Head-based sampling, force-keep rules |

@@ -86,6 +86,42 @@ def test_policy_allow_when_expression_does_not_match():
     assert f.response is None  # not blocked
 
 
+def test_no_policies_default_deny_blocks():
+    """Allow-list mode must hold even with zero policies loaded.
+
+    Regression: the zero-policy branch used to return allow before
+    consulting the project's allow-list posture, making a default-deny
+    project allow-everything at the egress layer while the SDK and MCP
+    gateway denied. An ungoverned request in default-deny falls closed.
+    """
+    addon = _addon()
+    addon._policies = []
+    addon._default_action = "block"
+    f = _request_flow(method="POST", body="benign body, no credentials")
+    with taddons.context(addon):
+        addon.request(f)
+    assert f.response is not None
+    assert f.response.status_code == 403
+    assert f.response.headers.get("X-Strathon-Block-Reason") == "policy"
+
+
+def test_unmatched_request_default_deny_blocks():
+    """In allow-list mode, a request matching no policy is denied."""
+    addon = _addon()
+    addon._policies = [{
+        "id": "p1", "name": "block_gets_only", "enabled": True, "action": "block",
+        "applies_to": [],
+        "match_expression": 'attrs["strathon.tool.name"] == "http.get"',
+        "priority": 100,
+    }]
+    addon._default_action = "block"
+    f = _request_flow(method="POST", body="benign body")  # POST, rule targets GET
+    with taddons.context(addon):
+        addon.request(f)
+    assert f.response is not None
+    assert f.response.status_code == 403
+
+
 def test_eval_error_fails_closed(monkeypatch):
     addon = _addon()
     addon._policies = [{

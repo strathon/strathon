@@ -261,8 +261,9 @@ jobs:
   # The codebase predates a clean mypy baseline; running it as a hard
   # gate today would be permanently red (mostly third-party framework
   # import/stub noise and intentional monkey-patches), which trains
-  # people to ignore CI. We run it for signal — to watch the error
-  # count and not let it grow — and will flip it to blocking after a
+  # people to ignore CI. With continue-on-error the job is non-blocking
+  # but a failing run still shows as failed on the job, so the signal
+  # is visible without gating merges. We will flip it to blocking after a
   # dedicated burn-down pass plus a [tool.mypy] config that silences the
   # framework-import noise. Do not remove this job; tighten it.
   # ============================================================
@@ -287,10 +288,10 @@ jobs:
           pip install -e "./sdk[all]"
           pip install -e "./receiver[dev]"
       - name: mypy (SDK)
-        run: mypy sdk/src/strathon/ || true
+        run: mypy sdk/src/strathon/
       - name: mypy (receiver)
         working-directory: receiver
-        run: mypy . || true
+        run: mypy .
 
   # ============================================================
   # Docker — build and push to ghcr.io on version tags (v*)

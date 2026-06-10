@@ -1,12 +1,20 @@
-"""Circuit breaker for per-agent and per-tool failure containment.
+"""Circuit breaker for per-agent and per-tool failure tracking.
 
-Three states: CLOSED (normal) → OPEN (all calls blocked) → HALF_OPEN
-(test one call). Trips after N errors in M minutes. Self-heals after
-a configurable cooldown.
+Three states: CLOSED (normal) → OPEN (tripped) → HALF_OPEN (probing
+recovery). Trips after N errors in M minutes. Self-heals after a
+configurable cooldown.
 
-Different from halts: halts are manual kill switches. Circuit breakers
-are automatic and self-recovering. They contain blast radius when an
-agent or tool starts failing without requiring operator intervention.
+What OPEN means: spans ingested for that agent/tool are annotated with
+``strathon.circuit_breaker.state`` / ``strathon.circuit_breaker.entity``,
+and the breaker is visible via GET /v1/circuit-breakers and the dashboard.
+The breaker does NOT itself prevent the agent's calls — enforcement that
+stops calls is the SDK policy engine and halts. To turn a trip into a hard
+stop, pair it with a halt (manual or automated on the alert) or a policy.
+
+Different from halts: halts are kill switches that the SDK enforces at the
+tool boundary. Circuit breakers are automatic, self-recovering failure
+*signals* with hysteresis — they tell you (and your automation) that an
+agent or tool is repeatedly failing.
 
 Execution model: this is request-path, NOT a background loop. State lives
 in-memory and is updated synchronously where calls happen — span ingest

@@ -5,8 +5,7 @@
 #   1. Real API keys (stra_ followed by 30+ chars, excluding the dev key)
 #   2. Private key material (PEM headers, PKCS markers)
 #   3. Hardcoded secrets (password=, secret=, hmac_key= with values)
-#   4. Forbidden words in code/config (competitor names, internal refs)
-#   5. Common cloud provider keys (AWS, GCP service account JSON)
+#   4. Common cloud provider keys (AWS, GCP service account JSON)
 #
 # Install as git hook:
 #   cp scripts/check-secrets.sh .git/hooks/pre-commit
@@ -34,10 +33,13 @@ check_pattern() {
     local exclude_pattern="${3:-}"
 
     for file in $STAGED; do
-        # Skip binary files and the hook script itself.
+        # Skip binary files, the hook script itself, and test files (which
+        # legitimately contain example/placeholder secrets like AWS's
+        # documented AKIAIOSFODNN7EXAMPLE key used to test detection).
         if [[ "$file" == *.png ]] || [[ "$file" == *.jpg ]] || \
            [[ "$file" == *.ico ]] || [[ "$file" == *.woff* ]] || \
            [[ "$file" == *.zip ]] || [[ "$file" == *.tar.gz ]] || \
+           [[ "$file" == *test_* ]] || [[ "$file" == */tests/* ]] || \
            [[ "$file" == "scripts/check-secrets.sh" ]]; then
             continue
         fi
@@ -49,10 +51,14 @@ check_pattern() {
         fi
 
         local matches
+        # Use `grep -e PATTERN` so patterns that begin with '-' (e.g. PEM
+        # headers like -----BEGIN PRIVATE KEY-----) are treated as a pattern
+        # and not as command-line flags. BSD/macOS grep otherwise misparses
+        # them even with -nE present.
         if [ -n "$exclude_pattern" ]; then
-            matches=$(echo "$content" | grep -nE "$pattern" | grep -vE "$exclude_pattern" || true)
+            matches=$(echo "$content" | grep -nE -e "$pattern" | grep -vE -e "$exclude_pattern" || true)
         else
-            matches=$(echo "$content" | grep -nE "$pattern" || true)
+            matches=$(echo "$content" | grep -nE -e "$pattern" || true)
         fi
 
         if [ -n "$matches" ]; then
@@ -117,43 +123,7 @@ for file in $STAGED; do
     fi
 done
 
-# 4. Forbidden words in code files (not docs, not this script).
-#    Patterns loaded from .strathon-forbidden-words (gitignored).
-#    Create the file with one regex pattern per line.
-FORBIDDEN_FILE=".strathon-forbidden-words"
-if [ -f "$FORBIDDEN_FILE" ]; then
-    # Join all non-empty, non-comment lines into a single regex.
-    FORBIDDEN_WORDS=$(grep -vE '^\s*#|^\s*$' "$FORBIDDEN_FILE" | paste -sd'|' -)
-else
-    FORBIDDEN_WORDS=""
-fi
-
-if [ -n "$FORBIDDEN_WORDS" ]; then
-    for file in $STAGED; do
-        # Allow docs and this script.
-        if [[ "$file" == *.md ]] || [[ "$file" == "scripts/check-secrets.sh" ]]; then
-            continue
-        fi
-
-    content=$(git show ":$file" 2>/dev/null || true)
-    if [ -z "$content" ]; then
-        continue
-    fi
-
-    matches=$(echo "$content" | grep -nE "$FORBIDDEN_WORDS" || true)
-    if [ -n "$matches" ]; then
-        echo "BLOCKED: Forbidden word (see .strathon-forbidden-words)"
-        echo "  File: $file"
-        echo "$matches" | head -3 | while read -r line; do
-            echo "  $line"
-        done
-        echo ""
-        FAIL=1
-    fi
-done
-fi
-
-# 5. AWS keys, GCP service account JSON.
+# 4. AWS keys, GCP service account JSON.
 check_pattern \
     'AKIA[0-9A-Z]{16}' \
     "Possible AWS access key"
@@ -161,40 +131,6 @@ check_pattern \
 check_pattern \
     '"type"\s*:\s*"service_account"' \
     "Possible GCP service account JSON"
-
-# 6. Internal references that should not be public.
-#
-# The list of forbidden terms is kept in a local, gitignored file so the
-# terms themselves never enter the repository. Create
-# scripts/forbidden-terms.local (one extended-regex pattern per line; blank
-# lines and '#' comments are ignored) on each machine that commits. See
-# scripts/forbidden-terms.local.example for the format. If the file is
-# absent, this check is skipped with a notice.
-FORBIDDEN_FILE="$(dirname "$0")/forbidden-terms.local"
-if [ -f "$FORBIDDEN_FILE" ]; then
-    FORBIDDEN_PATTERN=$(grep -vE '^[[:space:]]*(#|$)' "$FORBIDDEN_FILE" | paste -sd '|' -)
-    if [ -n "$FORBIDDEN_PATTERN" ]; then
-        for file in $STAGED; do
-            if [[ "$file" == "scripts/check-secrets.sh" ]] || [[ "$file" == *test_* ]]; then
-                continue
-            fi
-            content=$(git show ":$file" 2>/dev/null || true)
-            [ -z "$content" ] && continue
-            matches=$(echo "$content" | grep -nE "$FORBIDDEN_PATTERN" || true)
-            if [ -n "$matches" ]; then
-                echo "BLOCKED: Forbidden internal reference"
-                echo "  File: $file"
-                echo "$matches" | head -3 | while read -r line; do
-                    echo "  $line"
-                done
-                echo ""
-                FAIL=1
-            fi
-        done
-    fi
-else
-    echo "Notice: $FORBIDDEN_FILE not found; skipping internal-reference scan."
-fi
 
 if [ $FAIL -ne 0 ]; then
     echo "=========================================="

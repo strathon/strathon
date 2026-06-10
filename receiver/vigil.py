@@ -1,9 +1,10 @@
 """Behavioral drift detection via EWMA and CUSUM.
 
-Auto-calibrates from production span data. Does nothing until
-each agent has 100+ spans (configurable). Once calibrated,
-fires webhook alerts when an agent's behavior deviates from
-its historical baseline.
+Auto-calibrates from production span data. Does nothing for an agent
+until that agent's baseline has accumulated 100+ observations
+(configurable) — one observation per 60s tick in which the agent was
+active. Once calibrated, fires webhook alerts when an agent's behavior
+deviates from its historical baseline.
 
 Metrics tracked per agent:
   - deny_rate: fraction of spans blocked by policies

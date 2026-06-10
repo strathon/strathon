@@ -203,3 +203,51 @@ connections are recycled between transactions, releasing the lock
 unexpectedly. Either use session pooling (`pool_mode=session`) for
 the receiver's connections, or run the receiver against Postgres
 directly. See [self-hosting.md](self-hosting.md).
+
+## Circuit breakers
+
+Budgets contain *spend*; circuit breakers track *failure*. A circuit breaker
+exists per agent and per tool, and follows the standard
+CLOSED → OPEN → HALF-OPEN pattern: it trips when an entity accumulates too
+many error-status spans inside a sliding window, holds OPEN for a cooldown,
+then probes recovery through HALF-OPEN before closing again. Breakers
+require no setup — they are created automatically the first time an agent or
+tool reports activity.
+
+### What a tripped breaker does
+
+Be precise about the semantics, because they differ from halts:
+
+- While a breaker is OPEN (or HALF-OPEN), every span ingested for that
+  entity is annotated with `strathon.circuit_breaker.state` and
+  `strathon.circuit_breaker.entity`.
+- Open breakers are visible in the dashboard and via the API (below).
+- The breaker does **not** itself stop the agent's calls. Call-stopping
+  enforcement lives in the SDK policy engine and in halts. A breaker is the
+  automatic, self-recovering *signal* that an agent or tool is repeatedly
+  failing; to turn that signal into a hard stop, create a halt on the agent
+  (manually, or from your alerting automation) — `StrathonHaltExceeded` then
+  stops the agent at the tool boundary, exactly as with budget halts above.
+
+State is held in receiver memory and resets on restart (breakers re-learn
+from live traffic).
+
+### API
+
+```
+GET  /v1/circuit-breakers          # list all breakers + state summary
+POST /v1/circuit-breakers/reset    # body: {"entity_id": "...", "entity_type": "agent" | "tool"}
+```
+
+`GET` requires `traces:read`; `reset` requires `policies:write`. The list
+response includes per-breaker `state`, `errors_in_window`, `total_trips`,
+and the active thresholds.
+
+### Configuration
+
+| Env var | Default | Meaning |
+|---------|---------|---------|
+| `STRATHON_CB_ERROR_THRESHOLD` | `10` | Errors inside the window that trip the breaker |
+| `STRATHON_CB_WINDOW_SECONDS` | `300` | Sliding error-counting window |
+| `STRATHON_CB_COOLDOWN_SECONDS` | `60` | How long OPEN holds before HALF-OPEN probing |
+| `STRATHON_CB_HALF_OPEN_MAX` | `3` | Successful probes required to close again (a single failure during probing re-opens) |

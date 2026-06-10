@@ -81,7 +81,7 @@ Strathon raises `StrathonPolicyBlocked` **before** the tool call executes. The f
 from strathon import StrathonPolicyBlocked
 
 try:
-    agent.run("Email our competitors with our pricing")
+    agent.invoke({"messages": [{"role": "user", "content": "Email our competitors with our pricing"}]})
 except StrathonPolicyBlocked as e:
     print(f"Blocked by policy: {e.policy_name}")
     # The tool call never executed. Logged in audit trail.
@@ -134,7 +134,7 @@ Write rules in [CEL](https://cel.dev) (Common Expression Language — the same l
 
 ### Human Approval Workflows
 
-Pause agent execution until an operator approves or denies in the dashboard, Slack, or Discord. Multi-party approval (N-of-M) for high-risk actions like financial transactions or data deletion. Automatic expiry and escalation prevent stuck agents. The SDK holds the call until a decision arrives — awaiting on async surfaces, blocking on synchronous ones — so no architectural changes are needed in your agent. [Learn more → getstrathon.com/docs/approvals](https://getstrathon.com/docs/approvals)
+Pause agent execution until an operator approves or denies in the dashboard, Slack, or Discord. Multi-party approval (N-of-M) for high-risk actions like financial transactions or data deletion. Undecided requests expire automatically, so an unanswered approval fails closed instead of leaving the agent hung. The SDK holds the call until a decision arrives — awaiting on async surfaces, blocking on synchronous ones — so no architectural changes are needed in your agent. [Learn more → getstrathon.com/docs/intervention](https://getstrathon.com/docs/intervention)
 
 ### 50+ Credential Patterns
 
@@ -154,11 +154,11 @@ A network-layer catch-all. Runs as a mitmproxy addon in front of the agent and e
 
 ### Behavioral Drift Detection
 
-EWMA and CUSUM statistical analysis per agent. Auto-calibrates from the first 50 observations, then fires alerts when behavior shifts — token usage spikes, tool call patterns change, latency anomalies. Catches compromised or malfunctioning agents before damage accumulates. [Learn more → getstrathon.com/docs/analytics](https://getstrathon.com/docs/analytics)
+EWMA and CUSUM statistical analysis per agent, tracking four signals: policy deny rate, error rate, tool-call rate, and cost per minute. Auto-calibrates from each agent's first 100 observations (configurable), then fires webhook alerts when behavior shifts from the learned baseline — catching both sudden spikes and gradual drift from compromised or malfunctioning agents. [Learn more → getstrathon.com/docs/analytics](https://getstrathon.com/docs/analytics)
 
 ### Circuit Breakers
 
-Per-agent and per-tool automatic trip/half-open/reset, modeled on the standard circuit breaker pattern. When error rates exceed the threshold, the breaker trips and blocks further calls. Half-open probes let traffic resume gradually. Contains blast radius without operator intervention. [Learn more → getstrathon.com/docs/budgets](https://getstrathon.com/docs/budgets)
+Per-agent and per-tool failure tracking, modeled on the standard CLOSED → OPEN → HALF-OPEN pattern. When an agent or tool exceeds the error threshold, the breaker trips: subsequent spans are flagged with the breaker state at ingest, open breakers surface in the API and dashboard, and you can pair the flag with a policy or halt to stop the agent. Half-open probes detect recovery; a reset endpoint closes a breaker manually. [Learn more → getstrathon.com/docs/budgets](https://getstrathon.com/docs/budgets)
 
 ### Dashboard
 
@@ -178,7 +178,7 @@ pip install strathon[all]                # all 10 frameworks
 
 | Framework | Integration Type | Description | Docs |
 |-----------|-----------------|-------------|------|
-| **LangGraph** | BaseCallbackHandler | Intercepts tool calls via LangChain callback system. Block/steer before execution. | [Guide](https://getstrathon.com/docs/frameworks/langgraph) |
+| **LangGraph** | BaseCallbackHandler | Intercepts tool calls via LangChain callback system. Blocks and throttles before execution. | [Guide](https://getstrathon.com/docs/frameworks/langgraph) |
 | **CrewAI** | Event listener | Hooks into CrewAI event bus. Captures tool use, delegation, and task events. | [Guide](https://getstrathon.com/docs/frameworks/crewai) |
 | **OpenAI Agents SDK** | TracingProcessor | Extends the official tracing extension point. Full span lifecycle capture. | [Guide](https://getstrathon.com/docs/frameworks/openai-agents) |
 | **OpenAI** | Drop-in wrapper | Wraps `chat.completions.create`. Zero code changes beyond `instrument()`. | [Guide](https://getstrathon.com/docs/frameworks/openai) |
@@ -189,7 +189,7 @@ pip install strathon[all]                # all 10 frameworks
 | **Pydantic AI** | AbstractCapability | First-class plugin via Pydantic AI's capability system. No monkey-patching. | [Guide](https://getstrathon.com/docs/frameworks/pydantic-ai) |
 | **Google ADK** | BasePlugin | First-class plugin via Google ADK's plugin system. No monkey-patching. | [Guide](https://getstrathon.com/docs/frameworks/google-adk) |
 
-All integrations use first-class framework extension points where available. Zero monkey-patching.
+Integrations use first-class framework extension points wherever the framework provides them (TracingProcessor, BasePlugin, AbstractCapability, callback handlers); where none exists, Strathon wraps the framework's documented entry point. Each guide states exactly which mechanism is used and what it can enforce.
 
 ## CLI
 
@@ -250,7 +250,8 @@ python benchmarks/loadtest.py --endpoint http://127.0.0.1:4318 \
 It drives the full per-span pipeline — protobuf parse, CEL policy evaluation,
 50+ credential patterns, PII redaction, and the batched PostgreSQL write — and
 reports sustained spans/sec, latency p50/p95/p99, and error rate for the
-hardware it ran on.
+hardware it ran on. (Reference environment we test against: MacBook Pro
+M-series, 4 uvicorn workers, PostgreSQL 16, 50,000 spans.)
 
 Receivers are stateless and scale horizontally behind a load balancer. The
 receiver tier scales near-linearly until the shared PostgreSQL becomes the
@@ -258,7 +259,6 @@ bottleneck — all receivers write to one primary, so plan capacity around the
 database write path (PgBouncer, a larger primary, read replicas for dashboard
 queries), not the receiver count. See the [Scaling Guide](https://getstrathon.com/docs/scaling).
 
-Benchmarked on MacBook Pro M-series, 4 uvicorn workers, PostgreSQL 16, 50,000 spans.
 
 ## OWASP Agentic Security Coverage
 
@@ -273,7 +273,7 @@ Strathon's threat model is anchored on the [OWASP Top 10 for Agentic Application
 | **ASI05** Unexpected Code Execution | Block and allow-list policies on shell, code, and SQL tools; approval workflows required before code-executing tools run |
 | **ASI06** Memory and Context Poisoning | Behavioral drift detection (Vigil, EWMA/CUSUM) surfaces poisoning effects; halt propagation; content redaction on ingested data |
 | **ASI07** Insecure Inter-Agent Communication | MCP gateway evaluates inter-agent and tool calls against policies, fails closed when evaluation cannot complete |
-| **ASI08** Cascading Failures | Cost and iteration budgets with auto-halt, circuit breakers, kill switches, and halt propagation to contain failures before they fan out |
+| **ASI08** Cascading Failures | Cost and iteration budgets with auto-halt, kill switches, and halt propagation to contain failures before they fan out; circuit breakers flag repeatedly failing agents and tools |
 | **ASI09** Human-Agent Trust Exploitation | Human approval workflows (multi-party N-of-M, automatic expiry of undecided requests, Slack/Discord approval notifications), tamper-evident audit log, trace search, and SARIF export for accountability |
 | **ASI10** Rogue Agents | Behavioral drift detection (Vigil), heartbeat monitoring, SDK integrity check, kill switches |
 
@@ -303,12 +303,13 @@ The honest framing from the security community applies: an agent that combines a
 │                 │   OTLP/HTTP  │    Receiver      │        │            │
 │   Agent code    │─────────────▶│    (FastAPI)     │───────▶│ PostgreSQL │
 │                 │              │                  │        │            │
-│  ┌───────────┐  │◀─────────────│  Policy eval     │        └────────────┘
-│  │ Strathon  │  │  block/allow │  Credential scan │
-│  │ SDK       │  │              │  PII redaction   │        ┌───────────┐
-│  │ (3 lines) │  │              │  Audit log       │───────▶│ Dashboard │
-│  └───────────┘  │              │  Webhooks        │        │ (Next.js) │
-└─────────────────┘              └──────────────────┘        └───────────┘
+│  ┌───────────┐  │◀─────────────│  Ingest pipeline │        └────────────┘
+│  │ Strathon  │  │ policy sync, │  Credential scan │
+│  │ SDK       │  │ halts        │  PII redaction   │        ┌───────────┐
+│  │ (in-proc  │  │              │  Audit log       │───────▶│ Dashboard │
+│  │ enforce)  │  │              │  Webhooks        │        │ (Next.js) │
+│  └───────────┘  │              └──────────────────┘        └───────────┘
+└─────────────────┘
 ```
 
 Single PostgreSQL dependency. No Redis, no ClickHouse, no S3. Self-host on one machine or scale horizontally behind a load balancer.

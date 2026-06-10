@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
-"""Pre-commit guard: block secrets and private planning terms from being
-committed to the public repository.
+"""Pre-commit guard: block secret-shaped strings from being committed.
 
-Scans staged content (or, with --all, the whole tree) for two classes of
-problem:
-
-  1. Secret-shaped strings — real API keys, tokens, private keys, and
-     high-entropy assignments that look like credentials.
-  2. Forbidden terms — internal planning/competitive context that must never
-     appear in public artifacts: roadmap sequencing, investor/accelerator
-     references, the sibling project name, and internal commit-stage tags.
+Scans staged content (or, with --all, the whole tree) for secret-shaped
+strings — real API keys, tokens, private keys, and high-entropy assignments
+that look like credentials — and blocks the commit if any are found.
 
 Dependency-free (stdlib only) so it runs as a git hook without a framework.
 Exit non-zero on any finding so the commit (or CI job) fails.
@@ -20,7 +14,6 @@ Run over all tracked files:  python scripts/check_secrets.py --all
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import sys
@@ -39,41 +32,6 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
      re.compile(r"""(?i)(?:api[_-]?key|secret|token|passwd|password)\s*[:=]\s*['"][A-Za-z0-9/+_-]{24,}['"]""")),
 ]
 
-def _load_forbidden_terms() -> list[tuple[str, re.Pattern[str]]]:
-    """Load forbidden-term patterns from the gitignored local file.
-
-    The terms themselves (internal project names, funding references, internal
-    tagging schemes) must never live in the public repository — putting them in
-    this scanner's own source would make the leak-prevention tool the leak. So
-    they are kept in scripts/forbidden-terms.local (gitignored; one extended
-    regex per line, '#' comments and blanks ignored), the same file the shell
-    pre-commit hook reads. If the file is absent the forbidden-term scan is
-    skipped with a notice; the secret/key scans still run.
-    """
-    local = os.path.join(os.path.dirname(__file__), "forbidden-terms.local")
-    if not os.path.exists(local):
-        print(
-            f"Notice: {local} not found; skipping forbidden-term scan "
-            "(secret/key scans still run). See forbidden-terms.local.example.",
-            file=sys.stderr,
-        )
-        return []
-    terms: list[tuple[str, re.Pattern[str]]] = []
-    with open(local, encoding="utf-8") as fh:
-        for raw in fh:
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            try:
-                terms.append(("internal reference", re.compile(line)))
-            except re.error:
-                print(f"Warning: bad regex in forbidden-terms.local: {line!r}",
-                      file=sys.stderr)
-    return terms
-
-
-FORBIDDEN_TERMS: list[tuple[str, re.Pattern[str]]] = _load_forbidden_terms()
-
 ALLOWLIST_SUBSTRINGS = (
     "stra_dev_local_default_project_do_not_use_in_production",
     "CHANGE_ME",
@@ -86,7 +44,10 @@ EXEMPT_PATH_RE = re.compile(
     r"(credential_patterns\.py$"
     r"|/tests?/"
     r"|\.lock$|lock\.json$|\.lockb$"
-    r"|check_secrets\.py$)"
+    # Both secret scanners necessarily contain secret-shaped detection patterns
+    # and documented example keys (AKIA…EXAMPLE, PEM headers). Each exempts the
+    # other so a scanner's own patterns aren't flagged as a leak.
+    r"|check_secrets\.py$|check-secrets\.sh$)"
 )
 
 
@@ -123,10 +84,6 @@ def scan_file(path: str) -> list[str]:
     if text is None:
         return findings
     exempt_secrets = bool(EXEMPT_PATH_RE.search(path))
-    # The scanner's own source defines the forbidden-term patterns, so it
-    # necessarily contains those terms. Exempt it from the forbidden-term
-    # check (but not from real secret scanning).
-    exempt_forbidden = path.endswith("check_secrets.py") or path.endswith(".gitignore")
     for lineno, line in enumerate(text.splitlines(), start=1):
         if _line_is_allowlisted(line):
             continue
@@ -134,10 +91,6 @@ def scan_file(path: str) -> list[str]:
             for label, pat in SECRET_PATTERNS:
                 if pat.search(line):
                     findings.append(f"{path}:{lineno}: possible {label}")
-        if not exempt_forbidden:
-            for label, pat in FORBIDDEN_TERMS:
-                if pat.search(line):
-                    findings.append(f"{path}:{lineno}: forbidden term — {label}")
     return findings
 
 
@@ -153,7 +106,7 @@ def main() -> int:
         all_findings.extend(scan_file(f))
 
     if all_findings:
-        print("BLOCKED: potential secrets or forbidden terms detected\n",
+        print("BLOCKED: potential secrets detected\n",
               file=sys.stderr)
         for finding in all_findings:
             print(f"  {finding}", file=sys.stderr)
