@@ -63,8 +63,8 @@ async def get_project_settings_endpoint(
 
 @router.patch("")
 async def update_project_settings_endpoint(
+    request: Request,
     payload: dict[str, Any] = Body(default={}),
-    request: Request = None,
     ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_PROJECT_SETTINGS_WRITE),
     ),

@@ -10,7 +10,7 @@ API, Ed25519 signature verification for Discord interactions.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -168,7 +168,7 @@ def format_budget_alert(event: dict[str, Any]) -> dict:
     }
 
 
-EVENT_FORMATTERS = {
+EVENT_FORMATTERS: dict[str, Callable[..., dict[str, Any]]] = {
     "approval_request": format_approval_request,
     "incident": format_incident,
     "policy_blocked": format_policy_event,

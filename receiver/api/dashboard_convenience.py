@@ -549,6 +549,8 @@ async def export_my_data(
         {"uid": ctx.user_id},
     )
     u = user.first()
+    if u is None:
+        raise HTTPException(status_code=404, detail="User not found")
 
     memberships = await session.execute(
         text(

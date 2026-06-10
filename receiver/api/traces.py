@@ -292,7 +292,7 @@ async def ingest_traces(
                         "strathon.agent.name",
                         merged_attrs.get("gen_ai.agent.name", "unknown"),
                     )
-                    record_heartbeat(hb_agent, merged_attrs)
+                    record_heartbeat(hb_agent, merged_attrs, project_id)
 
                     # SDK integrity check: compare code_hash.
                     code_hash = merged_attrs.get("strathon.sdk.code_hash")

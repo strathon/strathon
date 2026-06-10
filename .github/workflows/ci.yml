@@ -22,8 +22,8 @@ permissions:
 jobs:
   # ============================================================
   # Secret + forbidden-term scan. Stdlib-only, no deps, fast.
-  # Blocks accidental credential leaks and private planning terms
-  # (roadmap sequencing, investor/accelerator refs, sibling project)
+  # Blocks accidental credential leaks and a configurable list of
+  # disallowed terms (loaded from a gitignored local file / CI secret)
   # from reaching the public repo. Mirrors the local pre-commit hook.
   # ============================================================
   secret-scan:
@@ -257,16 +257,6 @@ jobs:
         run: python scripts/check_cel_attributes.py
 
   # ============================================================
-  # Type check (mypy) — NON-BLOCKING for now (continue-on-error).
-  # The codebase predates a clean mypy baseline; running it as a hard
-  # gate today would be permanently red (mostly third-party framework
-  # import/stub noise and intentional monkey-patches), which trains
-  # people to ignore CI. With continue-on-error the job is non-blocking
-  # but a failing run still shows as failed on the job, so the signal
-  # is visible without gating merges. We will flip it to blocking after a
-  # dedicated burn-down pass plus a [tool.mypy] config that silences the
-  # framework-import noise. Do not remove this job; tighten it.
-  # ============================================================
   # SDK type check — BLOCKING. The SDK passes mypy clean: a scoped
   # [tool.mypy] config in sdk/pyproject.toml ignores optional-framework
   # missing imports and the intentional method-assign monkey-patching in the
@@ -291,20 +281,15 @@ jobs:
         working-directory: sdk
         run: mypy src/strathon/
 
-  # Receiver type check — NON-BLOCKING for now (continue-on-error), but NOT
-  # silenced: failures are visible so the error count can be watched and cannot
-  # grow unnoticed. The receiver currently has ~50 mypy findings across mixed
-  # categories that need a real triage pass (some are framework false positives
-  # like Result.rowcount on the async cursor; a few look like genuine
-  # call-signature issues worth fixing). Triaging them safely is a dedicated
-  # task, not a launch-eve change — blanket-suppressing them would discard the
-  # signal that just found two real SDK bugs. Path to blocking: triage + fix
-  # the real ones, scope the false positives in receiver/pyproject.toml, then
-  # drop continue-on-error here.
+  # Receiver type check — BLOCKING. The receiver passes mypy clean after a
+  # triage pass that fixed the real issues (the heartbeat_missed and
+  # sdk_integrity_violation alerts both passed a null project_id/session and so
+  # never dispatched; several reused-variable and Optional-narrowing bugs) and
+  # scoped only the genuine framework false positives (re2 missing stubs, async
+  # CursorResult.rowcount, mitmproxy follow-imports) in receiver/pyproject.toml.
   typecheck-receiver:
-    name: Type check — receiver (non-blocking)
+    name: Type check — receiver
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python 3.12

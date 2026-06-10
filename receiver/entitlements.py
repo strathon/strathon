@@ -53,10 +53,9 @@ _ALWAYS_GRANTED: frozenset[str] = frozenset(
     }
 )
 
-# Per-plan additions on top of _ALWAYS_GRANTED. Empty today: the enterprise
-# features (sso, scim, custom_roles, siem_export, ha_config) are not yet
-# implemented, so no plan grants them. When built, add the key to the right
-# plan(s) here — the only change needed to gate it.
+# Per-plan additions on top of _ALWAYS_GRANTED. Empty today: no plan grants
+# any additional entitlements yet. To gate a feature to a plan, add its key to
+# the right plan's frozenset here — that is the only change needed.
 _PLAN_GRANTS: dict[Plan, frozenset[str]] = {
     "oss": frozenset(),
     "ee": frozenset(),

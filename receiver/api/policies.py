@@ -75,8 +75,8 @@ async def list_policies_endpoint(
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_policy_endpoint(
+    request: Request,
     payload: dict[str, Any] = Body(default={}),
-    request: Request = None,
     ctx: auth_mod.ApiKeyContext = Depends(require_scope(auth_mod.SCOPE_POLICIES_WRITE)),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
@@ -295,8 +295,8 @@ async def get_policy_endpoint(
 @router.patch("/{policy_id}")
 async def update_policy_endpoint(
     policy_id: str,
+    request: Request,
     payload: dict[str, Any] = Body(default={}),
-    request: Request = None,
     ctx: auth_mod.ApiKeyContext = Depends(require_scope(auth_mod.SCOPE_POLICIES_WRITE)),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
@@ -487,7 +487,7 @@ async def batch_policies(
             detail=f"action must be enable, disable, or delete; got {body.action!r}",
         )
 
-    uuids = []
+    uuids: list[UUID] = []
     for pid in body.policy_ids:
         try:
             uuids.append(UUID(pid))
@@ -498,17 +498,17 @@ async def batch_policies(
             )
 
     affected = 0
-    for pid in uuids:
+    for policy_uuid in uuids:
         if body.action == "delete":
             deleted = await policies_repo.delete_policy(
-                session, ctx.project_id, pid
+                session, ctx.project_id, policy_uuid
             )
             if deleted:
                 affected += 1
         else:
             new_enabled = body.action == "enable"
             result = await policies_repo.update_policy(
-                session, ctx.project_id, pid, enabled=new_enabled
+                session, ctx.project_id, policy_uuid, enabled=new_enabled
             )
             if result is not None:
                 affected += 1

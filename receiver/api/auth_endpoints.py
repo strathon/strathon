@@ -557,7 +557,9 @@ async def mfa_disable(
 
     # Verify password.
     user = await users_repo.find_by_id(session, user_id)
-    if user is None or not verify_password(user.password_hash, body.password):
+    if user is None or user.password_hash is None or not verify_password(
+        user.password_hash, body.password
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid password",
@@ -665,7 +667,7 @@ async def request_password_reset(
         raw_token = await reset_repo.create_reset_token(session, user.id)
         # Send email (best-effort, don't block on failures).
         try:
-            _send_reset_email(user.email, raw_token, smtp_host)
+            _send_reset_email(body.email, raw_token, smtp_host)
         except Exception:
             logger.exception("Failed to send password reset email")
 

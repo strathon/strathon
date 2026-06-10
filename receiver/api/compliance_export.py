@@ -363,13 +363,13 @@ async def _audit_stats(session: AsyncSession, project_id: Any) -> dict:
         "WHERE project_id = :pid"
     )
     result = await session.execute(text(sql), {"pid": project_id})
-    total = (result.mappings().first() or {}).get("total", 0)
+    total = (dict(result.mappings().first() or {})).get("total", 0)
 
     anchors_sql = (
         "SELECT COUNT(*) AS cnt FROM audit.anchors"
     )
     anchors_result = await session.execute(text(anchors_sql))
-    anchors = (anchors_result.mappings().first() or {}).get("cnt", 0)
+    anchors = (dict(anchors_result.mappings().first() or {})).get("cnt", 0)
 
     return {
         "total_events": total,
@@ -402,7 +402,7 @@ async def _approval_stats(session: AsyncSession, project_id: Any) -> dict:
 async def _halt_count(session: AsyncSession, project_id: Any) -> int:
     sql = "SELECT COUNT(*) AS cnt FROM halt_state WHERE project_id = :pid"
     result = await session.execute(text(sql), {"pid": project_id})
-    return (result.mappings().first() or {}).get("cnt", 0)
+    return (dict(result.mappings().first() or {})).get("cnt", 0)
 
 
 async def _get_retention_days(session: AsyncSession, project_id: Any) -> int:
@@ -421,7 +421,7 @@ async def _budget_count(session: AsyncSession, project_id: Any) -> int:
         "WHERE project_id = :pid AND is_active = TRUE"
     )
     result = await session.execute(text(sql), {"pid": project_id})
-    return (result.mappings().first() or {}).get("cnt", 0)
+    return (dict(result.mappings().first() or {})).get("cnt", 0)
 
 
 def _compute_owasp_coverage(policies: list) -> dict[str, list[str]]:

@@ -99,7 +99,7 @@ async def _check_block_spike(
     result = await session.execute(
         text(sql), {"pid": project_id, "cutoff_ns": cutoff_ns}
     )
-    count = (result.mappings().first() or {}).get("cnt", 0)
+    count = (dict(result.mappings().first() or {})).get("cnt", 0)
     if count >= threshold:
         return {
             "trigger": "policy_block_spike",

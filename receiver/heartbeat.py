@@ -19,6 +19,7 @@ import logging
 import os
 import time
 from typing import Any
+from uuid import UUID
 
 logger = logging.getLogger("strathon.heartbeat")
 
@@ -29,11 +30,20 @@ CHECK_INTERVAL = 30
 _last_heartbeat: dict[str, float] = {}
 # Track which agents we already alerted for (avoid repeated alerts).
 _alerted: set[str] = set()
+# agent_name → project_id, so a missed-heartbeat alert reaches that project's
+# notification channels (None project_id would match no channels).
+_agent_project: dict[str, UUID] = {}
 
 
-def record_heartbeat(agent_name: str, attrs: dict[str, Any] | None = None) -> None:
+def record_heartbeat(
+    agent_name: str,
+    attrs: dict[str, Any] | None = None,
+    project_id: "UUID | None" = None,
+) -> None:
     """Record a heartbeat from an agent."""
     _last_heartbeat[agent_name] = time.monotonic()
+    if project_id is not None:
+        _agent_project[agent_name] = project_id
     if agent_name in _alerted:
         _alerted.discard(agent_name)
         logger.info("Agent '%s' heartbeat resumed", agent_name)
@@ -66,12 +76,23 @@ async def heartbeat_check_loop(session_maker) -> None:
                         "Agent '%s' heartbeat missed (last seen %.0fs ago)",
                         agent_name, elapsed,
                     )
-                    # Fire alert through notification dispatcher.
+                    # Fire alert through notification dispatcher. Needs the
+                    # agent's project_id to reach that project's channels; if we
+                    # never recorded one (heartbeat seen before project was
+                    # known), skip rather than dispatch to a null project that
+                    # matches no channels.
+                    project_id = _agent_project.get(agent_name)
+                    if project_id is None:
+                        logger.warning(
+                            "No project_id for agent '%s'; cannot route "
+                            "heartbeat_missed alert", agent_name,
+                        )
+                        continue
                     try:
                         from integrations.dispatcher import dispatch_event
                         async with session_maker() as session:
                             await dispatch_event(
-                                session, None,
+                                session, project_id,
                                 "heartbeat_missed", {
                                     "agent_name": agent_name,
                                     "last_seen_seconds_ago": round(elapsed),

@@ -5,9 +5,8 @@ channel credentials before storing in Postgres. Uses Fernet
 (AES-256-CBC + HMAC-SHA256) from the cryptography library.
 
 Key management:
-  Self-hosted: STRATHON_ENCRYPTION_KEY env var (Fernet key, base64).
-               Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-  Managed cloud (future): AWS KMS / GCP KMS envelope encryption.
+  STRATHON_ENCRYPTION_KEY env var (Fernet key, base64).
+  Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
 If STRATHON_ENCRYPTION_KEY is not set, encryption is disabled and
 values are stored in plaintext (backward compatible for existing

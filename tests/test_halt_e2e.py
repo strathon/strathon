@@ -1,7 +1,7 @@
 """End-to-end test for the halt enforcement loop.
 
-This is the integration test that ties H1 (server-side halt CRUD) and
-H2 (SDK enforcement) together:
+This is the integration test that ties the server-side halt CRUD and the
+SDK enforcement together:
 
   1. Operator creates a halt via POST /v1/halts on the real receiver.
   2. The SDK's HaltEnforcer polls /v1/intervention/sync and picks it up.

@@ -46,7 +46,7 @@ async def create_session(
     user_id: UUID,
     ip_address: Optional[str] = None,
     user_agent: Optional[str] = None,
-    ttl_hours: int = _DEFAULT_SESSION_TTL_HOURS,
+    ttl_hours: float = _DEFAULT_SESSION_TTL_HOURS,
 ) -> tuple[str, Session]:
     """Create a new session. Returns (raw_token, Session).
 

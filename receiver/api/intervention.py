@@ -60,8 +60,8 @@ router = APIRouter(prefix="/v1/intervention", tags=["intervention"])
 
 @router.post("/sync")
 async def intervention_sync(
+    request: Request,
     payload: dict[str, Any] = Body(default={}),
-    request: Request = None,
     ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
         require_scope(auth_mod.SCOPE_HALTS_READ)
     ),

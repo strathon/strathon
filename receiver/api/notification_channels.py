@@ -122,7 +122,7 @@ async def update_channel(
     except ValueError:
         raise HTTPException(400, "invalid channel_id")
 
-    updates = {}
+    updates: dict[str, Any] = {}
     if body.name is not None:
         updates["name"] = body.name
     if body.config is not None:
@@ -203,7 +203,10 @@ async def handle_slack_action(request: Request):
 
     # Parse the Slack payload.
     form_data = await request.form()
-    payload = json.loads(form_data.get("payload", "{}"))
+    payload_raw = form_data.get("payload", "{}")
+    if not isinstance(payload_raw, str):
+        raise HTTPException(400, "payload must be a string field")
+    payload = json.loads(payload_raw)
     actions = payload.get("actions", [])
     if not actions:
         return Response(status_code=200)

@@ -128,7 +128,7 @@ async def list_agents(
         "WHERE project_id = :pid AND is_active = TRUE AND scope = 'project'"
     )
     pb_result = await session.execute(text(project_budget_sql), {"pid": project_id})
-    has_project_budget = (pb_result.mappings().first() or {}).get("cnt", 0) > 0
+    has_project_budget = (dict(pb_result.mappings().first() or {})).get("cnt", 0) > 0
 
     # ---- Build response ----
     agents = []

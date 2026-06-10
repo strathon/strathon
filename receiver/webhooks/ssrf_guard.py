@@ -88,7 +88,7 @@ def validate_webhook_url(url: str) -> None:
         raise SSRFError(f"DNS resolution failed for '{hostname}': {exc}")
 
     for family, _type, _proto, _canonname, sockaddr in addr_infos:
-        ip_str = sockaddr[0]
+        ip_str = str(sockaddr[0])
         _check_ip(ip_str, hostname)
 
 

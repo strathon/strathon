@@ -124,27 +124,27 @@ async def _gather_dataset(
     produces a usable export."""
     cap = _MAX_ROWS_PER_DATASET
     if name == "policies":
-        rows = await policies_repo.list_policies(session, project_id)
-        return [_row_to_dict(r) for r in rows]
+        policy_rows = await policies_repo.list_policies(session, project_id)
+        return [_row_to_dict(r) for r in policy_rows]
     if name == "traces":
-        page = await analytics_repo.list_traces(
+        trace_page = await analytics_repo.list_traces(
             session, project_id, limit=cap, start_after=start_nanos
         )
-        return [_row_to_dict(r) for r in page.get("data", page.get("traces", []))]
+        return [_row_to_dict(r) for r in trace_page.get("data", trace_page.get("traces", []))]
     if name == "spans":
-        page = await spans_repo.list_spans(
+        span_page = await spans_repo.list_spans(
             session, project_id, limit=cap, start_after=start_nanos
         )
-        data = page.get("data", []) if isinstance(page, dict) else getattr(page, "data", [])
+        data = span_page.get("data", []) if isinstance(span_page, dict) else getattr(span_page, "data", [])
         return [_row_to_dict(r) for r in data]
     if name == "approvals":
-        rows = await approvals_repo.list_approvals(session, project_id, limit=cap)
-        return [_row_to_dict(r) for r in rows]
+        approval_rows = await approvals_repo.list_approvals(session, project_id, limit=cap)
+        return [_row_to_dict(r) for r in approval_rows]
     if name == "budgets":
-        rows = await budgets_repo.list_budgets(
+        budget_rows = await budgets_repo.list_budgets(
             session, project_id, include_inactive=True, limit=500
         )
-        return [_row_to_dict(r) for r in rows]
+        return [_row_to_dict(r) for r in budget_rows]
     if name == "audit":
         result = await audit_repo.list_events(session, project_id, limit=cap)
         events = getattr(result, "events", None)
