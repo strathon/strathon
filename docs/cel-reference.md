@@ -20,7 +20,7 @@ Available attributes in every span:
 - attrs["gen_ai.workflow.name"] — workflow name (string)
 - now                           — current UTC timestamp
 
-Available actions: block, steer, throttle, log, alert, require_approval
+Available actions: block, steer, throttle, log, alert, require_approval, allow
 
 CEL syntax basics:
 - == for equality, != for not equal
@@ -51,6 +51,23 @@ Tell the AI: "Alert when any agent spends more than $1 on a single call"
 ```cel
 attrs["gen_ai.usage.cost"] > 1.0
 ```
+
+### Attribute namespaces (which prefix to use)
+
+Attribute names use one of two prefixes, and the prefix matters — a policy that
+references an attribute the engine doesn't emit silently never matches:
+
+- **`gen_ai.*`** — OpenTelemetry's standard GenAI attributes (tool name, agent
+  name, content, model, cost, workflow). Use these for the common fields; they
+  are the convention and what most examples use.
+- **`strathon.*`** — Strathon's own additions that aren't in the OTel standard,
+  most importantly **`strathon.tool.args`** (the tool's input arguments, as a
+  JSON string).
+
+The one easy mistake: the tool *name* is `gen_ai.tool.name`, but the tool
+*arguments* are `strathon.tool.args` — different prefixes. There is no
+`gen_ai.tool.args`. When in doubt, use the names exactly as listed in this
+reference rather than guessing the prefix.
 
 ---
 

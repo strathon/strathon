@@ -11,14 +11,23 @@ agent process  ->  mitmproxy + Strathon addon  ->  internet
                    (credential scan + policy)
 ```
 
-**When to use this.** The egress proxy is a network-layer catch-all. The
-in-process SDK enforces on tool calls it can see; the egress proxy catches
-outbound HTTP the SDK doesn't — raw network calls, uninstrumented tools, or
-calls made through libraries you don't control. Enable it as a defense-in-depth
-layer when you want to guarantee that no data leaves the process without passing
-a policy check. It's heavier to run than the SDK (a separate proxy process, and
-HTTPS interception needs the agent to trust mitmproxy's CA), so it's opt-in
-hardening, not a default.
+## How it fits
+
+The egress proxy is one of Strathon's three enforcement layers. It governs an
+agent's **raw outbound HTTP** — the network calls the in-process SDK can't see:
+uninstrumented tools, direct HTTP, calls through libraries you don't control.
+The SDK governs framework tool calls, the MCP gateway governs MCP-routed calls,
+and the egress proxy is the network-layer catch-all underneath both.
+
+Strathon's posture is that this layer is **recommended on** in any deployment you
+can run it. The one difference from the other two layers: it cannot enable
+itself. It needs a separate proxy process, HTTPS interception requires the agent
+to trust mitmproxy's CA, and traffic has to be routed to it. So the model is:
+set it up with one command, then verify it is actually in the traffic path (see
+"Verifying the proxy is in the path" below) rather than assume it. In the
+explicit-proxy mode shipped today it enforces on all traffic that honors the
+proxy variables; network-level transparent interception that an agent cannot opt
+out of is on the roadmap.
 
 It does two things on every request, and one on every response:
 
@@ -58,13 +67,30 @@ python my_agent.py
 (For HTTPS interception the agent must trust mitmproxy's CA certificate — see
 the mitmproxy docs for `mitmproxy-ca-cert.pem` setup.)
 
+## Verifying the proxy is in the path
+
+An egress proxy that is configured but not actually intercepting traffic is
+worse than no proxy: it implies protection that isn't there. Because the proxy
+relies on the agent honoring `HTTP_PROXY`/`HTTPS_PROXY`, a missing or unset
+variable silently routes traffic around it.
+
+So Strathon treats "in the path" as something to verify, not assume. On startup
+the addon logs the listen address and the policy-pull target, and you can
+confirm interception end to end by making a request that a policy is known to
+block and checking for the `403` with `X-Strathon-Block-Reason`. Treat the proxy
+as active only once you have seen it block or redact a known request; if you have
+not, assume the agent's traffic is bypassing it and check the proxy-variable and
+CA-trust setup. Do not rely on a configuration flag alone to tell you the proxy
+is enforcing.
+
 ## How policy evaluation works (pull model)
 
 The addon **pulls** the project's enabled policies from `GET /v1/policies`
-(the same endpoint and pull-and-cache model the SDK uses) and evaluates CEL
-**locally** on each request. There is no per-request round-trip to the
-receiver, so request latency does not depend on receiver availability and a
-slow receiver cannot stall agent traffic.
+(the same endpoint the SDK uses) and evaluates CEL **locally** on each request.
+There is no per-request round-trip to the receiver, so request latency does not
+depend on receiver availability and a slow receiver cannot stall agent traffic.
+The policy set is pulled when the proxy starts (and whenever its mitmproxy
+options change); to pick up policy edits, restart the proxy.
 
 The policy match expression sees the request as:
 

@@ -10,11 +10,23 @@ Agent  ->  Strathon MCP Gateway  ->  upstream MCP server
            (policy evaluation)
 ```
 
-**When to use this.** Enable the MCP gateway when your agents reach their tools
-through an MCP server rather than (or in addition to) calling them in-process.
-The in-process SDK enforces on tools the agent calls directly; the gateway
-enforces on tools the agent reaches over MCP. Same policies, different boundary.
-If your agents don't use MCP, you don't need this.
+## How it fits
+
+The MCP gateway is one of Strathon's three enforcement layers. It governs the
+tool calls an agent makes **over MCP**, the same way the in-process SDK governs
+tools the agent calls directly and the egress proxy governs raw outbound HTTP.
+Same policies, three boundaries.
+
+It enforces by default once your agents route through it — a project's policies
+apply with no extra opt-in, and the default posture admits any call no policy
+blocks (it enforces the rules you write). To harden a project to default-deny —
+block any `tools/call` not explicitly allowed — set its
+`intervention_default_action` to `block`; see
+[intervention.md](intervention.md) on allow-list mode.
+
+The gateway is the relevant layer whenever an agent reaches tools through an MCP
+server. If none of your agents use MCP, this layer simply has no traffic to act
+on — the other two layers still enforce.
 
 Every MCP request is evaluated against the **same enabled policies** the rest
 of Strathon uses — the gateway calls the identical policy primitive the trace
@@ -98,8 +110,10 @@ bypass-by-denial-of-service: an attacker who could disrupt evaluation would
 disable enforcement.
 
 If you would rather prioritize availability over strict enforcement, set
-`"fail_open": true` in the request body. Responses produced under a degraded
-(failed-evaluation) allow are marked internally so they can be audited.
+`"fail_open": true` in the request body. When a degraded (failed-evaluation)
+allow occurs, the gateway logs it server-side (the evaluation error is logged
+with a stack trace); note that this is a log record, not an entry in the
+tamper-evident audit log.
 
 ## Credential scanning on responses
 

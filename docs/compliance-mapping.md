@@ -141,7 +141,7 @@ for the risk level of the AI system.
 
 | Subcategory | Strathon implementation |
 |---|---|
-| MG-1.1: Risk treatment plans | Policies with 5 action types (block/steer/throttle/log/alert) map directly to risk treatment options: avoid (block), mitigate (steer/throttle), accept (log), escalate (alert). |
+| MG-1.1: Risk treatment plans | Policies with seven action types (block/steer/throttle/log/alert/require_approval/allow) map directly to risk treatment options: avoid (block), mitigate (steer/throttle), accept (log/allow), escalate (require_approval/alert). |
 | MG-2.2: Mechanisms to halt AI systems | Kill-switch halts at project and agent scope. Budget monitor auto-halts on threshold breach. Both create audit trail entries. |
 | MG-2.6: Post-deployment monitoring | Prometheus metrics, Grafana dashboard, webhook notifications, budget monitoring, and the agent topology map provide continuous post-deployment visibility. |
 | MG-3.1: Post-deployment risk management | Policy export/import enables staging-to-production promotion with version-controlled rule sets. Policy versioning tracks every change. |

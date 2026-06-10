@@ -20,6 +20,7 @@ Run over all tracked files:  python scripts/check_secrets.py --all
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -38,14 +39,40 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
      re.compile(r"""(?i)(?:api[_-]?key|secret|token|passwd|password)\s*[:=]\s*['"][A-Za-z0-9/+_-]{24,}['"]""")),
 ]
 
-FORBIDDEN_TERMS: list[tuple[str, re.Pattern[str]]] = [
-    ("sibling project name", re.compile(r"\bStrathos\b")),
-    ("investor/accelerator (Emergent Ventures)", re.compile(r"\bEmergent\s+Ventures\b", re.I)),
-    ("accelerator (YC / Y Combinator)", re.compile(r"\bY\s*Combinator\b|\bYC\s*[WS]\d{2}\b")),
-    ("internal roadmap reference", re.compile(r"\broadmap\.md\b")),
-    ("internal commit-stage tag",
-     re.compile(r"\b(?:commit\s+[CHP]\d|stage\s+\d|[CHP]\d-[A-Za-z])")),
-]
+def _load_forbidden_terms() -> list[tuple[str, re.Pattern[str]]]:
+    """Load forbidden-term patterns from the gitignored local file.
+
+    The terms themselves (internal project names, funding references, internal
+    tagging schemes) must never live in the public repository — putting them in
+    this scanner's own source would make the leak-prevention tool the leak. So
+    they are kept in scripts/forbidden-terms.local (gitignored; one extended
+    regex per line, '#' comments and blanks ignored), the same file the shell
+    pre-commit hook reads. If the file is absent the forbidden-term scan is
+    skipped with a notice; the secret/key scans still run.
+    """
+    local = os.path.join(os.path.dirname(__file__), "forbidden-terms.local")
+    if not os.path.exists(local):
+        print(
+            f"Notice: {local} not found; skipping forbidden-term scan "
+            "(secret/key scans still run). See forbidden-terms.local.example.",
+            file=sys.stderr,
+        )
+        return []
+    terms: list[tuple[str, re.Pattern[str]]] = []
+    with open(local, encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                terms.append(("internal reference", re.compile(line)))
+            except re.error:
+                print(f"Warning: bad regex in forbidden-terms.local: {line!r}",
+                      file=sys.stderr)
+    return terms
+
+
+FORBIDDEN_TERMS: list[tuple[str, re.Pattern[str]]] = _load_forbidden_terms()
 
 ALLOWLIST_SUBSTRINGS = (
     "stra_dev_local_default_project_do_not_use_in_production",

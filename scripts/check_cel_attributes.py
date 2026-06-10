@@ -63,8 +63,8 @@ _EMIT_LITERAL = re.compile(
     r'"((?:gen_ai|strathon|crewai|autogen|langgraph|langchain|'
     r'pydantic_ai|google_adk|openai_agents|framework)\.[a-z0-9_.]+)"'
 )
-# An attrs["..."] reference in docs or templates.
-_USE_REF = re.compile(r'attrs\[\s*"([a-z0-9_.]+)"\s*\]')
+# An attrs["..."] or attrs['...'] reference in docs or templates.
+_USE_REF = re.compile(r"""attrs\[\s*['"]([a-z0-9_.]+)['"]\s*\]""")
 
 
 def _iter_py(root: Path):
@@ -72,6 +72,14 @@ def _iter_py(root: Path):
         # Tests emit synthetic attrs and assert on absent keys; they are not the
         # emitted contract, so exclude them from the emitted set.
         if "test" in p.name or "/tests/" in str(p):
+            continue
+        # policy_templates.py is a USE source (its CEL strings reference
+        # attributes), not an emitter. If it were scanned for emitted literals,
+        # a template referencing a non-existent attribute would self-certify —
+        # the literal would land in BOTH the emitted and used sets and the
+        # drift check would pass on a policy that silently never matches. The
+        # emitted contract comes only from the instrumentation/enforcement code.
+        if p.name == "policy_templates.py":
             continue
         yield p
 

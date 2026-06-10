@@ -7,6 +7,7 @@ it takes you from zero to a running firewall blocking a real agent action.
 |-----|--------|
 | [getting-started.md](getting-started.md) | Install, connect an agent, write your first policy, see it block a call |
 | [concepts.md](concepts.md) | The mental model: spans, traces, policies, the seven actions, inline enforcement, audit log |
+| [scope.md](scope.md) | What the three enforcement layers do and don't do, and what's roadmap vs shipped |
 | [intervention.md](intervention.md) | CEL policies, the seven actions (block/steer/throttle/log/alert/require_approval/allow), allow-list mode, time-based rules, policy versioning, halts, budgets, webhooks |
 | [analytics.md](analytics.md) | Trace list, trace tree, span aggregation |
 | [spans.md](spans.md) | Span search, attribute filtering, partitioned storage |

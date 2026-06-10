@@ -25,7 +25,7 @@
 
 <br/>
 
-Strathon is an **open-source firewall for AI agents**. Write a [CEL](https://cel.dev) policy, and Strathon blocks the tool call **before** it executes — no gateway proxy, no latency tax, enforcement happens inside your agent process. Self-host in minutes with Docker Compose. 1,000+ tests, 10 framework integrations, EU AI Act compliance.
+Strathon is an **open-source firewall for AI agents**. Write a [CEL](https://cel.dev) policy, and Strathon evaluates every tool call against it and blocks the dangerous ones **before** they execute. Enforcement runs at three independent layers — in-process via the SDK (no proxy hop, no latency tax), at the MCP gateway in front of your MCP servers, and at the network egress proxy for raw outbound HTTP — so a call is governed however the agent reaches the outside world. Self-host in minutes with Docker Compose. 1,000+ tests, 10 framework integrations, EU AI Act compliance.
 
 Most agent tooling reports what went wrong after the fact. Strathon stops it before the call runs.
 
@@ -267,21 +267,26 @@ Strathon's threat model is anchored on the [OWASP Top 10 for Agentic Application
 | Threat | Strathon Coverage |
 |--------|-------------------|
 | **ASI01** Agent Goal Hijack | CEL policies on prompt content and input patterns, block/alert on detected hijack attempts |
-| **ASI02** Tool Misuse and Exploitation | Pre-execution policy enforcement on tool names and arguments (block/allow-list), fully qualified tool-name pinning, and approval workflows for sensitive tools |
+| **ASI02** Tool Misuse and Exploitation | Pre-execution policy enforcement on tool names and arguments (block/allow-list), exact tool-name matching with default-deny allow-lists, and approval workflows for sensitive tools |
 | **ASI03** Identity and Privilege Abuse | Scoped API keys, RBAC (4 roles), MFA, per-key rate limits |
 | **ASI04** Agentic Supply Chain Vulnerabilities | [MCP gateway](https://getstrathon.com/docs/mcp) evaluates third-party tool/MCP-server calls against policies; [egress proxy](https://getstrathon.com/docs/egress) with domain allowlisting; credential scanning on tool responses |
 | **ASI05** Unexpected Code Execution | Block and allow-list policies on shell, code, and SQL tools; approval workflows required before code-executing tools run |
 | **ASI06** Memory and Context Poisoning | Behavioral drift detection (Vigil, EWMA/CUSUM) surfaces poisoning effects; halt propagation; content redaction on ingested data |
 | **ASI07** Insecure Inter-Agent Communication | MCP gateway evaluates inter-agent and tool calls against policies, fails closed when evaluation cannot complete |
 | **ASI08** Cascading Failures | Cost and iteration budgets with auto-halt, circuit breakers, kill switches, and halt propagation to contain failures before they fan out |
-| **ASI09** Human-Agent Trust Exploitation | Human approval workflows (multi-party N-of-M, auto-escalation), tamper-evident audit log, trace search, and SARIF export for accountability |
+| **ASI09** Human-Agent Trust Exploitation | Human approval workflows (multi-party N-of-M, automatic expiry of undecided requests, Slack/Discord approval notifications), tamper-evident audit log, trace search, and SARIF export for accountability |
 | **ASI10** Rogue Agents | Behavioral drift detection (Vigil), heartbeat monitoring, SDK integrity check, kill switches |
 
 ## Scope and Limitations
 
 Strathon enforces policy at the **tool-call boundary**: it inspects each tool call and its arguments before execution and can block, steer, throttle, require approval, log, or alert. This is the layer where an agent's decisions become real-world actions, and it is the right place to stop an action regardless of whether the model was mistaken, manipulated, or compromised.
 
-It is one layer of agent security, not the whole of it. Some attack classes are not solvable at the tool-call boundary alone, and we would rather say so than imply otherwise:
+It is one layer of agent security, not the whole of it. Two honesty notes worth stating up front, with the full picture in [docs/scope.md](docs/scope.md):
+
+- **Credentials: detection today, injection later.** Strathon detects and redacts secrets (50+ patterns) in tool arguments and request/response bodies — reactive protection against a leak in progress. Gateway-side credential *injection* (the agent never holds the secret) is stronger and is on the roadmap, not shipped.
+- **Egress: explicit today, transparent later.** The egress proxy runs in explicit (`HTTP_PROXY`) mode — defense-in-depth for a cooperating agent. Transparent, network-level interception that an agent cannot opt out of is on the roadmap.
+
+Some attack classes are not solvable at the tool-call boundary alone, and we would rather say so than imply otherwise:
 
 - **Data-flow exfiltration.** When sensitive data read earlier is smuggled inside an otherwise-valid argument (for example, encoded into a URL on an allowed domain), the individual call looks legitimate. Catching this reliably requires data-flow provenance (taint tracking), which is on our roadmap.
 - **Poisoned tool output and context attacks.** Instructions injected into a tool's response, or into the tool-list during a protocol handshake, can influence an agent without producing a malicious call of their own. These need response sanitization and input filtering, not only call-time enforcement.

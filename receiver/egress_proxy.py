@@ -44,8 +44,10 @@ try:
             )
             self.api_key = os.environ.get("STRATHON_API_KEY", "")
             self._credential_patterns = None
-            # Pulled policy list (same model the SDK uses: fetch from
-            # /v1/policies, evaluate CEL locally, refresh periodically).
+            # Pulled policy list (same source the SDK uses: fetch from
+            # /v1/policies and evaluate CEL locally). Pulled once at startup and
+            # again on any mitmproxy option change; static for the process
+            # lifetime otherwise (no periodic refresh).
             self._policies: list[dict[str, Any]] = []
             self._policies_loaded = False
             # Project-level allow-list toggle from /v1/policies; "allow"
@@ -69,6 +71,21 @@ try:
                 self.api_key = mitmctx.options.strathon_key
             # Refresh the policy list whenever config changes (and on first run).
             self._refresh_policies()
+            # Log where we pull policy from and how many rules loaded, so an
+            # operator can confirm the addon is live and configured. An egress
+            # proxy that is loaded but pulling zero policies (e.g. wrong URL or
+            # key) should be visible, not silent.
+            if self.api_key and self.strathon_url:
+                logger.info(
+                    "egress: active, pulling policies from %s (%d loaded)",
+                    self.strathon_url,
+                    len(self._policies or []),
+                )
+            else:
+                logger.warning(
+                    "egress: addon loaded but strathon_url/strathon_key not set "
+                    "— no policies will be enforced until both are provided"
+                )
 
         def _refresh_policies(self) -> None:
             """Pull the project's policies from /v1/policies (the real
@@ -176,6 +193,15 @@ try:
             action, or allow if none match.
             """
             if not self._policies:
+                # No policies loaded. Honor the project's allow-list posture
+                # exactly as the no-match branch below does: in default-deny
+                # (allow-list) mode an ungoverned request falls closed, matching
+                # the SDK enforcer and MCP gateway. Returning allow here
+                # unconditionally was a silent-allow gap — the egress surface
+                # admitting traffic that the other two surfaces deny for the
+                # same project state.
+                if getattr(self, "_default_action", "allow") == "block":
+                    return {"action": "block", "policy_name": "_default_deny"}
                 return {"action": "allow"}
             try:
                 from policies import evaluate_for_span
