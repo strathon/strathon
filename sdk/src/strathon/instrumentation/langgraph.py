@@ -522,7 +522,7 @@ class StrathonLangGraphHandler:
                 # falls closed: deny the call with a loud, observable block
                 # rather than silently allowing it. Real interactive approval
                 # on LangGraph requires a surface that wraps the tool
-                # invocation directly (enforce_steer / the @enforcer decorator /
+                # invocation directly (enforce_steer /
                 # tool-invoke patching), which can await.
                 attrs["strathon.policy.approval_required"] = True
                 attrs["strathon.policy.id"] = decision.policy_id or ""
@@ -535,16 +535,16 @@ class StrathonLangGraphHandler:
                     run_id,
                     error=decision.message
                     or "approval required; not enforceable on the LangGraph "
-                    "callback path (use enforce_steer or the @enforcer "
-                    "decorator for interactive approval)",
+                    "callback path (use enforce_steer or a framework whose "
+                    "pre-execution hook is async, for interactive approval)",
                 )
                 from strathon.policy import StrathonPolicyBlocked
                 raise StrathonPolicyBlocked(
                     decision.message
                     or f"Tool '{tool_name}' requires approval, which cannot be "
                     "served on the LangGraph auto-instrument path; blocked. "
-                    "Use enforce_steer or the @enforcer decorator for "
-                    "interactive approval.",
+                    "Use enforce_steer (or a framework with an async "
+                    "pre-execution hook) for interactive approval.",
                     policy_id=decision.policy_id,
                     policy_name=decision.policy_name,
                 )

@@ -285,7 +285,7 @@ def _build_firewall_class():
                 # matched require_approval falls closed here: deny with a loud,
                 # observable block rather than silently allowing. Interactive
                 # approval on pydantic-ai needs a surface that wraps the tool
-                # invocation directly (enforce_steer / the @enforcer decorator),
+                # invocation directly (enforce_steer),
                 # which can await.
                 from strathon.policy.steer import _emit_intervention_span
                 _emit_intervention_span(
@@ -299,7 +299,8 @@ def _build_firewall_class():
                     decision.message
                     or f"Tool '{tool_name}' requires approval, which cannot be "
                     "served on the pydantic-ai auto-instrument path; blocked. "
-                    "Use enforce_steer or the @enforcer decorator for "
+                    "Use enforce_steer (or a framework with an async "
+                    "pre-execution hook) for "
                     "interactive approval."
                 )
                 raise SkipToolExecution(message)
