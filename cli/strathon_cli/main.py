@@ -96,7 +96,7 @@ def policies_list(as_json: bool):
 @click.option("--action", default=None,
               type=click.Choice(
                   ["block", "steer", "throttle",
-                   "log", "alert", "require_approval"]),
+                   "log", "alert", "require_approval", "allow"]),
               help="Enforcement action")
 @click.option("--shadow", is_flag=True, help="Create as shadow policy")
 @click.option("--priority", default=0, help="Priority (higher = first)")
