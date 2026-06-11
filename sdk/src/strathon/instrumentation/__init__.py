@@ -70,8 +70,14 @@ def auto_instrument(client, frameworks: Optional[List[str]] = None) -> List[str]
                 f"for {fw!r}."
             )
         if fw not in SUPPORTED_FRAMEWORKS:
-            logger.warning("Unknown framework %r; skipping", fw)
-            continue
+            # A typo'd framework name means the user requested enforcement
+            # that will never attach. Silently skipping it is the same
+            # false-confidence failure as a silent allow, so fail loudly at
+            # instrument time (this is also what the docstring promises).
+            raise ValueError(
+                f"Unknown framework {fw!r}. "
+                f"Supported frameworks: {sorted(SUPPORTED_FRAMEWORKS)}."
+            )
 
         module_name = f"strathon.instrumentation.{fw}"
         try:

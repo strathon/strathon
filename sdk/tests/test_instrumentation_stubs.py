@@ -101,11 +101,13 @@ def test_auto_instrument_defaults_safe():
     assert isinstance(result, list)
 
 
-def test_auto_instrument_unknown_framework_skipped():
-    """A completely unknown framework name is logged and skipped."""
+def test_auto_instrument_unknown_framework_raises():
+    """A completely unknown framework name raises ValueError at instrument
+    time. Silently skipping a typo'd name would leave the user believing
+    calls are enforced when nothing attached."""
     client = MagicMock()
-    result = auto_instrument(client, frameworks=["nonexistent_framework"])
-    assert result == []
+    with pytest.raises(ValueError, match="Unknown framework"):
+        auto_instrument(client, frameworks=["nonexistent_framework"])
 
 
 def test_auto_instrument_explicit_openai():
