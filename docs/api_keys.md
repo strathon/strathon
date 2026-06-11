@@ -9,7 +9,7 @@ and resolves every request to that project.
 Strathon API keys look like:
 
 ```
-stra_aB3xC9zD2eF1gH4iJ6kL8mN0oP2qR4sT6uV8wX0yZ
+stra_<your-key-shown-once-on-creation>
 ```
 
 The `stra_` prefix identifies the scheme. The random part contains 256 bits of
@@ -33,8 +33,13 @@ Rotate immediately when moving to a shared or production deployment (see
 
 ## Creating a real API key
 
+Key management is scope-gated (`api_keys:read` / `api_keys:write`). The
+seeded dev key carries the wildcard scope, so on a fresh deployment you use
+it to mint your first real key, then revoke it:
+
 ```bash
 curl -X POST http://localhost:4318/v1/api_keys \
+  -H "Authorization: Bearer $STRATHON_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"name": "production deploy 2026-05"}'
 ```
@@ -48,7 +53,7 @@ retrieved later (only the SHA-256 hash is stored).
   "project_id": "00000000-0000-0000-0000-000000000001",
   "name": "production deploy 2026-05",
   "key_prefix": "stra_xxxxxxx",
-  "key": "stra_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "key": "stra_xxxx...xxxx",
   "created_at": "2026-05-14T11:57:15.153470+00:00",
   "last_used_at": null,
   "revoked_at": null
@@ -69,7 +74,8 @@ client = Client(
 ## Listing keys
 
 ```bash
-curl http://localhost:4318/v1/api_keys
+curl http://localhost:4318/v1/api_keys \
+  -H "Authorization: Bearer $STRATHON_API_KEY"
 ```
 
 Returns key metadata (`id`, `name`, `key_prefix`, timestamps) but never the
@@ -78,7 +84,8 @@ raw key. Use `?include_revoked=true` to also see revoked keys.
 ## Revoking a key
 
 ```bash
-curl -X DELETE http://localhost:4318/v1/api_keys/<key-id>
+curl -X DELETE http://localhost:4318/v1/api_keys/<key-id> \
+  -H "Authorization: Bearer $STRATHON_API_KEY"
 ```
 
 Soft-revokes the key by setting `revoked_at`. Subsequent requests using the
@@ -93,24 +100,26 @@ Before any production deployment, do this:
 3. Revoke the seeded dev key:
 
    ```bash
-   curl -X DELETE http://localhost:4318/v1/api_keys/00000000-0000-0000-0000-000000000010
+   curl -X DELETE http://localhost:4318/v1/api_keys/00000000-0000-0000-0000-000000000010 \
+     -H "Authorization: Bearer $STRATHON_NEW_API_KEY"
    ```
+
+   (Authenticate this call with the *new* key — once the dev key is revoked,
+   it can no longer authorize anything, including its own revocation if you
+   get the order wrong. Revoking with the new key avoids the chicken-and-egg.)
 
 After step 3, the well-known dev key no longer works. Anyone who knew it can
 no longer act as your default project.
 
-## v1 limitations
+## Scopes
 
-The `/v1/api_keys` endpoints are themselves UNAUTHENTICATED. This is
-acceptable for local development but unsafe for production. Until v2 adds
-proper admin authentication, you MUST:
-
-- Run the receiver on a private network (Tailscale, VPN, internal VPC), OR
-- Put a reverse proxy (nginx, Caddy, Cloudflare Access) in front of it
-  that restricts `/v1/api_keys/*` to admin sessions
-
-Public-internet receivers with no proxy in front of them will leak project
-membership and allow anyone to mint new keys.
+Every key carries a list of capability scopes; each endpoint requires a
+specific scope (`/v1/api_keys` requires `api_keys:read` for GET and
+`api_keys:write` for POST/DELETE). The seeded dev key has the wildcard `*`;
+production keys should be minted with only the scopes they need. The one
+operational consequence of the well-known dev key: until you rotate it,
+anyone with HTTP access to your receiver can act as the default project —
+which is why rotation is step one of any shared or production deployment.
 
 ## What happens on auth failure
 

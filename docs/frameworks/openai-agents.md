@@ -47,8 +47,11 @@ attrs["gen_ai.agent.name"] == "research_agent"
 
 ## Notes
 
-- Uses the official `TracingProcessor` protocol. No monkey-patching.
-- Compatible with OpenAI Agents SDK 0.1+.
+- Tracing uses the official `TracingProcessor` protocol. Enforcement wraps
+  `Runner.run` / `run_sync` / `run_streamed` to inject Strathon `RunHooks` —
+  a wrap of the framework's documented entry point, since the SDK exposes no
+  pre-execution policy hook of its own.
+- Requires `openai-agents>=0.6.0` (installed by the `openai-agents` extra).
 - Guardrail results are captured as span events.
 
 ## Learn More

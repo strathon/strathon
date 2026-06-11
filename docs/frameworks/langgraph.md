@@ -61,8 +61,8 @@ attrs["gen_ai.tool.name"] == "execute_sql"
 > the tool call is blocked (raising `StrathonPolicyBlocked`) and the
 > intervention is recorded, rather than pausing for an interactive decision.
 > For interactive approval that pauses until an operator responds, use a
-> tool-invoke surface that supports it: the `@enforcer` decorator,
-> `enforce_steer`, or a framework whose pre-execution hook is async (for
+> tool-invoke surface that supports it: `enforce_steer`,
+> or a framework whose pre-execution hook is async (for
 > example the [OpenAI Agents SDK](https://getstrathon.com/docs/frameworks/openai-agents),
 > [AutoGen](https://getstrathon.com/docs/frameworks/autogen),
 > [Google ADK](https://getstrathon.com/docs/frameworks/google-adk),
@@ -83,7 +83,7 @@ attrs["gen_ai.tool.name"] == "web_search"
 > cannot substitute a tool's return value, `steer` on this surface is
 > observe-only — the match is recorded (a `strathon.policy.steered` span)
 > but the original tool still runs. To actually replace a tool call with a
-> safer alternative, use a tool-invoke surface: the `@enforcer` decorator,
+> safer alternative, use a tool-invoke surface:
 > `enforce_steer`, or a framework whose hook controls the return value (for
 > example CrewAI or the async agent SDKs). For hard prevention on LangGraph,
 > use `block` instead.
@@ -94,7 +94,7 @@ attrs["gen_ai.tool.name"] == "web_search"
   instrument `langgraph`, LangChain chains also get traced.
 - The handler attaches via `config={"callbacks": [strathon_handler]}`.
   `instrument()` patches this automatically.
-- Works with LangGraph 0.2+ and LangChain 0.3+.
+- Requires `langchain-core>=0.3.0` (installed by the `langgraph` extra); works with current LangGraph and LangChain 0.3+ releases.
 
 ## Learn More
 

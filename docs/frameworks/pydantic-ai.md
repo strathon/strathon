@@ -4,11 +4,13 @@ Strathon integrates with Pydantic AI via its `AbstractCapability`
 plugin system. This is a first-class integration — no monkey-patching.
 
 > **Enforcement scope:** Pydantic AI is instrumented through a synchronous
-> pre-execution hook. It enforces `block` and `throttle` (which raise) and
-> records `steer`; `require_approval` **fails closed** (the call is blocked
-> and recorded) because a sync hook cannot pause for a human decision. For
-> interactive approval or true steer substitution, use the `@enforcer`
-> decorator, `enforce_steer`, or an async tool-executing surface. See the
+> pre-execution hook that can short-circuit the tool call. It enforces
+> `block` and `throttle` (which raise) and `steer` (the hook returns the
+> replacement in place of the real result — the tool body never runs).
+> `require_approval` **fails closed** (the call is blocked and recorded)
+> because a sync hook cannot pause for a human decision. For interactive
+> approval, use `enforce_steer` (tool-invoke wrapping) or a framework whose
+> pre-execution hook is async. See the
 > [approval matrix](https://getstrathon.com/docs/intervention#approval-support).
 
 ## Installation
@@ -58,7 +60,7 @@ attrs["gen_ai.tool.name"] == "fetch_record"
 
 - Uses `AbstractCapability` — Pydantic AI's official plugin interface.
 - Zero monkey-patching. The capability is registered at instrument time.
-- Works with Pydantic AI 0.1+.
+- Requires `pydantic-ai-slim>=1.80.0` (installed by the `pydantic-ai` extra).
 - 36 tests cover the integration.
 
 ## Learn More

@@ -9,12 +9,30 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Shadow policies no longer enforce.** The SDK dropped the `shadow` field
+  when parsing `/v1/policies`, so a shadow `block` policy blocked live
+  traffic in-process; the MCP gateway and egress proxy had the same gap.
+  All three enforcement surfaces now skip shadow policies; server-side
+  recording of shadow decisions is unchanged.
+- `instrument()` now raises `ValueError` on an unknown framework name
+  (as its docstring already stated) instead of logging a warning and
+  silently skipping — a typo'd name meant requested enforcement that
+  never attached.
+- Fail-closed approval messages on the LangGraph and Pydantic AI surfaces
+  referenced a decorator that does not exist; they now point at
+  `enforce_steer`.
+- The `claude-agent` and `all` extras now install `claude-agent-sdk`,
+  the package the Claude Agent SDK integration instruments.
+
+
 ## [1.1.0] - 2026-06-06
 
 ### Added
 
 **Policy engine**
-- CEL policy engine with 6 actions (block, steer, throttle, log, alert, require_approval)
+- CEL policy engine with seven actions (block, steer, throttle, log, alert, require_approval, allow)
 - Allow-list mode, time-based rules, policy versioning, shadow mode
 - OWASP-mapped policy templates
 

@@ -1,8 +1,8 @@
 # Self-hosting Strathon
 
-Strathon ships as a docker-compose stack: Postgres plus the receiver in
-two containers, sharing one network. From a fresh clone to a working
-receiver is typically under 60 seconds (most of which is the first
+Strathon ships as a docker-compose stack: Postgres, the receiver, and the
+dashboard in three containers sharing one network. From a fresh clone to a
+working receiver is typically under 60 seconds (most of which is the first
 Postgres image pull).
 
 ## Prerequisites
@@ -10,7 +10,7 @@ Postgres image pull).
 - Docker 24+ with the Compose plugin (`docker compose`, not the deprecated
   `docker-compose`)
 - 200 MB of disk for the Postgres volume
-- Ports 4318 (receiver) and 5432 (Postgres) free
+- Ports 4318 (receiver), 3000 (dashboard), and 5432 (Postgres) free
 
 ## Standing it up
 
@@ -69,10 +69,13 @@ A healthy `/ready` response looks like:
   "status": "ready",
   "checks": {
     "db": {"status": "ok", "latency_ms": 1.21},
-    "migrations": {"status": "ok", "current": "007", "head": "007"},
+    "migrations": {"status": "ok", "current": "<head>", "head": "<head>"},
     "retention_task": {"status": "ok"},
+    "retention_cleanup_task": {"status": "ok"},
     "webhook_sweeper_task": {"status": "ok"},
-    "budget_monitor_task": {"status": "ok"}
+    "budget_monitor_task": {"status": "ok"},
+    "audit_partition_task": {"status": "ok"},
+    "spans_partition_task": {"status": "ok"}
   }
 }
 ```
@@ -250,9 +253,10 @@ the Kubernetes liveness/readiness convention:
   breakdown when every dependency is healthy, `503` with the same
   shape when any check fails. Checks: database connectivity, schema
   migration version (compared to the code's expected head), and the
-  three background tasks (retention sweep, webhook sweeper, budget
-  monitor). Use this when you want "stop routing traffic to this
-  replica until it recovers."
+  background tasks (retention sweep and cleanup, webhook sweeper,
+  budget monitor, audit and spans partition maintenance). Use this
+  when you want "stop routing traffic to this replica until it
+  recovers."
 
 Keeping liveness lightweight matters: a deep check on the liveness
 endpoint would cause Kubernetes to kill an otherwise-healthy pod the

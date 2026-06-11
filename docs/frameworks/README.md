@@ -6,8 +6,8 @@ changes to your agent logic. All 10 integrations use first-class extension
 points where available. No monkey-patching.
 
 ```bash
-pip install strathon[langgraph]   # one framework
-pip install strathon[all]         # all 10
+pip install "strathon[langgraph]"   # one framework
+pip install "strathon[all]"         # all 10
 ```
 
 Then in your code:

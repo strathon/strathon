@@ -52,7 +52,7 @@ attrs["gen_ai.tool.name"] == "bigquery_query"
 
 - Uses `BasePlugin` — Google ADK's official plugin interface.
 - Zero monkey-patching. The plugin is registered at instrument time.
-- Works with Google ADK 0.1+.
+- Requires `google-adk>=1.7.0` (installed by the `google-adk` extra).
 - 25 tests cover the integration.
 
 ## Learn More

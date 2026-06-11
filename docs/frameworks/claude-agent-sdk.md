@@ -48,7 +48,7 @@ attrs["gen_ai.tool.name"] in ["deploy", "rollback", "scale"]
 
 - Wraps `query()` for tracing and policy enforcement.
 - Captures extended thinking content as span attributes.
-- Works with Claude Agent SDK 0.1+.
+- Requires `claude-agent-sdk>=0.1.0` (installed by the `claude-agent` extra).
 
 ## Learn More
 

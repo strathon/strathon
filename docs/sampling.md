@@ -15,7 +15,7 @@ STRATHON_SAMPLING_RATE   (float in [0.0, 1.0], default 1.0)
 
 | Value | Behavior                                                          |
 |-------|-------------------------------------------------------------------|
-| `1.0` | Keep every span. Default. Backward compatible with v0 deployments.|
+| `1.0` | Keep every span. Default.                                         |
 | `0.5` | Keep ~50% of routine traces (deterministic per trace_id).         |
 | `0.1` | Keep ~10% of routine traces. Common production setting.           |
 | `0.0` | Drop all routine traces. Only the "always keep" rules apply.      |
@@ -81,7 +81,7 @@ waits for trace completion, then evaluates policies against the assembled
 trace. That works but requires memory, completion detection, and edge cases
 under load.
 
-Strathon doesn't need that complexity in v1: each span already carries
+Strathon doesn't need that complexity: each span already carries
 enough metadata in its attributes (policy annotations, status, token
 counts) for a standalone keep/drop decision. Trace-level coherence is
 preserved by hashing the `trace_id` rather than by buffering. Memory

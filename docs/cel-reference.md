@@ -141,11 +141,13 @@ attrs["gen_ai.content"].matches("(?i)(ignore previous|disregard|forget your|you 
 ```
 Action: **block**
 
-### Redact PII outbound
+### Block PII outbound
 ```cel
 attrs["gen_ai.content"].matches("\\b\\d{3}-\\d{2}-\\d{4}\\b") || attrs["gen_ai.content"].matches("\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b")
 ```
-Action: **redact**
+Action: **block** — stops the call when the content carries an SSN or email
+address. (Redaction itself is not a policy action: Strathon redacts PII from
+stored spans automatically at ingest — see [redaction](https://getstrathon.com/docs/redaction).)
 
 ### Tool allowlist (production)
 ```cel
@@ -167,7 +169,7 @@ Action: **throttle**
 
 ### Block secret leakage
 ```cel
-attrs["gen_ai.content"].matches("(?i)(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|-----BEGIN.*PRIVATE KEY-----)") 
+attrs["gen_ai.content"].matches("(?i)(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|-----BEGIN.*PRIVATE KEY-----)")
 ```
 Action: **block**
 

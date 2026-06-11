@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/strathon/strathon/main/assets/banner.png" alt="Strathon" width="600" />
 
   <p><strong>Open-source AI agent firewall</strong></p>
-  <p>CEL policies, runtime enforcement at the tool-call boundary, and EU AI Act compliance.</p>
+  <p>Blocks dangerous agent tool calls before they execute. In-process CEL enforcement at the tool-call boundary.</p>
 
   <div>
     <a href="https://getstrathon.com"><strong>Website</strong></a> ·
@@ -25,11 +25,17 @@
 
 <br/>
 
-Strathon is an **open-source firewall for AI agents**. Write a [CEL](https://cel.dev) policy, and Strathon evaluates every tool call against it and blocks the dangerous ones **before** they execute. Enforcement runs at three independent layers — in-process via the SDK (no proxy hop, no latency tax), at the MCP gateway in front of your MCP servers, and at the network egress proxy for raw outbound HTTP — so a call is governed however the agent reaches the outside world. Self-host in minutes with Docker Compose. 1,000+ tests, 10 framework integrations, EU AI Act compliance.
+Strathon is an **open-source firewall for AI agents**: it evaluates every tool call against a [CEL](https://cel.dev) policy and blocks the dangerous ones **before** they execute.
 
-Most agent tooling reports what went wrong after the fact. Strathon stops it before the call runs.
+An agent that reads untrusted content will eventually be told, by that content, to misuse its tools. The moment that matters is the tool call: the email actually sent, the shell command actually run, the request actually made. Most agent tooling records what went wrong after the fact. Strathon enforces at the tool-call boundary, in-process, while the call can still be stopped.
+
+Enforcement runs at three layers, so a call is governed however the agent reaches the outside world. The **SDK** evaluates policies inside your agent process (no proxy hop, no latency tax) and works out of the box across 10 frameworks. The **MCP gateway** ships inside the receiver and screens any MCP client you point at it. The **egress proxy** is a separate process you deploy to govern raw outbound HTTP that no SDK can see. One invariant holds everywhere: a surface that matches a policy it cannot fully execute fails closed, blocked and recorded, never silently allowed.
+
+Seven enforcement actions. 10 framework integrations. 1,400+ tests. One PostgreSQL, self-hosted in minutes.
 
 ## Quickstart
+
+From zero to watching Strathon block a real tool call.
 
 ### 1. Start the server
 
@@ -38,65 +44,54 @@ git clone https://github.com/strathon/strathon.git
 cd strathon && docker compose up -d
 ```
 
-Dashboard opens at `http://localhost:3000`, receiver API at `http://localhost:4318`.
+Dashboard opens at `http://localhost:3000`, receiver API at `http://localhost:4318`. Register the first account (it becomes the project owner) and grab an API key from Settings → API Keys.
 
-### 2. Install the SDK
+### 2. Write a policy
 
-```bash
-pip install strathon
-```
-
-### 3. Create a policy and connect your agent
-
-```python
-from strathon import Client, instrument
-
-client = Client(
-    api_key="stra_...",         # from dashboard → Settings → API Keys
-    endpoint="http://localhost:4318",
-)
-instrument(client, frameworks=["langgraph"])
-
-# Your existing LangGraph agent — no changes needed. Strathon instruments
-# the framework and evaluates policies on every tool call and model request.
-result = agent.invoke({
-    "messages": [{"role": "user", "content": "Email the Q3 numbers to sales@competitor.com"}]
-})
-# A policy that blocks email tool calls to competitor domains halts this
-# before the tool runs — and records the decision in the audit log.
-```
-
-### 4. What happens when a policy matches
-
-If you've created a policy like:
+In the dashboard (Policies → New), create a policy with action **block**:
 
 ```cel
 attrs["gen_ai.tool.name"] == "send_email"
   && attrs["strathon.tool.args"].contains("competitor.com")
 ```
 
-Strathon raises `StrathonPolicyBlocked` **before** the tool call executes. The function body never runs. The block is logged in the audit trail with the matched policy, trace context, and timestamp.
+Policies are CEL expressions over the call's attributes: the tool name, its arguments, the model, token usage, the agent's identity. Not sure yet? Set the policy's status to **shadow** and Strathon will record every call it *would* have blocked without enforcing anything.
+
+### 3. Connect your agent
+
+```bash
+pip install "strathon[langgraph]"
+```
+
+```python
+from strathon import Client, instrument
+
+client = Client(
+    api_key="stra_...",              # from dashboard → Settings → API Keys
+    endpoint="http://localhost:4318",
+)
+instrument(client, frameworks=["langgraph"])
+```
+
+Your existing LangGraph agent needs no changes. Strathon instruments the framework and evaluates policies on every tool call and model request.
+
+### 4. Watch a call get blocked
 
 ```python
 from strathon import StrathonPolicyBlocked
 
 try:
-    agent.invoke({"messages": [{"role": "user", "content": "Email our competitors with our pricing"}]})
+    agent.invoke({"messages": [{"role": "user",
+        "content": "Email the Q3 numbers to sales@competitor.com"}]})
 except StrathonPolicyBlocked as e:
     print(f"Blocked by policy: {e.policy_name}")
-    # The tool call never executed. Logged in audit trail.
 ```
 
-### Reliability: what happens if the receiver is unreachable
+`StrathonPolicyBlocked` is raised **before** the tool call executes. The function body never runs. The decision lands in the audit trail with the matched policy, trace context, and timestamp.
 
-Policies evaluate inside your agent process, so a brief receiver outage doesn't
-add latency to tool calls. By default the SDK is **fail-open**: if it can't
-reach the receiver to refresh policy or halt state, agents keep running rather
-than stalling. This favors availability and is the right default for most
-deployments.
+## Failure Semantics
 
-For security-critical agents where an unreachable receiver should *stop* tool
-calls rather than allow them, enable **fail-closed** mode:
+A firewall's behavior when its control plane is unreachable is part of its contract, so here is Strathon's. Policies evaluate inside your agent process against locally cached state, so a brief receiver outage adds no latency to tool calls. By default the SDK is **fail-open**: if it cannot reach the receiver to refresh policy or halt state, agents keep running rather than stalling. For security-critical agents where an unreachable receiver should *stop* tool calls instead, enable fail-closed mode:
 
 ```python
 client = Client(
@@ -107,89 +102,72 @@ client = Client(
 )
 ```
 
-Choose deliberately: fail-open prioritizes uptime, fail-closed prioritizes
-containment. See [docs/intervention](https://getstrathon.com/docs/intervention)
-for the full contract.
-
-## Self-Host
-
-```bash
-git clone https://github.com/strathon/strathon.git
-cd strathon && docker compose up
-```
-
-Opens at `http://localhost:3000` (dashboard) and `http://localhost:4318` (receiver API).
-
-Register the first account, create a policy, get an API key, and connect your agent. No email server needed. The only dependency is PostgreSQL, which is included in the Compose stack.
-
-Strathon ships as two images — `ghcr.io/strathon/receiver` and `ghcr.io/strathon/dashboard` — plus PostgreSQL. Compose runs all three; you can also run the receiver on its own or scale the dashboard independently.
-
-For production deployments, see [Deploying with HTTPS](https://getstrathon.com/docs/self-hosting#https) (Caddy or nginx reverse proxy).
+Fail-open prioritizes uptime, fail-closed prioritizes containment. Choose deliberately. See [docs/intervention](https://getstrathon.com/docs/intervention) for the full contract.
 
 ## Core Features
 
 ### Policy Engine
 
-Write rules in [CEL](https://cel.dev) (Common Expression Language — the same language used by Kubernetes, Firebase, and Google Cloud IAM). Seven enforcement actions: **block**, **steer**, **throttle**, **log**, **alert**, **require_approval**, **allow**. Policies evaluate inside the agent process with sub-millisecond overhead, not at a network gateway. 12 OWASP-mapped templates for one-click setup. Shadow mode lets you test policies against live traffic without enforcing them, so you can validate before going live. [Learn more → getstrathon.com/docs/intervention](https://getstrathon.com/docs/intervention)
+Write rules in [CEL](https://cel.dev) (Common Expression Language, the same language used by Kubernetes, Firebase, and Google Cloud IAM). Seven enforcement actions: **block**, **steer**, **throttle**, **log**, **alert**, **require_approval**, **allow**. Policies evaluate inside the agent process with sub-millisecond overhead, not at a network gateway. 12 OWASP-mapped templates for one-click setup. Shadow mode evaluates and records against live traffic but never enforces, so you can validate a policy's match rate before turning it on. [Learn more → getstrathon.com/docs/intervention](https://getstrathon.com/docs/intervention)
 
 ### Human Approval Workflows
 
-Pause agent execution until an operator approves or denies in the dashboard, Slack, or Discord. Multi-party approval (N-of-M) for high-risk actions like financial transactions or data deletion. Undecided requests expire automatically, so an unanswered approval fails closed instead of leaving the agent hung. The SDK holds the call until a decision arrives — awaiting on async surfaces, blocking on synchronous ones — so no architectural changes are needed in your agent. [Learn more → getstrathon.com/docs/intervention](https://getstrathon.com/docs/intervention)
-
-### 50+ Credential Patterns
-
-Detects AWS keys, GCP service accounts, GitHub tokens, Stripe keys, database URIs, private keys, JWTs, and more. Scans tool arguments and responses at ingest time. Paired with CEL policies, you can block any tool call that contains a detected credential pattern — preventing accidental secret leakage before it happens. [Learn more → getstrathon.com/docs/redaction](https://getstrathon.com/docs/redaction)
-
-### EU AI Act Compliance
-
-Evidence export for Articles 9–15 and 19, covering risk management, data governance, transparency, human oversight, accuracy, and serious incident reporting. Agent inventory with NIST AI RMF risk scoring. Incident detection generates Article 73 reporting metadata automatically. Designed for teams that need to demonstrate compliance to auditors without building bespoke tooling. [Learn more → getstrathon.com/docs/compliance-mapping](https://getstrathon.com/docs/compliance-mapping)
+Pause an agent until an operator approves or denies in the dashboard, Slack, or Discord. Multi-party approval (N-of-M) for high-risk actions like financial transactions or data deletion. Undecided requests expire automatically, so an unanswered approval fails closed instead of leaving the agent hung. On surfaces that can pause (async pre-execution hooks, tool-invoke wrapping, CrewAI) the SDK holds the call until a decision arrives; on synchronous callback surfaces that cannot pause (LangGraph, LangChain, Pydantic AI) a matched approval fails closed, blocked and recorded. The per-surface matrix is in the docs. [Learn more → getstrathon.com/docs/intervention](https://getstrathon.com/docs/intervention)
 
 ### MCP Security Gateway
 
-Proxy between your agents and MCP servers. Every MCP request and response passes through the policy engine before reaching the server or returning to the agent. Credential scanning catches leaked secrets in MCP tool responses. Combined with egress policies, you control exactly which MCP tools your agents can call and what data they can send. Fails closed: a tool call is blocked, not allowed, if policy evaluation can't complete. [Learn more → getstrathon.com/docs/mcp](https://getstrathon.com/docs/mcp)
+Enforce policy on tools you never instrumented. Point any MCP client at the receiver's `/v1/mcp/proxy` endpoint and every `tools/call` is evaluated before it reaches the server: a blocked call comes back as a JSON-RPC error instead of executing, a steered call returns the replacement without ever contacting the upstream tool, and `tools/list` is filtered so blocked tools never appear in the model's context at all. Responses are scanned for leaked credentials on the way back. If policies cannot be loaded or evaluated, the call is blocked, not allowed. [Learn more → getstrathon.com/docs/mcp](https://getstrathon.com/docs/mcp)
 
 ### Egress Proxy
 
-A network-layer catch-all. Runs as a mitmproxy addon in front of the agent and enforces the same policies on all outbound HTTP, including calls the in-process SDK can't see (raw network calls, uninstrumented tools, third-party libraries). Scans request and response bodies for credential leakage. Optional defense-in-depth for higher-security deployments. [Learn more → getstrathon.com/docs/egress](https://getstrathon.com/docs/egress)
+Govern the traffic no SDK can see. Run the proxy in front of the agent, set `HTTP_PROXY`, and every outbound request from any library, instrumented or not, is evaluated against the same policy set: calls carry the tool name `http.<method>` and the full URL, so the policy that blocks a domain for your agent blocks it for a third-party dependency too. A credential detected in a request body blocks the request outright; one detected in a response is redacted before the agent reads it. Runs as a separate mitmproxy process in explicit `HTTP_PROXY` mode today; transparent interception is on the roadmap. [Learn more → getstrathon.com/docs/egress](https://getstrathon.com/docs/egress)
+
+### Credential Leak Detection
+
+Catch secrets in motion. 50+ patterns cover AWS keys, GCP service accounts, GitHub tokens, Stripe keys, database URIs, private keys, JWTs, and more, scanned across tool arguments and request and response bodies. Pair the detector with a CEL policy to block any tool call carrying a credential, and stored spans are scrubbed at ingest so a leaked key never sits in your trace history. [Learn more → getstrathon.com/docs/redaction](https://getstrathon.com/docs/redaction)
 
 ### Behavioral Drift Detection
 
-EWMA and CUSUM statistical analysis per agent, tracking four signals: policy deny rate, error rate, tool-call rate, and cost per minute. Auto-calibrates from each agent's first 100 observations (configurable), then fires webhook alerts when behavior shifts from the learned baseline — catching both sudden spikes and gradual drift from compromised or malfunctioning agents. [Learn more → getstrathon.com/docs/analytics](https://getstrathon.com/docs/analytics)
+EWMA and CUSUM statistical analysis per agent, tracking four signals: policy deny rate, error rate, tool-call rate, and cost per minute. Auto-calibrates from each agent's first 100 observations (configurable), then fires webhook alerts when behavior shifts from the learned baseline, catching both sudden spikes and gradual drift from compromised or malfunctioning agents. [Learn more → getstrathon.com/docs/analytics](https://getstrathon.com/docs/analytics)
 
 ### Circuit Breakers
 
-Per-agent and per-tool failure tracking, modeled on the standard CLOSED → OPEN → HALF-OPEN pattern. When an agent or tool exceeds the error threshold, the breaker trips: subsequent spans are flagged with the breaker state at ingest, open breakers surface in the API and dashboard, and you can pair the flag with a policy or halt to stop the agent. Half-open probes detect recovery; a reset endpoint closes a breaker manually. [Learn more → getstrathon.com/docs/budgets](https://getstrathon.com/docs/budgets)
-
-### Dashboard
-
-Next.js operator UI with trace waterfall, policy editor, approval cards, agent risk scoring, audit log with hash verification, budget charts, and compliance export. BFF security proxy with httpOnly cookies. Light and dark mode. Mobile responsive. [Learn more → getstrathon.com/docs](https://getstrathon.com/docs)
+Per-agent and per-tool failure tracking, modeled on the standard CLOSED → OPEN → HALF-OPEN pattern. When an agent or tool exceeds the error threshold the breaker trips: subsequent spans are flagged with the breaker state at ingest, open breakers surface in the API and dashboard, and you can pair the flag with a policy or halt to stop the agent. Half-open probes detect recovery; a reset endpoint closes a breaker manually. [Learn more → getstrathon.com/docs/budgets](https://getstrathon.com/docs/budgets)
 
 ### Tamper-Evident Audit Log
 
-HMAC-SHA256 hash chain on every operator action. Merkle root anchoring at configurable intervals. Append-only at the database level (PostgreSQL RLS). Built for environments where you need to prove the audit trail was not modified after the fact. [Learn more → getstrathon.com/docs/audit](https://getstrathon.com/docs/audit)
+Prove the trail was not rewritten. Every operator action is chained with HMAC-SHA256, Merkle roots are anchored at configurable intervals, and the table is append-only at the database level (PostgreSQL row-level security). Built for environments where the audit log is evidence, not just history. [Learn more → getstrathon.com/docs/audit](https://getstrathon.com/docs/audit)
+
+### EU AI Act Compliance
+
+Evidence export for Articles 9–15 and 19, covering risk management, data governance, transparency, human oversight, accuracy, and serious incident reporting. Agent inventory with NIST AI RMF risk scoring. Incident detection generates Article 73 reporting metadata automatically. Built for teams that need to demonstrate compliance to auditors without building bespoke tooling. [Learn more → getstrathon.com/docs/compliance-mapping](https://getstrathon.com/docs/compliance-mapping)
+
+### Dashboard
+
+Next.js operator UI: trace waterfall, policy editor, approval cards, agent risk scoring, audit log with hash verification, budget charts, and compliance export. BFF security proxy with httpOnly cookies. Light and dark mode, mobile responsive. [Learn more → getstrathon.com/docs](https://getstrathon.com/docs)
 
 ## Framework Integrations
 
 ```bash
-pip install strathon                     # core
-pip install strathon[langgraph]          # + LangGraph
-pip install strathon[all]                # all 10 frameworks
+pip install strathon                       # core
+pip install "strathon[langgraph]"          # + LangGraph
+pip install "strathon[all]"                # all 10 frameworks
 ```
 
 | Framework | Integration Type | Description | Docs |
 |-----------|-----------------|-------------|------|
 | **LangGraph** | BaseCallbackHandler | Intercepts tool calls via LangChain callback system. Blocks and throttles before execution. | [Guide](https://getstrathon.com/docs/frameworks/langgraph) |
-| **CrewAI** | Event listener | Hooks into CrewAI event bus. Captures tool use, delegation, and task events. | [Guide](https://getstrathon.com/docs/frameworks/crewai) |
-| **OpenAI Agents SDK** | TracingProcessor | Extends the official tracing extension point. Full span lifecycle capture. | [Guide](https://getstrathon.com/docs/frameworks/openai-agents) |
+| **CrewAI** | Event listener + tool wrap | Event bus for observability; tool-invoke wrapping for the full action set, including interactive approval. | [Guide](https://getstrathon.com/docs/frameworks/crewai) |
+| **OpenAI Agents SDK** | TracingProcessor + RunHooks | Official tracing extension point; run hooks for pre-execution enforcement. | [Guide](https://getstrathon.com/docs/frameworks/openai-agents) |
 | **OpenAI** | Drop-in wrapper | Wraps `chat.completions.create`. Zero code changes beyond `instrument()`. | [Guide](https://getstrathon.com/docs/frameworks/openai) |
-| **Anthropic** | Drop-in wrapper | Wraps `messages.create`. Same pattern as OpenAI integration. | [Guide](https://getstrathon.com/docs/frameworks/anthropic) |
+| **Anthropic** | Drop-in wrapper | Wraps `messages.create`. Same pattern as the OpenAI integration. | [Guide](https://getstrathon.com/docs/frameworks/anthropic) |
 | **LangChain** | BaseCallbackHandler | Same handler as LangGraph. Works with chains, agents, and tools. | [Guide](https://getstrathon.com/docs/frameworks/langchain) |
 | **AutoGen** | Agent wrapper | Wraps `BaseChatAgent.on_messages`. Captures multi-agent conversations. | [Guide](https://getstrathon.com/docs/frameworks/autogen) |
-| **Claude Agent SDK** | Query wrapper | Wraps `query()`. Captures tool use and agent reasoning. | [Guide](https://getstrathon.com/docs/frameworks/claude-agent-sdk) |
-| **Pydantic AI** | AbstractCapability | First-class plugin via Pydantic AI's capability system. No monkey-patching. | [Guide](https://getstrathon.com/docs/frameworks/pydantic-ai) |
+| **Claude Agent SDK** | PreToolUse hooks | First-class hook interception on `ClaudeSDKClient`; query wrapper for observability. | [Guide](https://getstrathon.com/docs/frameworks/claude-agent-sdk) |
+| **Pydantic AI** | AbstractCapability | First-class plugin via Pydantic AI's capability system. Steer substitutes the tool result directly. | [Guide](https://getstrathon.com/docs/frameworks/pydantic-ai) |
 | **Google ADK** | BasePlugin | First-class plugin via Google ADK's plugin system. No monkey-patching. | [Guide](https://getstrathon.com/docs/frameworks/google-adk) |
 
-Integrations use first-class framework extension points wherever the framework provides them (TracingProcessor, BasePlugin, AbstractCapability, callback handlers); where none exists, Strathon wraps the framework's documented entry point. Each guide states exactly which mechanism is used and what it can enforce.
+Integrations use first-class framework extension points wherever the framework provides them (TracingProcessor, BasePlugin, AbstractCapability, callback handlers); where none exists, Strathon wraps the framework's documented entry point. What each surface can enforce differs, and each guide says exactly which mechanism is used and what it enforces; the [per-surface matrix](https://getstrathon.com/docs/intervention) has the full picture.
 
 ## CLI
 
@@ -203,27 +181,27 @@ strathon policies list
 strathon policies create --name "block-email" \
   --expr 'attrs["gen_ai.tool.name"] == "send_email"' --action block
 strathon policies create --template block-prompt-injection
-strathon policies create --from-english "block all shell commands"
+strathon policies create --from-english "block all shell commands"   # needs STRATHON_AI_API_KEY on the receiver
 strathon policies import policies.yaml
 strathon policies test --name my-policy --last 100
 strathon policies suggest
 strathon policies conflicts
 
 # Traces and spans
-strathon traces list --last 1h
+strathon traces list --limit 50 --agent my-agent
 strathon traces tree <trace-id>
 strathon spans search --tool send_email --limit 50
 
 # Operations
 strathon halts create --scope project --reason "Emergency"
 strathon budgets list
-strathon budgets forecast --agent my-agent --days 30
-strathon approvals list --pending
+strathon budgets forecast
+strathon approvals list --status pending
 strathon approvals approve <approval-id>
 
 # Compliance and audit
 strathon compliance export --format sarif
-strathon audit list --last 24h
+strathon audit list --limit 100
 
 # Administration
 strathon admin list-users
@@ -232,33 +210,25 @@ strathon admin transfer-ownership --to user@company.com
 strathon admin revoke-all-keys
 ```
 
-13 command groups, 30+ subcommands. `--json` flag on every command for scripting and CI pipelines.
+13 command groups, 36 subcommands. Every read command takes a `--json` flag for scripting and CI pipelines.
 
 ## Performance
 
-Throughput depends on your hardware, PostgreSQL configuration, and span
-payload, so rather than quote a single number, Strathon ships a reproducible
-benchmark that measures it on your environment:
+Throughput depends on your hardware, PostgreSQL configuration, and span payload, so rather than quote a single number, Strathon ships a reproducible benchmark that measures it on your environment:
 
 ```bash
+# terminal 1: start the receiver
 cd receiver && uvicorn main:app --workers 4 --port 4318
+
+# terminal 2: from the repo root
 pip install httpx opentelemetry-proto protobuf
 python benchmarks/loadtest.py --endpoint http://127.0.0.1:4318 \
     --api-key "$STRATHON_API_KEY" --requests 5000 --concurrency 16
 ```
 
-It drives the full per-span pipeline — protobuf parse, CEL policy evaluation,
-50+ credential patterns, PII redaction, and the batched PostgreSQL write — and
-reports sustained spans/sec, latency p50/p95/p99, and error rate for the
-hardware it ran on. (Reference environment we test against: MacBook Pro
-M-series, 4 uvicorn workers, PostgreSQL 16, 50,000 spans.)
+It drives the full per-span pipeline (protobuf parse, CEL policy evaluation, 50+ credential patterns, PII redaction, and the batched PostgreSQL write) and reports sustained spans/sec, latency p50/p95/p99, and error rate for the hardware it ran on. (Reference environment we test against: MacBook Pro M-series, 4 uvicorn workers, PostgreSQL 16, 50,000 spans.)
 
-Receivers are stateless and scale horizontally behind a load balancer. The
-receiver tier scales near-linearly until the shared PostgreSQL becomes the
-bottleneck — all receivers write to one primary, so plan capacity around the
-database write path (PgBouncer, a larger primary, read replicas for dashboard
-queries), not the receiver count. See the [Scaling Guide](https://getstrathon.com/docs/scaling).
-
+Receivers are stateless and scale horizontally behind a load balancer. The receiver tier scales near-linearly until the shared PostgreSQL becomes the bottleneck: all receivers write to one primary, so plan capacity around the database write path (PgBouncer, a larger primary, read replicas for dashboard queries), not the receiver count. See the [Scaling Guide](https://getstrathon.com/docs/scaling).
 
 ## OWASP Agentic Security Coverage
 
@@ -279,17 +249,17 @@ Strathon's threat model is anchored on the [OWASP Top 10 for Agentic Application
 
 ## Scope and Limitations
 
-Strathon enforces policy at the **tool-call boundary**: it inspects each tool call and its arguments before execution and can block, steer, throttle, require approval, log, or alert. This is the layer where an agent's decisions become real-world actions, and it is the right place to stop an action regardless of whether the model was mistaken, manipulated, or compromised.
+Strathon enforces policy at the **tool-call boundary**: it inspects each tool call and its arguments before execution and can block, steer, throttle, require approval, log, alert, or explicitly allow. This is the layer where an agent's decisions become real-world actions, and it is the right place to stop an action regardless of whether the model was mistaken, manipulated, or compromised.
 
 It is one layer of agent security, not the whole of it. Two honesty notes worth stating up front, with the full picture in [docs/scope.md](docs/scope.md):
 
-- **Credentials: detection today, injection later.** Strathon detects and redacts secrets (50+ patterns) in tool arguments and request/response bodies — reactive protection against a leak in progress. Gateway-side credential *injection* (the agent never holds the secret) is stronger and is on the roadmap, not shipped.
-- **Egress: explicit today, transparent later.** The egress proxy runs in explicit (`HTTP_PROXY`) mode — defense-in-depth for a cooperating agent. Transparent, network-level interception that an agent cannot opt out of is on the roadmap.
+- **Credentials: detection today, injection later.** Strathon detects and redacts secrets (50+ patterns) in tool arguments and request/response bodies, which is reactive protection against a leak in progress. Gateway-side credential *injection*, where the agent never holds the secret at all, is stronger and is on the roadmap, not shipped.
+- **Egress: explicit today, transparent later.** The egress proxy runs in explicit (`HTTP_PROXY`) mode, which is defense-in-depth for a cooperating agent. Transparent, network-level interception that an agent cannot opt out of is on the roadmap.
 
 Some attack classes are not solvable at the tool-call boundary alone, and we would rather say so than imply otherwise:
 
 - **Data-flow exfiltration.** When sensitive data read earlier is smuggled inside an otherwise-valid argument (for example, encoded into a URL on an allowed domain), the individual call looks legitimate. Catching this reliably requires data-flow provenance (taint tracking), which is on our roadmap.
-- **Poisoned tool output and context attacks.** Instructions injected into a tool's response, or into the tool-list during a protocol handshake, can influence an agent without producing a malicious call of their own. These need response sanitization and input filtering, not only call-time enforcement.
+- **Poisoned tool output and context attacks.** Instructions injected into a tool's response, or into the tool list during a protocol handshake, can influence an agent without producing a malicious call of their own. These need response sanitization and input filtering, not only call-time enforcement.
 - **Memory poisoning.** A malicious instruction planted in an agent's long-term memory produces a later call that carries no in-band signal. Defending this is a memory-integrity and training-time problem.
 - **Aggregate/economic abuse.** Each call can be legitimate while the volume is the attack. Strathon's budgets and drift detection address this, but through cost and rate accounting rather than per-call policy.
 
@@ -312,44 +282,45 @@ The honest framing from the security community applies: an agent that combines a
 └─────────────────┘
 ```
 
-Single PostgreSQL dependency. No Redis, no ClickHouse, no S3. Self-host on one machine or scale horizontally behind a load balancer.
+Single PostgreSQL dependency. No ClickHouse, no S3, no required Redis (Redis is optional and only enables async webhook delivery). Self-host on one machine or scale horizontally behind a load balancer.
 
 ## Deploy
 
 ### Self-hosted (recommended)
 
 ```bash
-# Docker Compose — includes PostgreSQL, receiver, and dashboard
+# Docker Compose: PostgreSQL, receiver, and dashboard
 git clone https://github.com/strathon/strathon.git
 cd strathon && docker compose up
 ```
 
+Register the first account, create a policy, get an API key, and connect your agent. No email server needed; the only dependency is PostgreSQL, included in the Compose stack. Strathon ships as two images, `ghcr.io/strathon/receiver` and `ghcr.io/strathon/dashboard`, plus PostgreSQL. Compose runs all three; you can also run the receiver on its own or scale the dashboard independently. See [Self-Hosting](https://getstrathon.com/docs/self-hosting).
+
 ### Docker images
 
 ```bash
-# Pull from GitHub Container Registry
 docker pull ghcr.io/strathon/receiver:latest
 docker pull ghcr.io/strathon/dashboard:latest
 ```
 
 ### HTTPS (production)
 
-For production, put Caddy or nginx in front of the receiver as a reverse proxy. See [Deploying with HTTPS](https://getstrathon.com/docs/self-hosting#https) for a complete Caddyfile and nginx config.
+Put Caddy or nginx in front of the receiver as a reverse proxy. See [Deploying with HTTPS](https://getstrathon.com/docs/self-hosting#https) for a complete Caddyfile and nginx config.
 
 ### Cloud (managed)
 
-Sign up at [getstrathon.com](https://getstrathon.com) for managed Strathon with automatic updates, backups, and support.
+A managed cloud offering is planned. Self-hosting is the supported deployment today; see [getstrathon.com](https://getstrathon.com) for updates.
 
 ## Community
 
-- [Discord](https://discord.gg/Ta9XRmh4H) — questions, discussion, support
-- [GitHub Issues](https://github.com/strathon/strathon/issues) — bug reports
-- [GitHub Discussions](https://github.com/strathon/strathon/discussions) — feature requests, ideas
-- [Contributing](CONTRIBUTING.md) — setup guide for development
+- [Discord](https://discord.gg/Ta9XRmh4H) for questions, discussion, and support
+- [GitHub Issues](https://github.com/strathon/strathon/issues) for bug reports
+- [GitHub Discussions](https://github.com/strathon/strathon/discussions) for feature requests and ideas
+- [Contributing](CONTRIBUTING.md) for the development setup guide
 
 ## License
 
-- **SDK** (`sdk/`) — Apache License 2.0
-- **Receiver** (`receiver/`) — MIT License
+- **SDK** (`sdk/`) under the Apache License 2.0
+- **Receiver** (`receiver/`) under the MIT License
 
 See [LICENSING.md](LICENSING.md) for details.

@@ -2,7 +2,7 @@
 
 This guide takes you from nothing to a running firewall that blocks a real
 agent action in about five minutes. It uses [LangGraph](frameworks/langgraph.md)
-as the example framework, but the same three steps apply to any of the
+as the example framework, but the same steps apply to any of the
 [10 supported frameworks](frameworks/).
 
 Strathon sits between your agent and the tools and models it calls. Every tool
@@ -15,24 +15,20 @@ tamper-evident audit log.
 - Docker (or Python 3.11+ and PostgreSQL 16 if you prefer to run from source)
 - An existing agent built on a supported framework
 
-## 1. Start the receiver
+## 1. Start the stack
 
-The receiver is the policy engine and API. Run it with Docker:
+The Compose stack runs the receiver (the policy engine and API), the
+dashboard, and PostgreSQL:
 
 ```bash
-docker run -d --name strathon \
-  -p 4318:4318 \
-  -e DATABASE_URL="postgresql://strathon:strathon@db:5432/strathon" \
-  -e STRATHON_AUDIT_HMAC_KEY="$(openssl rand -hex 32)" \
-  -e STRATHON_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
-  ghcr.io/strathon/receiver:latest
+git clone https://github.com/strathon/strathon.git
+cd strathon && docker compose up -d
 ```
 
-For a full local stack (receiver + dashboard + Postgres) use Docker Compose —
-see [Self-Hosting](self-hosting.md).
-
-The dashboard is available at `http://localhost:3000`. Register the first
-account; it becomes the project owner.
+The dashboard is available at `http://localhost:3000` and the receiver at
+`http://localhost:4318`. Register the first account; it becomes the project
+owner. To run the receiver standalone against your own Postgres (no
+dashboard), see [Self-Hosting](self-hosting.md).
 
 ## 2. Create an API key and install the SDK
 
@@ -40,7 +36,7 @@ In the dashboard, go to **Settings → API Keys** and create a key. Then install
 the SDK with the extra for your framework:
 
 ```bash
-pip install strathon[langgraph]
+pip install "strathon[langgraph]"
 ```
 
 ## 3. Connect your agent
@@ -76,7 +72,7 @@ attrs["gen_ai.tool.name"] == "send_email"
 
 Set the action to `block` and the status to `enabled`. (Start with `shadow`
 status to see what *would* be blocked without actually blocking anything —
-see [Shadow mode](intervention.md).)
+see [Shadow mode](concepts.md#shadow-mode).)
 
 ## 5. See it work
 

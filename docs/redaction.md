@@ -40,8 +40,8 @@ sanitized. This property is the firewall semantic Strathon protects.
 Order matters. `API_KEY` runs first because keys are catastrophic to
 leak. `CREDIT_CARD` runs before `PHONE_NUMBER` so 16-digit card numbers
 don't get misclassified. The entity names match Microsoft Presidio's
-vocabulary so operators who later upgrade to a Presidio sidecar (a v2
-plan) keep their existing strategy config working.
+vocabulary so operators who later adopt a Presidio sidecar (on the
+roadmap) keep their existing strategy config working.
 
 ## Actions
 
@@ -159,16 +159,17 @@ project's redaction config is loaded once per ingest batch (not per
 span), so a thousand-span OTLP payload incurs one DB read.
 
 If the redactor ever becomes a hot-path bottleneck (we don't expect it
-to in v1), the right next step is a Presidio sidecar container; the
+to), the right next step is a Presidio sidecar container; the
 entity-name vocabulary is compatible, so existing strategy config
 moves over without rewrite.
 
-## What's not covered in v1
+## What's not covered today
 
 - **PERSON / LOCATION / ORGANIZATION**: these require NER (named-entity
   recognition), which means spaCy or a Hugging Face model. The image
-  bloat (~500 MB for spaCy alone) isn't worth it for v1's regex-only
-  baseline. The v2 plan is a Presidio sidecar that operators opt into.
+  bloat (~500 MB for spaCy alone) isn't worth it for the regex-only
+  baseline. The roadmap answer is a Presidio sidecar that operators
+  opt into.
 - **IPv6**: deferred. The pattern is more complex and the false-positive
   rate higher; we'd rather skip it than emit noisy matches.
 - **International phone numbers**: same reason. The shape varies too
@@ -179,5 +180,4 @@ moves over without rewrite.
   shape we need — by the time we see a span, the LLM has already seen
   the raw value.
 
-The path to closing these gaps in v2 is documented in `docs/v2.md`
-once that doc exists.
+These gaps are roadmap items; when one ships, this page will say so.

@@ -100,17 +100,20 @@ human:
 
 | Surface | `require_approval` behavior |
 |---------|------------------------------|
-| `@enforcer` decorator, `enforce_steer`, CrewAI (tool-invoke) | **Interactive** — pauses until an operator approves or denies in the dashboard or Slack |
+| `enforce_steer` (tool-invoke wrapping), CrewAI | **Interactive** — pauses until an operator approves or denies in the dashboard or Slack |
 | OpenAI Agents SDK, AutoGen, Google ADK, Claude Agent SDK | **Interactive** — async pre-execution hooks pause for the operator decision |
 | LangGraph, LangChain, Pydantic AI | **Fails closed** — the synchronous callback cannot pause, so the call is blocked and recorded (use a surface above for interactive approval) |
 | MCP gateway | Returns an approval-required error to the caller |
 | Anthropic / OpenAI LLM integrations | Observability-only — no tool-call enforcement; use `log`/`alert` here |
 
 The same async/sync distinction applies to `steer`: surfaces that control
-the return value (direct tool-invoke wrapping, async hooks, the gateway)
-substitute the replacement; the synchronous callback surfaces (LangGraph,
-LangChain, Pydantic AI) record the steer but the original tool still runs, so
-use `block` there for hard prevention.
+the return value (direct tool-invoke wrapping, async hooks, the plugin
+frameworks, the gateway) substitute the replacement; the synchronous callback
+surfaces (LangGraph, LangChain) record the steer but the original tool still
+runs, so use `block` there for hard prevention. Pydantic AI's pre-execution
+hook, although synchronous, short-circuits with the replacement, so steer
+substitutes there — it is only interactive approval that its hook cannot
+serve.
 
 ### Throttle action config
 
@@ -728,7 +731,7 @@ both, so its per-tool call is optional.
 
 **Approval** follows the same async/sync split. Surfaces with an async
 pre-execution hook or a tool-invoke boundary (OpenAI Agents SDK, AutoGen,
-Google ADK, Claude Agent SDK, CrewAI, and the `@enforcer`/`enforce_steer`
+Google ADK, Claude Agent SDK, CrewAI, and the `enforce_steer`
 paths) can pause the call for an interactive human decision. The synchronous
 callback surfaces (LangGraph, LangChain, Pydantic AI) cannot pause, so a
 matched `require_approval` policy there **fails closed** — it blocks the call

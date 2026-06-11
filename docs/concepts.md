@@ -46,17 +46,19 @@ effect — and therefore whether it can actually stop a call.
 |--------|--------------|-------------------|
 | `log` | Annotates the span. Passive record-keeping. | No — server-side |
 | `alert` | Fires a signed webhook (retried, dead-lettered on failure). | No — server-side |
-| `block` | SDK raises `StrathonPolicyBlocked` before the call executes. | **Yes** — client-side |
-| `steer` | SDK returns a corrective string in place of the real output, so the agent self-corrects. | **Yes** — client-side |
-| `throttle` | SDK consults a per-policy token bucket; calls over the cap are denied with a retry hint. | **Yes** — client-side |
-| `require_approval` | Holds the call for human approval. Pauses for an operator decision where the surface can wait; otherwise fails closed (blocks). Never silently allows. | **Yes** — client-side |
-| `allow` | Admits the call and short-circuits lower-priority policies. Used for carve-outs and required for allow-list mode. | **Yes** — client-side |
+| `block` | Raises `StrathonPolicyBlocked` before the call executes. | **Yes** — at the enforcement surface |
+| `steer` | Returns a corrective string in place of the real output, so the agent self-corrects. | **Yes** — at the enforcement surface |
+| `throttle` | Consults a per-policy token bucket; calls over the cap are denied with a retry hint. | **Yes** — at the enforcement surface |
+| `require_approval` | Holds the call for human approval. Pauses for an operator decision where the surface can wait; otherwise fails closed (blocks). Never silently allows. | **Yes** — at the enforcement surface |
+| `allow` | Admits the call and short-circuits lower-priority policies. Used for carve-outs and required for allow-list mode. | **Yes** — at the enforcement surface |
 
-The five call-affecting actions (`block`, `steer`, `throttle`, `require_approval`,
-`allow`) run in
-the SDK, in-process, *before* the tool or model call executes. That is what
-makes Strathon a firewall rather than an observability tool: enforcement is
-inline, not after the fact.
+The five call-affecting actions (`block`, `steer`, `throttle`,
+`require_approval`, `allow`) run *before* the tool or model call executes, at
+whichever of Strathon's three enforcement layers the call passes through: the
+in-process SDK for instrumented frameworks, the [MCP gateway](mcp.md) for
+MCP-routed tool calls, and the [egress proxy](egress.md) for raw outbound
+HTTP. That is what makes Strathon a firewall rather than an observability
+tool: enforcement is inline, not after the fact.
 
 ## Enforcement is inline
 

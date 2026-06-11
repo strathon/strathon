@@ -114,9 +114,9 @@ omitted for `project` scope.
 | `agent`   | the `agent_id`  | Only spans with this `gen_ai.agent.id`.      |
 | `model`   | the model name  | Only spans with this `gen_ai.request.model`. |
 
-Tag-based budgets (LiteLLM's cost-center pattern) are deferred to a
-future commit; the schema's `scope` column is `TEXT` so adding new
-scope kinds doesn't require a migration.
+Tag-based budgets (the cost-center pattern) are on the roadmap; the
+schema's `scope` column is `TEXT` so adding new scope kinds doesn't
+require a migration.
 
 ### Read live spend
 
@@ -144,8 +144,8 @@ need a different scope or window.
 
 The receiver ships a vendored model price catalog at
 `receiver/data/model_prices.json`, sourced from LiteLLM's upstream
-`model_prices_and_context_window.json` (MIT-licensed). 20 of the
-most-used models are bundled in v1; the file gets refreshed
+`model_prices_and_context_window.json` (MIT-licensed). The most-used
+models (currently 21) are bundled; the file gets refreshed
 periodically.
 
 Operators who've negotiated a discount with their provider, or who

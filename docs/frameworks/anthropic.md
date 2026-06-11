@@ -72,7 +72,7 @@ attrs["gen_ai.system"] == "anthropic"
 
 - Wraps `messages.create` (sync and async).
 - Streaming responses are traced with token counts at completion.
-- Works with `anthropic` Python SDK 0.30+.
+- Requires `anthropic>=0.40.0` (installed by the `anthropic` extra).
 
 ## Learn More
 

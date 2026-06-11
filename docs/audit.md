@@ -172,9 +172,12 @@ with:
 python -c 'import secrets; print(secrets.token_hex(32))'
 ```
 
-The receiver refuses to start in production with an empty key.
-In development (`DEBUG=true`) an empty key is silently substituted
-with a deterministic dev key plus a loud warning in the logs.
+The behavior with an empty key depends on the deployment mode
+(`STRATHON_MODE`, default `self-hosted`). In self-hosted mode an empty
+key falls back to a deterministic dev key with a one-time warning in
+the logs, so the receiver is usable out of the box — set a real key
+for any non-development deployment. In cloud mode an empty key raises
+instead of silently signing with a known value.
 
 Each row records `hmac_key_id` so historical rows continue to
 verify under the key they were signed with. The current release ships a single

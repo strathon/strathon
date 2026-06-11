@@ -112,9 +112,25 @@ X-Project-Id: <project-uuid>
 
 API keys don't need this header — they're already project-scoped.
 
-## API keys (unchanged)
+## API keys
 
-SDK and programmatic API keys continue to work exactly as before. They use capability-based scopes, not roles. See [api_keys.md](api_keys.md) for details.
+SDK and programmatic API keys are separate from dashboard roles: they use capability-based scopes, not roles. See [api_keys.md](api_keys.md) for details.
+
+## Multi-factor authentication (TOTP)
+
+Dashboard users can enable TOTP-based MFA on their account. Four endpoints,
+all under `/v1/auth`:
+
+| Endpoint | What it does |
+|----------|--------------|
+| `POST /v1/auth/mfa/setup` | Generates a TOTP secret for the current user (session auth). Returns the base32 secret and an `otpauth://` URI for QR scanning. |
+| `POST /v1/auth/mfa/verify-setup` | Verifies a TOTP code and enables MFA. Returns one-time backup codes — store them safely. |
+| `POST /v1/auth/mfa/verify` | Completes an MFA login: takes the short-lived `mfa_token` from the login response plus a TOTP or backup code, returns a full session token. |
+| `POST /v1/auth/mfa/disable` | Disables MFA. Requires the current password and a valid TOTP code. |
+
+Once MFA is enabled, `POST /v1/auth/login` with the correct password returns
+an `mfa_token` instead of a session token; the client exchanges it at
+`/v1/auth/mfa/verify` to finish signing in.
 
 ## Password security
 

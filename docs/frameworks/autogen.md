@@ -48,7 +48,7 @@ attrs["gen_ai.tool.name"] == "execute_code"
 ## Notes
 
 - Wraps `BaseChatAgent.on_messages` for message interception.
-- Works with AutoGen 0.4+.
+- Requires `autogen-agentchat>=0.7.0` (installed by the `autogen` extra).
 - Multi-agent conversations create a single trace with per-agent spans.
 
 ## Learn More

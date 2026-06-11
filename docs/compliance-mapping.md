@@ -79,7 +79,7 @@ limitations, performance metrics, and required human oversight level.
 |---|---|
 | Performance metrics | Prometheus `/metrics` endpoint with 16-panel Grafana dashboard template. Span aggregation provides per-agent, per-model, per-tool analytics. |
 | System behavior visibility | Agent topology map (`GET /v1/topology`) shows agent-to-tool relationships discovered from trace data. |
-| Deployer information | OpenAPI 3.1 spec at `/openapi.json` with Swagger UI and ReDoc. 14 tagged endpoint groups. |
+| Deployer information | OpenAPI 3.1 spec at `/openapi.json` with Swagger UI and ReDoc. 30+ tagged endpoint groups. |
 
 ### Article 14: Human Oversight
 
