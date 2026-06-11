@@ -244,3 +244,64 @@ def test_mcp_proxy_blocks_via_real_policy(client, monkeypatch):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert "error" in body and body["error"]["code"] == -32040
+
+
+def test_shadow_block_policy_forwards(monkeypatch):
+    """A shadow block policy is a dry run: the gateway must forward the
+    call, not enforce. Enforcing a shadow policy would block live traffic
+    during what the operator believes is a test."""
+    policies = [{
+        "id": uuid.uuid4(),
+        "name": "shadow_block_send_email",
+        "enabled": True,
+        "shadow": True,
+        "action": "block",
+        "applies_to": [],
+        "match_expression": 'attrs["strathon.tool.name"] == "send_email"',
+        "priority": 100,
+    }]
+    gw = _make_gateway(policies=policies)
+    forwarded = {}
+
+    async def fake_forward(req):
+        forwarded["called"] = True
+        return {"jsonrpc": "2.0", "id": req.get("id"), "result": {"ok": True}}
+
+    monkeypatch.setattr(gw, "_forward", fake_forward)
+    resp = asyncio.run(gw.handle_request(_tool_call("send_email")))
+    assert forwarded.get("called"), "shadow policy enforced at the gateway"
+    assert "error" not in resp
+
+
+def test_shadow_policy_does_not_mask_enabled_policy_at_gateway(monkeypatch):
+    """A higher-priority shadow allow must not short-circuit a real block."""
+    policies = [
+        {
+            "id": uuid.uuid4(),
+            "name": "shadow_allow_all",
+            "enabled": True,
+            "shadow": True,
+            "action": "allow",
+            "applies_to": [],
+            "match_expression": "true",
+            "priority": 1000,
+        },
+        {
+            "id": uuid.uuid4(),
+            "name": "block_send_email",
+            "enabled": True,
+            "action": "block",
+            "applies_to": [],
+            "match_expression": 'attrs["strathon.tool.name"] == "send_email"',
+            "priority": 100,
+        },
+    ]
+    gw = _make_gateway(policies=policies)
+
+    async def fake_forward(req):  # must NOT be called
+        raise AssertionError("blocked tool call must not forward")
+
+    monkeypatch.setattr(gw, "_forward", fake_forward)
+    resp = asyncio.run(gw.handle_request(_tool_call("send_email")))
+    assert "error" in resp
+    assert resp["error"]["code"] == -32040

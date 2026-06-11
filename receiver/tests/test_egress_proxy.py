@@ -151,3 +151,23 @@ def test_response_credentials_are_redacted():
     body = f.response.get_text()
     assert "AKIAIOSFODNN7EXAMPLE" not in body
     assert f.response.headers.get("X-Strathon-Redacted") is not None
+
+
+def test_shadow_block_policy_does_not_block_egress():
+    """A shadow block policy must not 403 live egress traffic — shadow is
+    the documented dry-run mode at every enforcement surface."""
+    addon = _addon()
+    addon._policies = [{
+        "id": "p1",
+        "name": "shadow_block_posts",
+        "enabled": True,
+        "shadow": True,
+        "action": "block",
+        "applies_to": [],
+        "match_expression": 'attrs["strathon.tool.name"] == "http.post"',
+        "priority": 100,
+    }]
+    f = _request_flow(method="POST")
+    with taddons.context(addon):
+        addon.request(f)
+    assert f.response is None, "shadow policy enforced at the egress proxy"

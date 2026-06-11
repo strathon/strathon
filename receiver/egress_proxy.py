@@ -213,6 +213,9 @@ try:
                     "strathon.source": "egress_proxy",
                 }
                 matches = evaluate_for_span(self._policies, tool_name, attrs)
+                # Shadow policies never enforce; drop them before picking the
+                # top action (same filter as the SDK enforcer and MCP gateway).
+                matches = [m for m in matches if not m.get("shadow", False)]
                 if not matches:
                     # Allow-list mode: no policy matched and the project is
                     # default-deny, so fall closed.

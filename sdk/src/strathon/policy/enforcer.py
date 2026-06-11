@@ -221,6 +221,11 @@ class PolicyEnforcer:
         for policy in policies:
             if not policy.enabled:
                 continue
+            if policy.shadow:
+                # Shadow policies record server-side; they never enforce.
+                # Enforcing one here would block live traffic during what the
+                # operator believes is a dry run.
+                continue
             if policy.action not in {"block", "steer", "throttle", "allow", "require_approval"}:
                 continue
             if not _span_matches_applies_to(span_context, policy.applies_to):

@@ -125,6 +125,11 @@ class MCPSecurityGateway:
                 "strathon.source": "mcp_gateway",
             }
             matches = evaluate_for_span(self.policies, tool_name, attrs)
+            # Shadow policies are dry-run: the ingest path records their
+            # would-be decision, but an enforcement surface must never act on
+            # one. Filter them here rather than in evaluate_for_span, which
+            # the recording path also uses and which needs shadow matches.
+            matches = [m for m in matches if not m.get("shadow", False)]
             if not matches:
                 # Allow-list mode: deny unmatched tool calls when the project
                 # is default-deny.

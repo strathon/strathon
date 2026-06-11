@@ -26,6 +26,11 @@ class Policy:
     enabled: bool = True
     priority: int = 0
     description: Optional[str] = None
+    # Shadow policies are evaluated and recorded server-side but must never
+    # enforce. The SDK previously dropped this field on parse, which made a
+    # shadow block policy block for real in-process — the inverse of the
+    # documented "test without enforcing" contract.
+    shadow: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -39,6 +44,7 @@ class Policy:
             "applies_to": self.applies_to,
             "enabled": self.enabled,
             "priority": self.priority,
+            "shadow": self.shadow,
         }
 
     @classmethod
@@ -54,6 +60,7 @@ class Policy:
             applies_to=list(data.get("applies_to") or []),
             enabled=data.get("enabled", True),
             priority=data.get("priority", 0),
+            shadow=bool(data.get("shadow", False)),
         )
 
 

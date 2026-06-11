@@ -349,3 +349,63 @@ def test_explicit_environment_attr_wins_over_enforcer_default():
         "attrs": {"gen_ai.tool.name": "deploy", "strathon.project.environment": "development"},
     })
     assert not d.is_block, "an explicitly provided environment attr should win"
+
+
+# ---- Shadow mode -----------------------------------------------------------
+
+
+def test_shadow_block_policy_does_not_enforce():
+    """A shadow block policy must never block in-process. Shadow is the
+    documented 'test without enforcing' mode; before the shadow field was
+    parsed by the SDK, a shadow block policy blocked live traffic."""
+    enforcer = _make_enforcer()
+    shadow_block = Policy(
+        id="pol_shadow_block",
+        project_id="00000000-0000-0000-0000-000000000001",
+        name="shadow_block",
+        match_expression=(
+            'attrs["gen_ai.tool.name"] == "send_email" && '
+            'attrs["strathon.tool.args"].contains("@competitor.com")'
+        ),
+        action="block",
+        priority=100,
+        shadow=True,
+    )
+    enforcer.set_policies_for_testing([shadow_block])
+    decision = enforcer.check_policy(_competitor_email_context())
+    assert decision.is_allow, (
+        "shadow policy enforced — dry-run mode blocked live traffic"
+    )
+
+
+def test_shadow_policy_does_not_mask_enabled_policy():
+    """A higher-priority shadow policy must not short-circuit a real one."""
+    enforcer = _make_enforcer()
+    shadow_allow = Policy(
+        id="pol_shadow_allow",
+        project_id="00000000-0000-0000-0000-000000000001",
+        name="shadow_allow",
+        match_expression='has(attrs["gen_ai.tool.name"])',
+        action="allow",
+        priority=1000,
+        shadow=True,
+    )
+    enforcer.set_policies_for_testing([shadow_allow, _block_policy()])
+    decision = enforcer.check_policy(_competitor_email_context())
+    assert decision.is_block, (
+        "shadow allow short-circuited a real block policy"
+    )
+
+
+def test_shadow_field_parses_from_server_payload():
+    """The /v1/policies payload carries shadow; the SDK must not drop it."""
+    p = Policy.from_dict({
+        "id": "1",
+        "project_id": "00000000-0000-0000-0000-000000000001",
+        "name": "s",
+        "match_expression": "true",
+        "action": "block",
+        "shadow": True,
+    })
+    assert p.shadow is True
+    assert p.to_dict()["shadow"] is True
