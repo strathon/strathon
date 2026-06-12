@@ -1,6 +1,6 @@
 # Documentation
 
-New to Strathon? Start with the **[Getting Started guide](getting-started.md)** —
+New to Strathon? Start with the **[Getting Started guide](getting-started.md)**:
 it takes you from zero to a running firewall blocking a real agent action.
 
 | Doc | Covers |

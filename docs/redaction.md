@@ -8,13 +8,13 @@ webhook payloads are assembled. Default-on for new projects.
 
 Two layers, applied in order on every incoming span:
 
-**Layer 1 — key-based actions.** Some attribute keys should never carry
+**Layer 1: key-based actions.** Some attribute keys should never carry
 their value into the trace store regardless of content. Authorization
 headers are always credentials; `user.email` is always PII. Operators
 declare these as `{attribute_key: action}` pairs and the redactor
 applies them by name.
 
-**Layer 2 — value-based pattern matching.** For free-text attributes
+**Layer 2: value-based pattern matching.** For free-text attributes
 like `strathon.tool.args`, we don't know what's inside, so we scan the
 value for known PII patterns (emails, credit cards, SSNs, API keys,
 etc.) and apply the configured action per entity.
@@ -56,7 +56,7 @@ roadmap) keep their existing strategy config working.
 the value (count distinct, group-by) without retaining the cleartext.
 Two runs against the same input produce the same hash, so joins work.
 
-`delete` is only meaningful at the key level — you can't "delete part
+`delete` is only meaningful at the key level; you can't "delete part
 of a value", you delete the whole attribute. At the value-pattern
 level, redact / mask / hash are the choices.
 
@@ -96,7 +96,7 @@ WHERE project_id = '...';
 
 Every other attribute is dropped at ingest. This is the
 compliance-grade setting: it doesn't matter what new attribute someone
-adds in a future SDK version — if it's not on the list, it doesn't get
+adds in a future SDK version: if it's not on the list, it doesn't get
 stored.
 
 ### Example: custom pattern for an internal ID
@@ -181,3 +181,9 @@ moves over without rewrite.
   the raw value.
 
 These gaps are roadmap items; when one ships, this page will say so.
+
+## Related
+
+- [Egress proxy](egress.md): credential scanning on live network traffic
+- [Retention](retention.md): redaction at ingest, deletion at expiry
+- [Runtime intervention](intervention.md): blocking a call vs scrubbing its record

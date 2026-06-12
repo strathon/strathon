@@ -1,12 +1,14 @@
 # Pydantic AI Integration
 
-Strathon integrates with Pydantic AI via its `AbstractCapability`
-plugin system. This is a first-class integration — no monkey-patching.
+Strathon enforces policies on Pydantic AI tool calls before they execute:
+`block` and `throttle` raise, and `steer` returns the replacement in place of
+the real result. Integration is a first-class `AbstractCapability` plugin,
+registered at instrument time, no monkey-patching.
 
 > **Enforcement scope:** Pydantic AI is instrumented through a synchronous
 > pre-execution hook that can short-circuit the tool call. It enforces
 > `block` and `throttle` (which raise) and `steer` (the hook returns the
-> replacement in place of the real result — the tool body never runs).
+> replacement in place of the real result; the tool body never runs).
 > `require_approval` **fails closed** (the call is blocked and recorded)
 > because a sync hook cannot pause for a human decision. For interactive
 > approval, use `enforce_steer` (tool-invoke wrapping) or a framework whose
@@ -16,7 +18,7 @@ plugin system. This is a first-class integration — no monkey-patching.
 ## Installation
 
 ```bash
-pip install strathon[pydantic-ai]
+pip install "strathon[pydantic-ai]"
 ```
 
 ## Setup
@@ -58,7 +60,7 @@ attrs["gen_ai.tool.name"] == "fetch_record"
 
 ## Notes
 
-- Uses `AbstractCapability` — Pydantic AI's official plugin interface.
+- Uses `AbstractCapability`: Pydantic AI's official plugin interface.
 - Zero monkey-patching. The capability is registered at instrument time.
 - Requires `pydantic-ai-slim>=1.80.0` (installed by the `pydantic-ai` extra).
 - 36 tests cover the integration.

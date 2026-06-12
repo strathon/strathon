@@ -17,19 +17,19 @@ tool calls an agent makes **over MCP**, the same way the in-process SDK governs
 tools the agent calls directly and the egress proxy governs raw outbound HTTP.
 Same policies, three boundaries.
 
-It enforces by default once your agents route through it — a project's policies
+It enforces by default once your agents route through it; a project's policies
 apply with no extra opt-in, and the default posture admits any call no policy
-blocks (it enforces the rules you write). To harden a project to default-deny —
-block any `tools/call` not explicitly allowed — set its
+blocks (it enforces the rules you write). To harden a project to default-deny,
+blocking any `tools/call` not explicitly allowed, set its
 `intervention_default_action` to `block`; see
 [intervention.md](intervention.md) on allow-list mode.
 
 The gateway is the relevant layer whenever an agent reaches tools through an MCP
 server. If none of your agents use MCP, this layer simply has no traffic to act
-on — the other two layers still enforce.
+on; the other two layers still enforce.
 
 Every MCP request is evaluated against the **same enabled policies** the rest
-of Strathon uses — the gateway calls the identical policy primitive the trace
+of Strathon uses; the gateway calls the identical policy primitive the trace
 ingest path does, so an MCP `tools/call` is judged exactly like a tool call
 captured from an instrumented framework. There is no separate ruleset to keep
 in sync.

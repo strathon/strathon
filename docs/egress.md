@@ -64,7 +64,7 @@ export HTTPS_PROXY=http://localhost:8080
 python my_agent.py
 ```
 
-(For HTTPS interception the agent must trust mitmproxy's CA certificate — see
+(For HTTPS interception the agent must trust mitmproxy's CA certificate; see
 the mitmproxy docs for `mitmproxy-ca-cert.pem` setup.)
 
 ## Verifying the proxy is in the path
@@ -125,11 +125,17 @@ if `credential_patterns` is importable.
 
 Three enforcement surfaces, used for different traffic:
 
-- **SDK instrumentation** — in-process, at the tool-call boundary inside an
+- **SDK instrumentation**: in-process, at the tool-call boundary inside an
   agent framework. Can substitute tool results (full steer/throttle).
-- **MCP gateway** (`/v1/mcp/proxy`) — at the network boundary in front of an
+- **MCP gateway** (`/v1/mcp/proxy`): at the network boundary in front of an
   MCP server.
-- **Egress proxy** — at the network boundary for arbitrary outbound HTTP the
+- **Egress proxy**: at the network boundary for arbitrary outbound HTTP the
   agent makes, regardless of framework or protocol.
 
 Use the one(s) matching how your agent reaches the outside world; they compose.
+
+## Related
+
+- [Scope and limitations](scope.md): explicit vs transparent mode, honestly
+- [MCP gateway](mcp.md): the same enforcement for MCP-routed tools
+- [Runtime intervention](intervention.md): the policy language and actions

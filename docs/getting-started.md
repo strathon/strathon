@@ -41,7 +41,7 @@ pip install "strathon[langgraph]"
 
 ## 3. Connect your agent
 
-Add two lines to your existing agent. No other code changes are needed —
+Add two lines to your existing agent. No other code changes are needed:
 Strathon instruments the framework's own extension points.
 
 ```python
@@ -71,7 +71,7 @@ attrs["gen_ai.tool.name"] == "send_email"
 ```
 
 Set the action to `block` and the status to `enabled`. (Start with `shadow`
-status to see what *would* be blocked without actually blocking anything —
+status to see what *would* be blocked without actually blocking anything:
 see [Shadow mode](concepts.md#shadow-mode).)
 
 ## 5. See it work
@@ -86,14 +86,14 @@ sends the message. Open the dashboard:
 
 ## What's next
 
-- **[Policy Engine](intervention.md)** — all seven actions (block, steer,
+- **[Policy Engine](intervention.md)**: all seven actions (block, steer,
   throttle, require_approval, allow, log, alert), allow-list mode, time-based
   rules, versioning.
-- **[CEL Reference](cel-reference.md)** — the policy language, with 20+ examples.
-- **[Human Approval Workflows](intervention.md)** — pause high-risk calls for
+- **[CEL Reference](cel-reference.md)**: the policy language, with 20+ examples.
+- **[Human Approval Workflows](intervention.md)**: pause high-risk calls for
   operator sign-off in the dashboard or Slack.
-- **[Budgets](budgets.md)** — cap model spend and iteration loops per project,
+- **[Budgets](budgets.md)**: cap model spend and iteration loops per project,
   agent, or model.
-- **[Framework guides](frameworks/)** — setup for all 10 supported frameworks.
-- **[Self-Hosting](self-hosting.md)** — production deployment, environment
+- **[Framework guides](frameworks/)**: setup for all 10 supported frameworks.
+- **[Self-Hosting](self-hosting.md)**: production deployment, environment
   variables, scaling.

@@ -27,7 +27,7 @@ stra_dev_local_default_project_do_not_use_in_production
 ```
 
 This key is hard-coded into the migration so demos work out of the box. **It
-is not a secret** — anyone with HTTP access to your receiver can use it.
+is not a secret**: anyone with HTTP access to your receiver can use it.
 Rotate immediately when moving to a shared or production deployment (see
 "Rotating the dev key" below).
 
@@ -104,7 +104,7 @@ Before any production deployment, do this:
      -H "Authorization: Bearer $STRATHON_NEW_API_KEY"
    ```
 
-   (Authenticate this call with the *new* key — once the dev key is revoked,
+   (Authenticate this call with the *new* key: once the dev key is revoked,
    it can no longer authorize anything, including its own revocation if you
    get the order wrong. Revoking with the new key avoids the chicken-and-egg.)
 
@@ -118,7 +118,7 @@ specific scope (`/v1/api_keys` requires `api_keys:read` for GET and
 `api_keys:write` for POST/DELETE). The seeded dev key has the wildcard `*`;
 production keys should be minted with only the scopes they need. The one
 operational consequence of the well-known dev key: until you rotate it,
-anyone with HTTP access to your receiver can act as the default project —
+anyone with HTTP access to your receiver can act as the default project:
 which is why rotation is step one of any shared or production deployment.
 
 ## What happens on auth failure
@@ -133,3 +133,9 @@ which is why rotation is step one of any shared or production deployment.
 
 All failure responses are intentionally identical to avoid leaking which
 prefixes exist in the database.
+
+## Related
+
+- [RBAC](rbac.md): dashboard roles, sessions, and MFA
+- [Projects](projects.md): every key is scoped to one project
+- [Audit log](audit.md): key creation and revocation are recorded

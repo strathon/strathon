@@ -11,6 +11,7 @@ standards, and the PR process.
 git clone https://github.com/strathon/strathon.git
 cd strathon
 docker compose up -d postgres
+export DATABASE_URL="postgresql://strathon:strathon_dev@localhost:5432/strathon"
 
 # Receiver
 cd receiver
@@ -44,7 +45,6 @@ strathon --version
 
 **Security rules (non-negotiable):**
 - No secrets in code — env vars only
-- No competitor product names in code, comments, or commits
 - `hmac.compare_digest` for all secret comparisons, never `==`
 - `extra="forbid"` on all Pydantic request models
 - Parameterized SQL only — never f-strings with user input

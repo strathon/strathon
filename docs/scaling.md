@@ -1,7 +1,7 @@
 # Scaling Guide
 
 Strathon scales from a single-instance development setup to high-volume
-production. This guide explains how, and — importantly — where the real
+production. This guide explains how and, importantly, where the real
 limit is.
 
 ## Measuring throughput on your hardware
@@ -22,9 +22,9 @@ python benchmarks/loadtest.py \
     --requests 5000 --concurrency 16 --batch-size 20
 ```
 
-The harness exercises the complete per-span pipeline — OTLP protobuf parse,
+The harness exercises the complete per-span pipeline: OTLP protobuf parse,
 CEL policy evaluation, credential pattern scan, PII redaction, and the batched
-PostgreSQL write — and reports sustained spans/sec, requests/sec, latency
+PostgreSQL write: and reports sustained spans/sec, requests/sec, latency
 p50/p95/p99, and the error rate, alongside the hardware and config it ran on.
 Re-run it after any tuning to see the effect. The numbers it prints are the
 numbers to publish for your deployment; do not extrapolate.
@@ -43,24 +43,24 @@ SDK → Load Balancer → Receiver 1 ┐
 
 The receiver tier scales close to linearly **until the shared PostgreSQL
 becomes the bottleneck**, which it will: all receivers write to one primary
-database. Past that point, adding receivers does not add throughput — you have
+database. Past that point, adding receivers does not add throughput; you have
 to scale the database. So plan capacity around the database write path, not the
 receiver count:
 
-- **Connection pressure** — front PostgreSQL with PgBouncer (see below) before
+- **Connection pressure**: front PostgreSQL with PgBouncer (see below) before
   adding many instances, or you will exhaust the connection limit.
-- **Write IOPS / CPU** — a larger PostgreSQL instance (more CPU, faster disk)
+- **Write IOPS / CPU**: a larger PostgreSQL instance (more CPU, faster disk)
   raises the ceiling more reliably than more receivers once the DB is hot.
-- **Read load** — move dashboard/analytics reads to replicas (see below) so
+- **Read load**: move dashboard/analytics reads to replicas (see below) so
   they don't compete with ingest writes on the primary.
-- **Retention** — keep the live partition set bounded (monthly partitioning +
+- **Retention**: keep the live partition set bounded (monthly partitioning +
   detaching old partitions) so write performance doesn't degrade over time.
 
 If you need throughput beyond what a single well-provisioned primary sustains,
 the next step is partitioning writes across more than one database, which
 Strathon's monthly-partitioned schema is structured for but which is a
 deliberate operational step, not an automatic one. Benchmark your primary
-first — most deployments are far from that ceiling.
+first; most deployments are far from that ceiling.
 
 ## Connection Pooling with PgBouncer
 
@@ -120,7 +120,7 @@ Grafana. A reference Grafana dashboard is included in `grafana/`.
 ## Recommendations by Scale
 
 The receiver count is rarely the constraint; the database is. These are
-starting points — benchmark your primary to size it.
+starting points: benchmark your primary to size it.
 
 | Scale | Setup |
 |-------|-------|
@@ -128,3 +128,9 @@ starting points — benchmark your primary to size it.
 | Startup (< 1K agents) | 1-2 receiver instances, single PostgreSQL |
 | Growth (1K-10K agents) | A few receiver instances, PgBouncer in front of PostgreSQL, scheduled partition maintenance, read replicas for the dashboard |
 | High volume (10K+ agents) | Multiple receivers behind a load balancer, PgBouncer, a dedicated well-provisioned Postgres primary + read replicas. If a single primary's write path is the ceiling, partition writes across databases (a deliberate operational step). |
+
+## Related
+
+- [Self-hosting](self-hosting.md): the single-node baseline this scales from
+- [Metrics](metrics.md): the numbers that tell you when to scale
+- [Retention](retention.md): keep the database bounded

@@ -1,12 +1,23 @@
 # LangGraph Integration
 
-Strathon integrates with LangGraph via LangChain's `BaseCallbackHandler`,
-intercepting tool calls before execution and capturing full trace context.
+Strathon evaluates every LangGraph tool call against your policies before
+it executes: a matched `block` or `throttle` stops the call at the callback
+boundary, before the tool body runs. Integration is two lines via LangChain's
+`BaseCallbackHandler`.
+
+> **Enforcement scope:** the LangChain callback surface is synchronous.
+> `block` and `throttle` enforce (the tool never runs); `steer` is recorded
+> but the original tool still runs; `require_approval` **fails closed** (the
+> call is blocked and recorded) because a sync callback cannot pause for a
+> human decision. For steer substitution or interactive approval, use
+> `enforce_steer` (tool-invoke wrapping). Full picture in the
+> [approval matrix](https://getstrathon.com/docs/intervention#approval-support).
+
 
 ## Installation
 
 ```bash
-pip install strathon[langgraph]
+pip install "strathon[langgraph]"
 ```
 
 ## Setup
@@ -57,7 +68,7 @@ attrs["gen_ai.tool.name"] == "execute_sql"
 
 > **How approval behaves on LangGraph:** LangGraph is instrumented through a
 > synchronous callback (`on_tool_start`), which cannot suspend execution to
-> wait for a human. So a matched `require_approval` policy **fails closed** —
+> wait for a human. So a matched `require_approval` policy **fails closed**:
 > the tool call is blocked (raising `StrathonPolicyBlocked`) and the
 > intervention is recorded, rather than pausing for an interactive decision.
 > For interactive approval that pauses until an operator responds, use a
@@ -81,7 +92,7 @@ attrs["gen_ai.tool.name"] == "web_search"
 
 > **How steer behaves on LangGraph:** because the `on_tool_start` callback
 > cannot substitute a tool's return value, `steer` on this surface is
-> observe-only — the match is recorded (a `strathon.policy.steered` span)
+> observe-only; the match is recorded (a `strathon.policy.steered` span)
 > but the original tool still runs. To actually replace a tool call with a
 > safer alternative, use a tool-invoke surface:
 > `enforce_steer`, or a framework whose hook controls the return value (for

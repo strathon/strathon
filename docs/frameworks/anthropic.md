@@ -1,15 +1,15 @@
 # Anthropic Integration
 
-Strathon instruments the Anthropic Python SDK by wrapping
-`messages.create`. Every Claude call is traced with model parameters,
-token usage, and response content.
+Trace every Claude call your agents make: model parameters, token usage,
+response content, and cost, captured by wrapping `messages.create` in the
+Anthropic Python SDK.
 
 > **Enforcement scope:** this integration is observability-only. It wraps
 > the LLM call (`messages.create`), not tool execution, so it records what
 > the model does but does not block, throttle, steer, or gate tool calls.
 > Use it for tracing, `log`, and `alert` policies. To *enforce* policies on
 > tool calls (block / throttle / steer / require_approval), instrument the
-> agent framework that runs the tools — for example the
+> agent framework that runs the tools, for example the
 > [Claude Agent SDK](https://getstrathon.com/docs/frameworks/claude-agent-sdk),
 > [LangGraph](https://getstrathon.com/docs/frameworks/langgraph), or another
 > tool-executing integration.
@@ -17,7 +17,7 @@ token usage, and response content.
 ## Installation
 
 ```bash
-pip install strathon[anthropic]
+pip install "strathon[anthropic]"
 ```
 
 ## Setup
@@ -49,7 +49,7 @@ message = client.messages.create(
 - **Latency**: request duration
 - **Messages**: user and assistant messages
 - **Tool use**: the tool calls the model *requests* (name, arguments) as
-  seen in the LLM response — not the tool's actual execution
+  seen in the LLM response, not the tool's actual execution
 
 ## Example Policy
 

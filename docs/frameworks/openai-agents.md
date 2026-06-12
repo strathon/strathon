@@ -1,13 +1,21 @@
 # OpenAI Agents SDK Integration
 
-Strathon integrates with the OpenAI Agents SDK via its official
-`TracingProcessor` extension point, capturing the full span lifecycle
-including tool calls, handoffs, and guardrail evaluations.
+Strathon enforces policies on OpenAI Agents SDK tool calls before they
+execute, with the full action set including interactive approval. Tracing
+rides the official `TracingProcessor` extension point, capturing the span
+lifecycle including handoffs and guardrail evaluations; enforcement injects
+run hooks through the SDK's documented `Runner` entry points.
+
+> **Enforcement scope:** full. The pre-execution hook is async, so all seven
+> actions enforce: `block` and `throttle` stop the call, `steer` substitutes
+> the tool result directly, and `require_approval` pauses until an operator
+> decides (and fails closed on expiry).
+
 
 ## Installation
 
 ```bash
-pip install strathon[openai-agents]
+pip install "strathon[openai-agents]"
 ```
 
 ## Setup
@@ -48,7 +56,7 @@ attrs["gen_ai.agent.name"] == "research_agent"
 ## Notes
 
 - Tracing uses the official `TracingProcessor` protocol. Enforcement wraps
-  `Runner.run` / `run_sync` / `run_streamed` to inject Strathon `RunHooks` —
+  `Runner.run` / `run_sync` / `run_streamed` to inject Strathon `RunHooks`:
   a wrap of the framework's documented entry point, since the SDK exposes no
   pre-execution policy hook of its own.
 - Requires `openai-agents>=0.6.0` (installed by the `openai-agents` extra).

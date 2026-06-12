@@ -39,6 +39,22 @@ instrument(client, frameworks=["openai"])
 # and enforces CEL policies before tool execution.
 ```
 
+## Enforce
+
+A policy with action `block` stops the call before the tool body runs:
+
+```python
+from strathon import StrathonPolicyBlocked
+
+try:
+    agent.run("Email the Q3 numbers to sales@competitor.com")
+except StrathonPolicyBlocked as e:
+    print(f"Blocked by policy: {e.policy_name}")
+    # The tool call never executed. Recorded in the audit trail.
+```
+
+Seven actions: block, steer, throttle, log, alert, require_approval, allow.
+
 ## What gets captured
 
 - Every LLM call: model, tokens in/out, cost, latency
@@ -55,4 +71,4 @@ instrument(client, frameworks=["openai"])
 
 ## License
 
-Apache License 2.0. See [LICENSE](https://github.com/strathon/strathon/blob/main/LICENSE).
+Apache License 2.0. See [LICENSE](https://github.com/strathon/strathon/blob/main/sdk/LICENSE).

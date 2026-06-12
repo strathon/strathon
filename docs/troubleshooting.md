@@ -7,7 +7,7 @@ ask in [Discord](https://discord.gg/Ta9XRmh4H) or open a
 ## My policy isn't matching
 
 The most common cause: a CEL match expression that references an attribute the
-span doesn't have. Strathon's CEL evaluation **fails safe** — a missing-key
+span doesn't have. Strathon's CEL evaluation **fails safe**; a missing-key
 error is treated as "no match" (the call is allowed), so a typo'd attribute
 name silently never matches. Check:
 
@@ -44,7 +44,7 @@ than stalling. A brief outage does not break your agent.
 
 For security-critical agents you can set `fail_closed=True`, which stops tool
 calls when policy state cannot be verified within
-`fail_closed_max_staleness_sec`. Choose deliberately — fail-open prioritizes
+`fail_closed_max_staleness_sec`. Choose deliberately: fail-open prioritizes
 uptime, fail-closed prioritizes control. See the Reliability section of the
 README.
 
@@ -64,7 +64,7 @@ an active member automatically.
 ## A new user registered but has no access
 
 After the first user (who becomes owner), new registrations do not get project
-access automatically — access is granted by invitation. An owner or admin
+access automatically; access is granted by invitation. An owner or admin
 invites the email; when that person registers, they join with the invited role.
 This prevents anyone who can reach the registration page from joining your
 project.
@@ -72,7 +72,7 @@ project.
 ## How do I rotate or revoke an API key?
 
 In **Settings → API Keys**, use the actions menu on a key. **Rotate** issues a
-new secret and invalidates the old one immediately — copy the new secret, it is
+new secret and invalidates the old one immediately; copy the new secret, it is
 shown only once. **Revoke** disables the key without issuing a replacement. See
 [API Keys](api_keys.md).
 
@@ -94,14 +94,23 @@ for the supported setups.
 ## Timestamps look wrong / show UTC
 
 The dashboard renders all timestamps in your browser's local timezone
-automatically. If a time looks off, check your machine's timezone setting —
+automatically. If a time looks off, check your machine's timezone setting:
 there is no manual timezone selector to misconfigure.
 
 ## Is my own data export gated behind a paid plan?
 
 No. Manual, on-demand export of your own data (policies, traces, spans,
 approvals, agents, audit, budgets, compliance) is free in the open-source
-build. Automated or scheduled streaming to a SIEM is an enterprise feature.
+build. Automated or scheduled streaming to a SIEM is planned for the
+commercial enterprise edition (see [LICENSING.md](../LICENSING.md)).
+
+## `zsh: no matches found: strathon[langgraph]`
+
+zsh treats square brackets as glob characters. Quote the extra:
+
+```bash
+pip install "strathon[langgraph]"
+```
 
 ## Where do I report a security issue?
 

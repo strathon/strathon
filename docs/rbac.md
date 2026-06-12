@@ -2,8 +2,8 @@
 
 Strathon supports two authentication methods:
 
-1. **API keys** — for SDK telemetry ingestion and programmatic access
-2. **Session tokens** — for dashboard users with email/password auth
+1. **API keys**: for SDK telemetry ingestion and programmatic access
+2. **Session tokens**: for dashboard users with email/password auth
 
 ## Roles
 
@@ -110,7 +110,7 @@ Session tokens are user-scoped (one token, multiple projects). When using sessio
 X-Project-Id: <project-uuid>
 ```
 
-API keys don't need this header — they're already project-scoped.
+API keys don't need this header; they're already project-scoped.
 
 ## API keys
 
@@ -124,7 +124,7 @@ all under `/v1/auth`:
 | Endpoint | What it does |
 |----------|--------------|
 | `POST /v1/auth/mfa/setup` | Generates a TOTP secret for the current user (session auth). Returns the base32 secret and an `otpauth://` URI for QR scanning. |
-| `POST /v1/auth/mfa/verify-setup` | Verifies a TOTP code and enables MFA. Returns one-time backup codes — store them safely. |
+| `POST /v1/auth/mfa/verify-setup` | Verifies a TOTP code and enables MFA. Returns one-time backup codes: store them safely. |
 | `POST /v1/auth/mfa/verify` | Completes an MFA login: takes the short-lived `mfa_token` from the login response plus a TOTP or backup code, returns a full session token. |
 | `POST /v1/auth/mfa/disable` | Disables MFA. Requires the current password and a valid TOTP code. |
 

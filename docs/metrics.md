@@ -13,7 +13,7 @@ GET /metrics
 ```
 
 Returns text in the standard Prometheus exposition format. Unauthenticated
-by design — Prometheus scrapers commonly run without credentials. Restrict
+by design: Prometheus scrapers commonly run without credentials. Restrict
 via network ACL or reverse proxy if you don't want it public.
 
 Sample Prometheus scrape config:
@@ -177,3 +177,9 @@ Set log verbosity with `STRATHON_LOG_LEVEL` (default `INFO`):
 ```bash
 STRATHON_LOG_LEVEL=DEBUG STRATHON_LOG_FORMAT=json uvicorn main:app …
 ```
+
+## Related
+
+- [Analytics](analytics.md): agent-level insights vs receiver-level metrics
+- [Scaling guide](scaling.md): what to watch as volume grows
+- [Self-hosting](self-hosting.md): health endpoints and deployment

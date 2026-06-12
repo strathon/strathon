@@ -23,7 +23,7 @@ instrument(client, frameworks=["langgraph"])
 
 | Framework | Integration | Guide |
 |-----------|-------------|-------|
-| **LangGraph** | LangChain `BaseCallbackHandler` — intercepts tool calls before execution | [langgraph.md](langgraph.md) |
+| **LangGraph** | LangChain `BaseCallbackHandler`: intercepts tool calls before execution | [langgraph.md](langgraph.md) |
 | **CrewAI** | Event listener on the CrewAI event bus | [crewai.md](crewai.md) |
 | **LangChain** | Same callback handler as LangGraph | [langchain.md](langchain.md) |
 | **OpenAI Agents SDK** | `TracingProcessor` extension point | [openai-agents.md](openai-agents.md) |
@@ -39,7 +39,7 @@ instrument(client, frameworks=["langgraph"])
 If you are building production agents and not already committed to a framework,
 LangGraph is the most widely deployed choice for stateful, auditable workflows
 and is the best-supported integration here. If you already use a framework,
-pick its guide above — every integration captures the same trace data and
+pick its guide above; every integration captures the same trace data and
 enforces the same policies.
 
 The raw model-SDK wrappers (OpenAI, Anthropic) instrument direct model calls

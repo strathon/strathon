@@ -1,13 +1,23 @@
 # LangChain Integration
 
-Strathon integrates with LangChain via `BaseCallbackHandler`, the same
-handler used for LangGraph. Chains, agents, tools, and LLM calls are
-all traced automatically.
+Strathon evaluates every LangChain tool call against your policies before
+it executes: a matched `block` or `throttle` stops the call at the callback
+boundary. Chains, agents, tools, and LLM calls are traced automatically with
+the same `BaseCallbackHandler` used for LangGraph.
+
+> **Enforcement scope:** the LangChain callback surface is synchronous.
+> `block` and `throttle` enforce (the tool never runs); `steer` is recorded
+> but the original tool still runs; `require_approval` **fails closed** (the
+> call is blocked and recorded) because a sync callback cannot pause for a
+> human decision. For steer substitution or interactive approval, use
+> `enforce_steer` (tool-invoke wrapping). Full picture in the
+> [approval matrix](https://getstrathon.com/docs/intervention#approval-support).
+
 
 ## Installation
 
 ```bash
-pip install strathon[langchain]
+pip install "strathon[langchain]"
 ```
 
 ## Setup

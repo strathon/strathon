@@ -3,7 +3,7 @@
 Strathon supports server-side sampling at ingest time to control storage
 cost without losing audit-critical spans. The sampling decision is made
 per-span as it arrives at the receiver, after the SDK has already enforced
-any block/steer policies — so policy enforcement is unaffected by sampling.
+any block/steer policies, so policy enforcement is unaffected by sampling.
 
 ## Configuration
 
@@ -56,11 +56,11 @@ tools that didn't trigger policy) get dropped.
 
 Routine spans are sampled deterministically by hashing the OTel `trace_id`
 to a uniform `[0, 1)` value (the standard `TraceIdRatioBased` approach,
-using the upper 53 bits of the trace_id's lower 8 bytes — exactly
+using the upper 53 bits of the trace_id's lower 8 bytes: exactly
 representable in IEEE-754 doubles).
 
 **All spans of a given trace get the same keep/drop decision.** This means
-you never end up with partial traces in storage — either the whole trace
+you never end up with partial traces in storage: either the whole trace
 is kept or none of it. The receiver doesn't need to buffer trace state to
 guarantee this; the hash-based decision is stable across spans of the same
 trace.
@@ -98,3 +98,9 @@ The receiver maintains in-memory counters for sampling decisions:
 
 These are exposed via the `/metrics` Prometheus endpoint, and are also
 accessible via the FastAPI app state for debugging.
+
+## Related
+
+- [Retention](retention.md): the other storage-cost lever
+- [Scaling guide](scaling.md): when sampling starts to matter
+- [Metrics](metrics.md): sampling counters to watch

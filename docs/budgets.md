@@ -38,7 +38,7 @@ Cost budgets use **fixed-window** reset, the same shape LiteLLM and
 every other LLM gateway uses for cost caps. A budget with
 `budget_duration='30d'` created at 3:17pm on May 1 resets at 3:17pm on
 May 31, then 3:17pm on June 30, and so on. There's no calendar
-alignment — operators who want "resets at midnight UTC" can create
+alignment; operators who want "resets at midnight UTC" can create
 the budget at midnight.
 
 Iteration budgets use a **rolling** window (last N seconds). Loop
@@ -47,8 +47,8 @@ would let a runaway loop survive a boundary reset.
 
 ## Why cost is on the span (not a counter)
 
-The naive design — `UPDATE budgets SET spent_usd = spent_usd + cost`
-on every span ingest — serializes every concurrent ingest on the
+The naive design (`UPDATE budgets SET spent_usd = spent_usd + cost`
+on every span ingest) serializes every concurrent ingest on the
 same project on one row. At scale this becomes the bottleneck.
 
 Strathon writes the cost on each span (the `spans.cost_usd` column,
@@ -124,7 +124,7 @@ require a migration.
 GET /v1/budgets/{id}/spend
 ```
 
-Returns the **live** aggregation — runs the SUM query, not the
+Returns the **live** aggregation: runs the SUM query, not the
 cached snapshot the monitor writes. For dashboards that need
 authoritative numbers vs the few-second staleness of the cached
 value.
@@ -136,7 +136,7 @@ PATCH  /v1/budgets/{id}
 DELETE /v1/budgets/{id}
 ```
 
-PATCH cannot change `scope` or `budget_duration` — changing these
+PATCH cannot change `scope` or `budget_duration`: changing these
 invalidates the existing spend tracking. Create a new budget if you
 need a different scope or window.
 
@@ -183,8 +183,8 @@ dashboards rather than silently misattributing spend.
 ## Composition with operator halts
 
 The halt mechanism is shared with operator kill-switches (see
-[intervention.md](intervention.md)). An active halt — whether from
-the budget monitor or from an operator — raises
+[intervention.md](intervention.md)). An active halt, whether from
+the budget monitor or from an operator, raises
 `StrathonHaltExceeded` at the SDK's tool boundary.
 
 If both an operator halt and a budget halt are active, either is
@@ -198,7 +198,7 @@ replicas' ticks see the lock held, skip the work, and try again on
 their next tick. No extra coordination service required.
 
 **Caveat**: If you run PgBouncer in transaction-pooling mode
-(`pool_mode=transaction`), advisory locks don't work correctly —
+(`pool_mode=transaction`), advisory locks don't work correctly:
 connections are recycled between transactions, releasing the lock
 unexpectedly. Either use session pooling (`pool_mode=session`) for
 the receiver's connections, or run the receiver against Postgres
@@ -211,7 +211,7 @@ exists per agent and per tool, and follows the standard
 CLOSED → OPEN → HALF-OPEN pattern: it trips when an entity accumulates too
 many error-status spans inside a sliding window, holds OPEN for a cooldown,
 then probes recovery through HALF-OPEN before closing again. Breakers
-require no setup — they are created automatically the first time an agent or
+require no setup; they are created automatically the first time an agent or
 tool reports activity.
 
 ### What a tripped breaker does
@@ -226,7 +226,7 @@ Be precise about the semantics, because they differ from halts:
   enforcement lives in the SDK policy engine and in halts. A breaker is the
   automatic, self-recovering *signal* that an agent or tool is repeatedly
   failing; to turn that signal into a hard stop, create a halt on the agent
-  (manually, or from your alerting automation) — `StrathonHaltExceeded` then
+  (manually, or from your alerting automation): `StrathonHaltExceeded` then
   stops the agent at the tool boundary, exactly as with budget halts above.
 
 State is held in receiver memory and resets on restart (breakers re-learn

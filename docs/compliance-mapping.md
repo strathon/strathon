@@ -61,7 +61,7 @@ purpose and enable traceability.
 
 | Requirement | Strathon implementation |
 |---|---|
-| Automatic event logging | OTLP protobuf ingest captures every agent span automatically. No manual instrumentation needed — SDK auto-instruments 10 frameworks. |
+| Automatic event logging | OTLP protobuf ingest captures every agent span automatically. No manual instrumentation needed: SDK auto-instruments 10 frameworks. |
 | Traceability | Trace tree endpoint (`GET /v1/traces/{trace_id}/tree`) reconstructs the full execution graph of any agent session. |
 | Tamper-evident records | HMAC-SHA256 hash chain on the audit log. Per-minute Merkle root anchors. Any modification to historical records is cryptographically detectable. |
 | Log retention | Configurable per-project retention with automatic partition management (premake 3 months, drop after retention window). |
@@ -214,3 +214,9 @@ For organizations preparing for the EU AI Act high-risk deadline (December 2, 20
 Strathon's audit log, policy engine, kill-switches, and budget controls
 provide the Article 12 (record-keeping) and Article 14 (human oversight)
 capabilities that are the most scrutinized during conformity assessment.
+
+## Related
+
+- [Audit log](audit.md): the tamper-evident trail behind the evidence
+- [Scope and limitations](scope.md): what Strathon does and does not cover
+- [Runtime intervention](intervention.md): the enforcement these controls map to

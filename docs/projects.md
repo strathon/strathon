@@ -28,7 +28,7 @@ Returns:
 
 Creating a project also creates its `project_settings` row (with
 defaults) and mints an initial API key with SDK-default scopes. The
-key plaintext is returned in the response and is never stored — record
+key plaintext is returned in the response and is never stored: record
 it immediately.
 
 Slug rules: 3–64 characters, lowercase alphanumeric plus hyphens,
@@ -81,3 +81,9 @@ retained for audit purposes.
 
 All project management endpoints require `projects:manage` scope.
 The wildcard scope (`*`) includes it.
+
+## Related
+
+- [RBAC](rbac.md): per-project roles and membership
+- [API keys](api_keys.md): keys resolve to exactly one project
+- [Retention](retention.md): retention is configured per project

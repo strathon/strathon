@@ -1,7 +1,7 @@
 # Retention
 
 Strathon automatically deletes traces older than each project's configured
-retention window. The deletion cascades through FK constraints — removing
+retention window. The deletion cascades through FK constraints: removing
 a trace removes its spans, span_events, span_links, and policy_matches in
 one operation.
 
@@ -111,3 +111,9 @@ A healthy receiver should show `sweeps_total` incrementing on the
 configured interval and `sweep_errors_total` staying at 0. If
 `traces_deleted_total` is climbing rapidly, your retention window may
 be too short for ingest volume.
+
+## Related
+
+- [Sampling](sampling.md): reduce what you store before it ages out
+- [Scaling guide](scaling.md): retention and partitioning under load
+- [Projects](projects.md): retention windows are per project

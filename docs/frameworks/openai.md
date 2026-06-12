@@ -1,22 +1,22 @@
 # OpenAI Integration
 
-Strathon instruments the OpenAI Python SDK by wrapping
-`chat.completions.create`. Every LLM call is traced with full model
-parameters, token usage, and response content.
+Trace every OpenAI call your agents make: model parameters, token usage,
+response content, and cost, captured by wrapping `chat.completions.create`
+in the OpenAI Python SDK.
 
 > **Enforcement scope:** this integration is observability-only. It wraps
 > the LLM call (`chat.completions.create`), not tool execution, so it
 > records what the model does but does not block, throttle, steer, or gate
 > tool calls. Use it for tracing, `log`, and `alert` policies. To *enforce*
 > policies on tool calls, instrument the agent framework that runs the
-> tools — for example the
+> tools, for example the
 > [OpenAI Agents SDK](https://getstrathon.com/docs/frameworks/openai-agents)
 > or another tool-executing integration.
 
 ## Installation
 
 ```bash
-pip install strathon[openai]
+pip install "strathon[openai]"
 ```
 
 ## Setup
@@ -50,7 +50,7 @@ response = openai.chat.completions.create(
 ## Example Policy
 
 Alert when an expensive model is used in development, so you can track
-spend (use `alert` or `log` — this surface observes, it does not block):
+spend (use `alert` or `log`; this surface observes, it does not block):
 
 ```cel
 attrs["gen_ai.request.model"] == "gpt-4o"

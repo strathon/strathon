@@ -7,9 +7,17 @@ A policy can log, alert, steer, or **block** the action. This is the difference
 between "you discover the problem in the dashboard tomorrow" and "the bad email
 never leaves your servers."
 
+**On this page:** [CEL expressions](#policy-expressions-cel) ·
+[Actions](#actions) · [Version history](#policy-version-history) ·
+[Halts](#operator-kill-switches-halts) · [Budgets](#cost-and-iteration-budgets) ·
+[Webhooks](#webhook-delivery-for-alert-policies) · [Scoping](#scoping-with-applies_to) ·
+[Creating a policy](#creating-a-policy) · [Framework support](#framework-support) ·
+[Enforcing in code](#enforcing-in-your-agent-code) · [API](#crud-endpoints) ·
+[Audit trail](#audit-trail)
+
 ## Policy expressions: CEL
 
-Policies are written in [Common Expression Language (CEL)][cel] — the same
+Policies are written in [Common Expression Language (CEL)][cel], the same
 language Kubernetes admission policies, Envoy filters, gRPC interceptors, and
 gcloud IAM conditions use. CEL is:
 
@@ -66,7 +74,7 @@ attrs["strathon.tool.args"].contains("@competitor.com")
 ```
 
 In practice, when a policy errors out the SDK treats it as a non-match (the
-action is allowed), so missing-key errors fail safe — but they generate log
+action is allowed), so missing-key errors fail safe, but they generate log
 noise and reduce policy effectiveness. Use `has()` for any attribute that
 isn't guaranteed to exist on every span.
 
@@ -85,7 +93,7 @@ A policy has one of seven actions:
 | `allow`    | Admits the call and short-circuits subsequent policies. Useful for carve-outs and required for allow-list mode.                       | SDK (client)  |
 
 `block`, `steer`, `throttle`, `require_approval`, and `allow` actually
-affect the call. They are enforced at the point the action happens — in
+affect the call. They are enforced at the point the action happens: in
 the SDK for instrumented agents, at the [MCP gateway](https://getstrathon.com/docs/mcp)
 for MCP tool calls, and at the [egress proxy](https://getstrathon.com/docs/egress)
 for outbound network requests. By the time a span reaches the server, the
@@ -100,11 +108,11 @@ human:
 
 | Surface | `require_approval` behavior |
 |---------|------------------------------|
-| `enforce_steer` (tool-invoke wrapping), CrewAI | **Interactive** — pauses until an operator approves or denies in the dashboard or Slack |
-| OpenAI Agents SDK, AutoGen, Google ADK, Claude Agent SDK | **Interactive** — async pre-execution hooks pause for the operator decision |
-| LangGraph, LangChain, Pydantic AI | **Fails closed** — the synchronous callback cannot pause, so the call is blocked and recorded (use a surface above for interactive approval) |
+| `enforce_steer` (tool-invoke wrapping), CrewAI | **Interactive**: pauses until an operator approves or denies in the dashboard or Slack |
+| OpenAI Agents SDK, AutoGen, Google ADK, Claude Agent SDK | **Interactive**: async pre-execution hooks pause for the operator decision |
+| LangGraph, LangChain, Pydantic AI | **Fails closed**: the synchronous callback cannot pause, so the call is blocked and recorded (use a surface above for interactive approval) |
 | MCP gateway | Returns an approval-required error to the caller |
-| Anthropic / OpenAI LLM integrations | Observability-only — no tool-call enforcement; use `log`/`alert` here |
+| Anthropic / OpenAI LLM integrations | Observability-only, no tool-call enforcement; use `log`/`alert` here |
 
 The same async/sync distinction applies to `steer`: surfaces that control
 the return value (direct tool-invoke wrapping, async hooks, the plugin
@@ -112,7 +120,7 @@ frameworks, the gateway) substitute the replacement; the synchronous callback
 surfaces (LangGraph, LangChain) record the steer but the original tool still
 runs, so use `block` there for hard prevention. Pydantic AI's pre-execution
 hook, although synchronous, short-circuits with the replacement, so steer
-substitutes there — it is only interactive approval that its hook cannot
+substitutes there; it is only interactive approval that its hook cannot
 serve.
 
 ### Throttle action config
@@ -130,28 +138,28 @@ serve.
 }
 ```
 
-- `max_calls` (required, positive integer) — token-bucket capacity.
-- `window_seconds` (required, positive number) — interval over which
+- `max_calls` (required, positive integer): token-bucket capacity.
+- `window_seconds` (required, positive number): interval over which
   the bucket refills back to capacity. Combined with `max_calls`, this
   yields a sustained rate of `max_calls / window_seconds` calls per
   second per scope key.
-- `scope` (optional, defaults to `"agent"`) — what the bucket is keyed
+- `scope` (optional, defaults to `"agent"`): what the bucket is keyed
   by:
   - `"agent"`: one bucket per `(policy, agent_id)`. The most common
-    semantic — "no single agent calls this tool more than N times per
+    semantic: "no single agent calls this tool more than N times per
     window."
   - `"global"`: one shared bucket per policy. Use this for
     project-wide caps that apply regardless of which agent invoked.
 
 Throttle decisions raise `StrathonPolicyThrottled`, which is a subclass
-of `StrathonPolicyBlocked` — existing `except StrathonPolicyBlocked`
+of `StrathonPolicyBlocked`; existing `except StrathonPolicyBlocked`
 handlers continue to catch it. Code that wants to distinguish a
 throttle (and backoff-and-retry) from a hard block (and escalate) can
 catch `StrathonPolicyThrottled` specifically. The exception carries
 `retry_after_seconds` so a retry loop can sleep for the right amount.
 
 When a throttle policy *admits* a call (the bucket had a token), the
-SDK does not short-circuit — lower-priority `block` or `steer`
+SDK does not short-circuit; lower-priority `block` or `steer`
 policies still get evaluated. A throttle that admits is "no opinion
 on this call." A throttle that denies short-circuits with the throttle
 decision.
@@ -163,18 +171,18 @@ rate limiter; see `docs/self-hosting.md` for the multi-replica note.
 
 #### Counting SDK-side throttle decisions
 
-The SDK doesn't expose its own Prometheus `/metrics` endpoint — that
+The SDK doesn't expose its own Prometheus `/metrics` endpoint; that
 matches LaunchDarkly's architecture, where application-embedded SDKs
 emit analytics events and the server-side Relay Proxy aggregates them.
 Strathon's equivalent is the intervention span: every `throttle`
 decision (and every `block`, `steer`, and synthetic-deny in allow-list
 mode) emits an intervention span with a boolean
-`strathon.policy.<decision_kind>` attribute set to `true` — concretely
+`strathon.policy.<decision_kind>` attribute set to `true`: concretely
 `strathon.policy.throttled`, `strathon.policy.blocked`, or
 `strathon.policy.steered`, along with `strathon.policy.id` and
 `strathon.policy.name`. To count SDK-side throttle decisions, query
-intervention spans where `strathon.policy.throttled = true` — by
-policy, by agent, by tool — over whatever window matters. The
+intervention spans where `strathon.policy.throttled = true`, by
+policy, by agent, by tool, over whatever window matters. The
 receiver's own `strathon_receiver_rate_limit_rejections_total` counter
 covers the HTTP-edge limiter only; it does not count SDK-side policy
 throttles.
@@ -185,8 +193,8 @@ By default, a call that doesn't match any policy is admitted. This is
 the permissive posture and works well for projects that use Strathon
 primarily for observability + spot-fix policies.
 
-For environments that need the inverse — "list everything that's
-permitted, deny the rest" — flip the project into allow-list mode by
+For environments that need the inverse ("list everything that's
+permitted, deny the rest"), flip the project into allow-list mode by
 setting `intervention_default_action` to `block`:
 
 ```bash
@@ -225,7 +233,7 @@ Evaluation rules:
   policy whose action affects control flow (`block`, `steer`,
   `throttle` when denied, or `allow`) short-circuits.
 - A higher-priority `block` beats a lower-priority `allow`. The
-  priority ordering is preserved across action types — there is no
+  priority ordering is preserved across action types; there is no
   "allow always wins" or "deny always wins" override.
 - A matched `allow` short-circuits subsequent policies in BOTH modes.
   Outside allow-list mode, that lets operators carve a specific tool
@@ -236,7 +244,7 @@ Evaluation rules:
 
 #### Contrast with IAM / Cedar / OPA
 
-AWS IAM and Cedar enforce "explicit `deny` always wins" — an explicit
+AWS IAM and Cedar enforce "explicit `deny` always wins"; an explicit
 deny statement supersedes any explicit allow, regardless of priority.
 OPA/Rego explicitly leaves the choice to the policy author: "neither
 allow nor deny are keywords in Rego, so if you want to treat them as
@@ -264,7 +272,7 @@ read and write both; production keys should be scoped narrowly.
 ### Time-based policies
 
 Every policy match expression is evaluated against a context that
-includes `now` — a CEL `timestamp` of the current UTC time at the
+includes `now`: a CEL `timestamp` of the current UTC time at the
 moment of evaluation. Operators write time conditions using the
 standard CEL timestamp methods, the same surface that gcloud IAM,
 Envoy, and Kubernetes admission policies expose. Methods include:
@@ -281,8 +289,8 @@ Envoy, and Kubernetes admission policies expose. Methods include:
 | `now.getMinutes()`              | 0-59                          |
 | `now.getSeconds()`              | 0-59                          |
 
-All of these accept an optional IANA timezone string —
-`now.getHours("America/Los_Angeles")` — so operators in non-UTC
+All of these accept an optional IANA timezone string
+(`now.getHours("America/Los_Angeles")`), so operators in non-UTC
 deployments can write policies in local terms without doing offset
 math themselves.
 
@@ -366,13 +374,13 @@ Requires `policies:read` scope.
 
 ## Operator kill-switches: halts
 
-Policies are *conditional* — they fire when a CEL expression matches. Halts
+Policies are *conditional*; they fire when a CEL expression matches. Halts
 are *unconditional*: they stop an agent regardless of what it's trying to do.
 This is the "something's clearly wrong, stop everything" lever.
 
 A halt is a row in `halt_state` with a scope (`agent` or `project`), an
 optional reason, and an `actor` recording who created it (`user` for an
-operator, `budget_monitor` for the automatic kind — see the budgets
+operator, `budget_monitor` for the automatic kind: see the budgets
 section below).
 
 ### Creating a halt
@@ -394,7 +402,7 @@ halt and starts raising `StrathonHaltExceeded` at every tool-call boundary
 for the matching scope.
 
 Project-scope halts (`scope=project`, no `scope_value`) match every agent
-in the project — the "kill the whole product" lever for cases where you
+in the project: the "kill the whole product" lever for cases where you
 don't know which agent's misbehaving. Agent-scope halts only match calls
 whose `gen_ai.agent.id` (or `strathon.agent.id`) equals `scope_value`.
 
@@ -416,7 +424,7 @@ scope, scope_value, and reason. The user's tool function body never
 executes.
 
 A halt check failing (network blip during refresh) is fail-open by
-default — the SDK uses its last-known halt cache rather than blocking
+default; the SDK uses its last-known halt cache rather than blocking
 every call. Operators who prefer safer-but-noisier semantics can opt
 into fail-closed mode by passing `fail_closed=True` on the client:
 
@@ -451,7 +459,7 @@ seeded dev key has `*`; production keys should be scoped narrowly.
 
 ### Audit trail
 
-Every halt row is preserved on clear — the `cleared_at` column is
+Every halt row is preserved on clear; the `cleared_at` column is
 stamped rather than deleting the row, so the history of who created
 and cleared a halt remains queryable for as long as the row exists.
 Retention sweeps don't touch `halt_state` today; if you need bounded
@@ -487,7 +495,7 @@ webhook senders (Stripe, GitHub, OpenAI, Svix) converged on:
 - **Durable retries**. Each delivery is a row in `webhook_deliveries`
   with a status (`pending`/`succeeded`/`failed_retrying`/`dlq`/
   `abandoned`). Failed sends retry with exponential backoff
-  (defaults: 8 attempts, 1s base, 6h cap — total ~24h window). 5xx,
+  (defaults: 8 attempts, 1s base, 6h cap: total ~24h window). 5xx,
   timeouts, connection errors, and 429s retry. 4xx (other than 429),
   3xx, and malformed URLs are marked `abandoned`. Exhausted retries
   move to `dlq` for operator review.
@@ -508,7 +516,7 @@ curl -X POST http://localhost:4318/v1/webhook_signing_keys \
 ```
 
 The response includes a `secret` field starting with `whsec_`. **Save
-it now** — the plaintext is shown exactly once and is not recoverable
+it now**; the plaintext is shown exactly once and is not recoverable
 from any subsequent endpoint. Only its SHA-256 hash is persisted.
 
 Persist the plaintext into `STRATHON_WEBHOOK_SIGNING_SECRETS`
@@ -546,7 +554,7 @@ curl "http://localhost:4318/v1/webhook_signing_keys?include_revoked=true" \
 ```
 
 Returns `id`, `prefix` (4-char public handle), `created_at`,
-`revoked_at`. No secret material — list endpoints never reveal
+`revoked_at`. No secret material: list endpoints never reveal
 plaintext or hash.
 
 ### Required scopes
@@ -588,8 +596,8 @@ request via `?cursor=...`. Default page size 50, hard cap 200.
 ### Replaying failed deliveries
 
 When a delivery sits in `dlq` (exhausted retries) or `abandoned` (4xx
-or bad URL) and the operator wants to retry it — say the consumer was
-down longer than the 24h retry window — POST replay:
+or bad URL) and the operator wants to retry it, say the consumer was
+down longer than the 24h retry window, POST replay:
 
 ```bash
 curl -X POST http://localhost:4318/v1/webhook_deliveries/$DELIVERY_ID/replay \
@@ -599,20 +607,20 @@ curl -X POST http://localhost:4318/v1/webhook_deliveries/$DELIVERY_ID/replay \
 Returns 202 Accepted with the row reset to `pending`, `attempts=0`,
 `last_error` cleared. A new Dramatiq message is dispatched after the
 DB commit so the actor picks it up immediately. The replay is
-asynchronous; the 202 is not evidence of consumer success — GET the
+asynchronous; the 202 is not evidence of consumer success: GET the
 delivery again to check its new status.
 
 Replay only works on `dlq` and `abandoned` deliveries. Replaying a
 `succeeded` delivery returns 409 (re-delivering a success is a future
 feature; for now operators reach into the policy and re-trigger via
-their normal flow). Replaying a `pending` delivery returns 409 too —
+their normal flow). Replaying a `pending` delivery returns 409 too:
 the retry middleware is already going to fire.
 
 ### Sweeper
 
 A background loop ("the sweeper") scans `pending` deliveries whose
 `next_attempt_at` is older than a threshold (default 5 minutes). These
-are deliveries whose Dramatiq message never landed — Redis was
+are deliveries whose Dramatiq message never landed: Redis was
 unreachable during dispatch, the receiver crashed between row insert
 and message send, the worker died before consuming the message. The
 sweeper re-dispatches each one.
@@ -626,7 +634,7 @@ Configuration via environment variables (defaults shown):
 | `STRATHON_WEBHOOK_SWEEPER_THRESHOLD_SEC`  | `300`   | Orphan age before re-dispatch |
 | `STRATHON_WEBHOOK_SWEEPER_BATCH`          | `100`   | Max rows per tick |
 
-Re-dispatch is safe — the actor's first action is a status check on the
+Re-dispatch is safe; the actor's first action is a status check on the
 row, and a row that's no longer `pending` is a clean no-op. Aggressive
 thresholds (small `THRESHOLD_SEC`) waste queue capacity on legitimate
 in-flight messages; conservative thresholds extend the outage recovery
@@ -645,7 +653,7 @@ observability:
 | `strathon_receiver_webhook_sweeper_runs_total`          | Counter | —        | Sweeper ticks completed |
 | `strathon_receiver_webhook_sweeper_reclaimed_total`     | Counter | —        | Orphan rows the sweeper re-dispatched |
 
-The standard alerting target is `strathon_receiver_webhook_dlq_total` —
+The standard alerting target is `strathon_receiver_webhook_dlq_total`:
 any non-zero increase means an alert hit DLQ and an operator should
 investigate via the REST endpoints above.
 
@@ -674,7 +682,7 @@ specific spans, set `applies_to` to a list of dot-segment-path tokens:
 A token matches a span name if and only if it aligns with one or more
 whole dot-separated segments of the name. So `"tool"` matches
 `"langgraph.tool.send_email"` because `tool` is one of the segments,
-but does **not** match `"langgraph.pool.X"` — the substring `tool`
+but does **not** match `"langgraph.pool.X"`; the substring `tool`
 appearing inside `pool` is not a segment-aligned match. Multi-segment
 tokens work too: `"langgraph.tool"` matches LangGraph tool spans but
 not CrewAI tool spans.
@@ -707,7 +715,7 @@ curl -X POST http://localhost:4318/v1/policies \
 Strathon enforces policies at the tool-call boundary on every supported
 framework. Block enforcement is zero-code-change: `instrument(client)` is
 all the user does. Steer enforcement requires one extra line per tool
-(or per agent) — replacing a tool's return value is a bigger contract
+(or per agent): replacing a tool's return value is a bigger contract
 change than refusing to call, so we ask the user to opt in explicitly.
 
 | Framework            | Block (auto)        | Steer            | Steer opt-in call (callback frameworks only)            |
@@ -715,10 +723,10 @@ change than refusing to call, so we ask the user to opt in explicitly.
 | LangGraph (LangChain)| `instrument(client)`| Per-tool opt-in  | `from strathon.policy import enforce_steer; enforce_steer(tool, client)` |
 | CrewAI               | `instrument(client)`| Auto (per-tool optional) | `enforce_steer(tool, client)` (optional; class patch already covers steer) |
 | OpenAI Agents SDK    | `instrument(client)`| Per-agent opt-in | `from strathon.instrumentation.openai_agents import attach_strathon_guardrails; attach_strathon_guardrails(agent, client)` |
-| Pydantic AI          | `instrument(client)`| Auto             | not needed — plugin substitutes the tool result directly |
-| Google ADK           | `instrument(client)`| Auto             | not needed — plugin short-circuits with the replacement |
-| AutoGen              | `instrument(client)`| Auto             | not needed — plugin substitutes the tool result directly |
-| Claude Agent SDK     | `instrument(client)`| Auto             | not needed — plugin substitutes the tool result directly |
+| Pydantic AI          | `instrument(client)`| Auto             | not needed: plugin substitutes the tool result directly |
+| Google ADK           | `instrument(client)`| Auto             | not needed: plugin short-circuits with the replacement |
+| AutoGen              | `instrument(client)`| Auto             | not needed: plugin substitutes the tool result directly |
+| Claude Agent SDK     | `instrument(client)`| Auto             | not needed: plugin substitutes the tool result directly |
 
 Why the difference: the plugin-based frameworks (Pydantic AI, Google ADK,
 AutoGen, Claude Agent SDK) expose a hook that can replace a tool's return
@@ -734,13 +742,13 @@ pre-execution hook or a tool-invoke boundary (OpenAI Agents SDK, AutoGen,
 Google ADK, Claude Agent SDK, CrewAI, and the `enforce_steer`
 paths) can pause the call for an interactive human decision. The synchronous
 callback surfaces (LangGraph, LangChain, Pydantic AI) cannot pause, so a
-matched `require_approval` policy there **fails closed** — it blocks the call
+matched `require_approval` policy there **fails closed**; it blocks the call
 and records the intervention rather than silently allowing it. See the
 [approval support matrix](#approval-support).
 
 The raw model-SDK integrations (OpenAI, Anthropic) are **observe-only**: they
 emit spans for visibility but do not enforce, because at the raw model-call
-layer there is no tool call to intercept. (LangChain is *not* in this group —
+layer there is no tool call to intercept. (LangChain is *not* in this group;
 it runs through the same enforcing handler as LangGraph.) Enforcement
 happens at the tool-call boundary on the agent frameworks above. If you drive
 tools yourself on top of a raw model SDK, add enforcement at your own tool

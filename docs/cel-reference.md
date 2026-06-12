@@ -2,75 +2,6 @@
 
 Strathon uses [CEL (Common Expression Language)](https://cel.dev) for policy rules. CEL is Google's open standard used in Firebase, Kubernetes, and Envoy.
 
-## Don't know CEL? Use AI to generate it
-
-Copy this prompt into Claude, ChatGPT, or any AI assistant:
-
-```
-You are a Strathon CEL policy generator. Convert my plain English
-description into a CEL expression for the Strathon AI agent firewall.
-
-Available attributes in every span:
-- attrs["gen_ai.tool.name"]     — tool being called (string)
-- attrs["strathon.tool.args"]   — tool input arguments, as a JSON string
-- attrs["gen_ai.agent.name"]    — agent name (string)
-- attrs["gen_ai.content"]       — prompt or response text (string)
-- attrs["gen_ai.request.model"] — model name (string)
-- attrs["gen_ai.usage.cost"]    — cost in USD (float)
-- attrs["gen_ai.workflow.name"] — workflow name (string)
-- now                           — current UTC timestamp
-
-Available actions: block, steer, throttle, log, alert, require_approval, allow
-
-CEL syntax basics:
-- == for equality, != for not equal
-- && for AND, || for OR, ! for NOT
-- "in" for list membership: x in ["a", "b"]
-- .matches("regex") for regex matching
-- .startsWith("prefix"), .endsWith("suffix")
-- .contains("substring")
-
-Output only the CEL expression. No explanation.
-
-My policy: [DESCRIBE WHAT YOU WANT HERE]
-```
-
-### Examples
-
-Tell the AI: "Block shell commands from any agent"
-```cel
-attrs["gen_ai.tool.name"] in ["shell_exec", "bash", "exec", "system"]
-```
-
-Tell the AI: "Require human approval when research-bot wants to send emails"
-```cel
-attrs["gen_ai.agent.name"] == "research-bot" && attrs["gen_ai.tool.name"] == "send_email"
-```
-
-Tell the AI: "Alert when any agent spends more than $1 on a single call"
-```cel
-attrs["gen_ai.usage.cost"] > 1.0
-```
-
-### Attribute namespaces (which prefix to use)
-
-Attribute names use one of two prefixes, and the prefix matters — a policy that
-references an attribute the engine doesn't emit silently never matches:
-
-- **`gen_ai.*`** — OpenTelemetry's standard GenAI attributes (tool name, agent
-  name, content, model, cost, workflow). Use these for the common fields; they
-  are the convention and what most examples use.
-- **`strathon.*`** — Strathon's own additions that aren't in the OTel standard,
-  most importantly **`strathon.tool.args`** (the tool's input arguments, as a
-  JSON string).
-
-The one easy mistake: the tool *name* is `gen_ai.tool.name`, but the tool
-*arguments* are `strathon.tool.args` — different prefixes. There is no
-`gen_ai.tool.args`. When in doubt, use the names exactly as listed in this
-reference rather than guessing the prefix.
-
----
-
 ## Quick Reference
 
 ### Comparisons
@@ -145,15 +76,15 @@ Action: **block**
 ```cel
 attrs["gen_ai.content"].matches("\\b\\d{3}-\\d{2}-\\d{4}\\b") || attrs["gen_ai.content"].matches("\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b")
 ```
-Action: **block** — stops the call when the content carries an SSN or email
+Action: **block**: stops the call when the content carries an SSN or email
 address. (Redaction itself is not a policy action: Strathon redacts PII from
-stored spans automatically at ingest — see [redaction](https://getstrathon.com/docs/redaction).)
+stored spans automatically at ingest: see [redaction](https://getstrathon.com/docs/redaction).)
 
 ### Tool allowlist (production)
 ```cel
 !(attrs["gen_ai.tool.name"] in ["search", "read_document", "summarize", "calculate", "send_response"])
 ```
-Action: **block** — blocks anything NOT in the list
+Action: **block**: blocks anything NOT in the list
 
 ### Require approval for destructive actions
 ```cel
@@ -174,7 +105,7 @@ attrs["gen_ai.content"].matches("(?i)(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|--
 Action: **block**
 
 ### Shadow mode (test without blocking)
-Any policy can be set to **shadow mode** in the dashboard. Shadow policies evaluate every span but never enforce — results appear in traces for review. Use shadow mode to test a new policy before enabling enforcement.
+Any policy can be set to **shadow mode** in the dashboard. Shadow policies evaluate every span but never enforce; results appear in traces for review. Use shadow mode to test a new policy before enabling enforcement.
 
 ---
 
@@ -196,9 +127,78 @@ Any policy can be set to **shadow mode** in the dashboard. Shadow policies evalu
 
 ---
 
+## Don't know CEL? Use AI to generate it
+
+Copy this prompt into Claude, ChatGPT, or any AI assistant:
+
+```
+You are a Strathon CEL policy generator. Convert my plain English
+description into a CEL expression for the Strathon AI agent firewall.
+
+Available attributes in every span:
+- attrs["gen_ai.tool.name"]     — tool being called (string)
+- attrs["strathon.tool.args"]   — tool input arguments, as a JSON string
+- attrs["gen_ai.agent.name"]    — agent name (string)
+- attrs["gen_ai.content"]       — prompt or response text (string)
+- attrs["gen_ai.request.model"] — model name (string)
+- attrs["gen_ai.usage.cost"]    — cost in USD (float)
+- attrs["gen_ai.workflow.name"] — workflow name (string)
+- now                           — current UTC timestamp
+
+Available actions: block, steer, throttle, log, alert, require_approval, allow
+
+CEL syntax basics:
+- == for equality, != for not equal
+- && for AND, || for OR, ! for NOT
+- "in" for list membership: x in ["a", "b"]
+- .matches("regex") for regex matching
+- .startsWith("prefix"), .endsWith("suffix")
+- .contains("substring")
+
+Output only the CEL expression. No explanation.
+
+My policy: [DESCRIBE WHAT YOU WANT HERE]
+```
+
+### Examples
+
+Tell the AI: "Block shell commands from any agent"
+```cel
+attrs["gen_ai.tool.name"] in ["shell_exec", "bash", "exec", "system"]
+```
+
+Tell the AI: "Require human approval when research-bot wants to send emails"
+```cel
+attrs["gen_ai.agent.name"] == "research-bot" && attrs["gen_ai.tool.name"] == "send_email"
+```
+
+Tell the AI: "Alert when any agent spends more than $1 on a single call"
+```cel
+attrs["gen_ai.usage.cost"] > 1.0
+```
+
+### Attribute namespaces (which prefix to use)
+
+Attribute names use one of two prefixes, and the prefix matters; a policy that
+references an attribute the engine doesn't emit silently never matches:
+
+- **`gen_ai.*`**: OpenTelemetry's standard GenAI attributes (tool name, agent
+  name, content, model, cost, workflow). Use these for the common fields; they
+  are the convention and what most examples use.
+- **`strathon.*`**: Strathon's own additions that aren't in the OTel standard,
+  most importantly **`strathon.tool.args`** (the tool's input arguments, as a
+  JSON string).
+
+The one easy mistake: the tool *name* is `gen_ai.tool.name`, but the tool
+*arguments* are `strathon.tool.args`: different prefixes. There is no
+`gen_ai.tool.args`. When in doubt, use the names exactly as listed in this
+reference rather than guessing the prefix.
+
+---
+
 ## Need Help?
 
-- **Templates**: Use one-click policy templates in the dashboard — no CEL needed
+- **Templates**: Use one-click policy templates in the dashboard, no CEL needed
 - **AI Generation**: Copy the prompt above into Claude or ChatGPT
 - **Documentation**: [getstrathon.com/docs](https://getstrathon.com/docs)
 - **Community**: [Discord](https://discord.gg/Ta9XRmh4H)

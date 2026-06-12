@@ -1,13 +1,20 @@
 # AutoGen Integration
 
-Strathon integrates with Microsoft AutoGen by wrapping
-`BaseChatAgent.on_messages`, capturing multi-agent conversations,
-tool calls, and LLM interactions.
+Strathon enforces policies on AutoGen tool calls before they execute,
+across multi-agent conversations, with the full action set including
+interactive approval. Integration wraps `BaseChatAgent.on_messages` and
+captures conversations, tool calls, and LLM interactions.
+
+> **Enforcement scope:** full. The pre-execution hook is async, so all seven
+> actions enforce: `block` and `throttle` stop the call, `steer` substitutes
+> the tool result directly, and `require_approval` pauses until an operator
+> decides (and fails closed on expiry).
+
 
 ## Installation
 
 ```bash
-pip install strathon[autogen]
+pip install "strathon[autogen]"
 ```
 
 ## Setup
@@ -38,7 +45,7 @@ attrs["gen_ai.tool.name"] == "execute_code"
 ```
 
 Block code execution in production (AutoGen group chats re-send the full
-history every turn, so a runaway loop is expensive — gate the dangerous tool):
+history every turn, so a runaway loop is expensive: gate the dangerous tool):
 
 ```cel
 attrs["gen_ai.tool.name"] == "execute_code"

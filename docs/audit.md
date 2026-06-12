@@ -44,7 +44,7 @@ Endpoints currently audited:
 | `audit.read`                 | `audit`                |
 
 `audit.read` rows are emitted by GET requests against the audit log
-itself — the audit-of-the-audit pattern Vault, GitHub Enterprise,
+itself: the audit-of-the-audit pattern Vault, GitHub Enterprise,
 and 1Password ship.
 
 ## Row shape
@@ -130,14 +130,14 @@ A future release wires it once legal-hold / e-discovery surfaces ship.
 
 The audit log is **tamper-evident**, not tamper-proof. Two layers:
 
-1. **Per-row HMAC chain** — every row's `row_hash` is computed as
+1. **Per-row HMAC chain**: every row's `row_hash` is computed as
    `HMAC-SHA256(K, canonical_json(row) || prev_hash)` where
    `prev_hash` is the previous row's `row_hash` for the same
    project. The chain is per-project so multi-tenant deployments
    verify each tenant's chain independently. A single row
    modification, insertion, or deletion breaks the chain at that
    point.
-2. **Per-minute Merkle anchors** — a background worker computes a
+2. **Per-minute Merkle anchors**: a background worker computes a
    Merkle root over the prior interval's `row_hash` values and
    inserts an `audit.anchors` row every
    `STRATHON_AUDIT_ANCHOR_INTERVAL_SECONDS` (default 60s). The
@@ -175,7 +175,7 @@ python -c 'import secrets; print(secrets.token_hex(32))'
 The behavior with an empty key depends on the deployment mode
 (`STRATHON_MODE`, default `self-hosted`). In self-hosted mode an empty
 key falls back to a deterministic dev key with a one-time warning in
-the logs, so the receiver is usable out of the box — set a real key
+the logs, so the receiver is usable out of the box; set a real key
 for any non-development deployment. In cloud mode an empty key raises
 instead of silently signing with a known value.
 
@@ -203,7 +203,7 @@ before storage. Three strategies, one per field name:
   `external_user_id`.
 
 The full rule table is in `audit/redaction.py`. Operators who need
-additional fields covered open a PR — The current release ships a fixed
+additional fields covered open a PR. The current release ships a fixed
 conservative default; a future release surfaces a per-tenant rules table.
 
 ## Streams (webhook destinations)
@@ -250,17 +250,17 @@ months. Idempotent via `CREATE TABLE IF NOT EXISTS`.
 
 ## OWASP Agentic Top 10 mapping
 
-- **ASI04 (Agentic Supply Chain Vulnerabilities)** — audit captures the policy
+- **ASI04 (Agentic Supply Chain Vulnerabilities)**: audit captures the policy
   mutation that opened the attack vector. `policy.update` rows
   with `before_state` and `after_state` give the reviewer the
   exact change.
-- **ASI08 (Cascading Failures)** — `halt.issue` rows record who
+- **ASI08 (Cascading Failures)**: `halt.issue` rows record who
   triggered the halt and why; the resource and reason fields are
   human-readable in dashboards and incident reviews.
-- **ASI09 (Human-Agent Trust Exploitation)** — every audit row records actor
+- **ASI09 (Human-Agent Trust Exploitation)**: every audit row records actor
   type, actor id, request id, source IP, and user agent. A halt
   issued by an unexpected actor is visible at a glance.
-- **ASI10 (Rogue Agents)** — `audit.read` rows surface the
+- **ASI10 (Rogue Agents)**: `audit.read` rows surface the
   query patterns of operators consuming the audit log itself. A
   flood of automated reads is detectable from the audit log.
 
@@ -290,5 +290,11 @@ months. Idempotent via `CREATE TABLE IF NOT EXISTS`.
 - Streams ride dramatiq webhook delivery. If your project has no
   Redis configured, audit streams will still queue durably (rows
   in `webhook_deliveries`) but send inline to the request that
-  triggered them — fine for dev, set `STRATHON_WEBHOOK_REDIS_URL`
+  triggered them, fine for dev, set `STRATHON_WEBHOOK_REDIS_URL`
   for production.
+
+## Related
+
+- [Compliance mapping](compliance-mapping.md): which controls this log satisfies
+- [RBAC](rbac.md): who can read and export the log
+- [Retention](retention.md): span retention is separate from audit retention

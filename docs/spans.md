@@ -144,3 +144,9 @@ Span search queries use `SET LOCAL plan_cache_mode = 'force_custom_plan'`
 to ensure Postgres uses plan-time partition pruning rather than
 switching to a generic plan after the 6th prepared-statement
 execution.
+
+## Related
+
+- [Analytics](analytics.md): aggregations built on this data
+- [Retention](retention.md): how long spans are kept
+- [CEL reference](cel-reference.md): the attributes you can filter and match on

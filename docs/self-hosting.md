@@ -142,7 +142,7 @@ make reset     # wipe volume + restart fresh
 
 Strathon uses [Alembic](https://alembic.sqlalchemy.org/) for schema
 management. Migrations live in `receiver/alembic/versions/` and run
-automatically when the receiver starts (idempotent — already-applied
+automatically when the receiver starts (idempotent: already-applied
 migrations are a no-op).
 
 When you add a new migration file and restart the receiver, the new
@@ -245,11 +245,11 @@ client = Client(
 The receiver exposes two probe endpoints with distinct semantics, matching
 the Kubernetes liveness/readiness convention:
 
-- **`/health`** — Liveness probe. Returns `200 {"status": "ok", ...}` as
+- **`/health`**: Liveness probe. Returns `200 {"status": "ok", ...}` as
   long as the event loop is responsive. Does not touch the database or
   any background task. Use this when you want "restart the pod if the
   process is wedged."
-- **`/ready`** — Readiness probe. Returns `200` with a per-check
+- **`/ready`**: Readiness probe. Returns `200` with a per-check
   breakdown when every dependency is healthy, `503` with the same
   shape when any check fails. Checks: database connectivity, schema
   migration version (compared to the code's expected head), and the
@@ -263,7 +263,7 @@ endpoint would cause Kubernetes to kill an otherwise-healthy pod the
 moment a downstream dependency hiccups, replacing a routing problem
 with an availability problem.
 
-Both endpoints are unauthenticated by design — Prometheus scrapers and
+Both endpoints are unauthenticated by design: Prometheus scrapers and
 Kubernetes probes commonly run without credentials. Restrict them at
 the network layer (ACL or reverse proxy) if your environment requires
 it.
@@ -305,7 +305,7 @@ The receiver enforces a per-identifier token-bucket rate limit by
 default (100 req/s sustained, 200 burst). The identifier is the
 `Authorization` header's SHA-256 digest for authenticated requests,
 the client IP otherwise (`X-Forwarded-For` leftmost when present).
-`/health`, `/ready`, and `/metrics` are exempt — probes always answer
+`/health`, `/ready`, and `/metrics` are exempt: probes always answer
 regardless of load.
 
 Responses include `X-RateLimit-Limit` and `X-RateLimit-Remaining`
@@ -344,3 +344,9 @@ receiver at Postgres directly, or run with a single receiver replica
 (advisory locks are still useful there as a guard against startup races).
 The same caveat applies to anything else in the codebase that uses
 session-scoped state on a Postgres connection.
+
+## Related
+
+- [Getting started](getting-started.md): from running stack to first blocked call
+- [Scaling guide](scaling.md): beyond a single node
+- [Metrics](metrics.md): monitoring the receiver in production

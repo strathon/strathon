@@ -1,12 +1,19 @@
 # Google ADK Integration
 
-Strathon integrates with Google's Agent Development Kit (ADK) via its
-`BasePlugin` system. This is a first-class integration — no monkey-patching.
+Strathon enforces policies on Google ADK tool calls before they execute,
+with the full action set including interactive approval. Integration is a
+first-class `BasePlugin`, registered at instrument time, no monkey-patching.
+
+> **Enforcement scope:** full. The pre-execution hook is async, so all seven
+> actions enforce: `block` and `throttle` stop the call, `steer` substitutes
+> the tool result directly, and `require_approval` pauses until an operator
+> decides (and fails closed on expiry).
+
 
 ## Installation
 
 ```bash
-pip install strathon[google-adk]
+pip install "strathon[google-adk]"
 ```
 
 ## Setup
@@ -50,7 +57,7 @@ attrs["gen_ai.tool.name"] == "bigquery_query"
 
 ## Notes
 
-- Uses `BasePlugin` — Google ADK's official plugin interface.
+- Uses `BasePlugin`: Google ADK's official plugin interface.
 - Zero monkey-patching. The plugin is registered at instrument time.
 - Requires `google-adk>=1.7.0` (installed by the `google-adk` extra).
 - 25 tests cover the integration.

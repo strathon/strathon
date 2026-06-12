@@ -1,12 +1,21 @@
 # Claude Agent SDK Integration
 
-Strathon integrates with the Claude Agent SDK by wrapping the `query()`
-method, capturing tool use, agent reasoning, and response content.
+Strathon enforces policies on Claude Agent SDK tool calls before they
+execute, with the full action set including interactive approval.
+Enforcement uses the SDK's first-class `PreToolUse`/`PostToolUse` hooks on
+`ClaudeSDKClient`; a `query()` wrapper adds observability for code not using
+the client.
+
+> **Enforcement scope:** full on `ClaudeSDKClient`, where the async hooks
+> enforce all seven actions, including interactive `require_approval`. The
+> module-level `query()` function does not support hooks, so that path is
+> observability-only.
+
 
 ## Installation
 
 ```bash
-pip install strathon[claude-agent]
+pip install "strathon[claude-agent]"
 ```
 
 ## Setup

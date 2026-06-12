@@ -28,7 +28,7 @@ sidestepped. Defense in depth, not one control.
 **SDK.** Evaluates each tool call against your CEL policies before the tool
 runs, and can block, steer (substitute the result), throttle, require approval,
 log, alert, or allow. Across the supported frameworks the available actions vary
-by surface — some frameworks expose a synchronous callback that can block but
+by surface: some frameworks expose a synchronous callback that can block but
 cannot pause for approval; see [intervention.md](intervention.md) for the
 per-surface matrix. Where a surface cannot fully execute a matched action, it
 fails closed.
@@ -45,7 +45,7 @@ and response bodies for credential patterns, and blocks or redacts. See
 
 Strathon's credential handling today is **detection and redaction**: it
 recognizes secrets (50+ patterns) in tool arguments and in request/response
-bodies, and it blocks the leak or masks the secret. This is reactive — it
+bodies, and it blocks the leak or masks the secret. This is reactive; it
 catches a secret that the agent is holding and about to send.
 
 It is **not** credential injection. In an injection model the secret never
@@ -57,12 +57,12 @@ security" imply more than detection.
 
 ## Egress: explicit today, transparent later
 
-The egress proxy today runs in **explicit mode** — the agent's process is
+The egress proxy today runs in **explicit mode**; the agent's process is
 pointed at it via `HTTP_PROXY`/`HTTPS_PROXY`. This enforces on all traffic that
 honors those variables, which is the right defense-in-depth layer for a
 cooperating agent. It does not, on its own, contain an agent that deliberately
-ignores the proxy. **Transparent mode** — routing the agent's traffic at the
-network or namespace level so it cannot opt out — closes that gap and is on the
+ignores the proxy. **Transparent mode** (routing the agent's traffic at the
+network or namespace level so it cannot opt out) closes that gap and is on the
 roadmap. Until it ships, we describe the egress proxy as recommended
 defense-in-depth, not an un-bypassable boundary.
 
