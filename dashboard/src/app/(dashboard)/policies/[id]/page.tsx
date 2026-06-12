@@ -198,7 +198,7 @@ export default function PolicyDetailPage({ params }: { params: Promise<{ id: str
                   <button className="btn" style={{ width: "100%", justifyContent: "space-between" }} onClick={toggle}>
                     <Badge kind={ACTION_COLOR[action] || "muted"} mono>{action}</Badge><Icons.ChevronDown size={13} />
                   </button>
-                )} items={(["block", "steer", "throttle", "log", "alert", "require_approval"] as const).map((a) => ({ label: a, onClick: () => { setAction(a); setDirty(true); } }))} />
+                )} items={(["block", "steer", "throttle", "log", "alert", "require_approval", "allow"] as const).map((a) => ({ label: a, onClick: () => { setAction(a); setDirty(true); } }))} />
               </div>
               <div>
                 <div className="form-label">Priority</div>

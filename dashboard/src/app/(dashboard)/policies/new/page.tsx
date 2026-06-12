@@ -195,7 +195,7 @@ export default function NewPolicyPage() {
                 <button className="btn" style={{ width: "100%", justifyContent: "space-between" }} onClick={toggle}>
                   <Badge kind={ACTION_COLOR[action] || "muted"} mono>{action}</Badge><Icons.ChevronDown size={13} />
                 </button>
-              )} items={(["block", "steer", "throttle", "log", "alert", "require_approval"] as const).map((a) => ({ label: a, onClick: () => setAction(a) }))} />
+              )} items={(["block", "steer", "throttle", "log", "alert", "require_approval", "allow"] as const).map((a) => ({ label: a, onClick: () => setAction(a) }))} />
             </div>
             <div>
               <div className="form-label">Initial status</div>
