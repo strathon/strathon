@@ -42,10 +42,10 @@ matches the surrounding code's posture).
 
 The receiver has a parallel in-memory token bucket implementation
 under ``receiver/rate_limit.py`` that uses ``asyncio.Lock``. The two
-are kept independent on purpose: the SDK is Apache 2.0 and the
-receiver is MIT, the lock primitive differs, and dragging a shared
-package into both would force every SDK install to ship a dependency
-graph it doesn't need.
+are kept independent on purpose: the lock primitive differs
+(``threading`` vs ``asyncio``), and dragging a shared package into
+both would force every SDK install to ship a dependency graph it
+doesn't need.
 
 Idle-bucket pruning
 -------------------

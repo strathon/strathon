@@ -60,4 +60,4 @@ Every read command takes a `--json` flag for scripting and CI pipelines.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/strathon/strathon/blob/main/cli/LICENSE).
+Apache License 2.0. See [LICENSE](https://github.com/strathon/strathon/blob/main/cli/LICENSE).

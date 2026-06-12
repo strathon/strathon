@@ -668,7 +668,7 @@ app = FastAPI(
         "Strathon blocks the tool call before it runs."
     ),
     version="1.1.0",
-    license_info={"name": "MIT", "url": "https://opensource.org/licenses/MIT"},
+    license_info={"name": "Apache-2.0", "url": "https://www.apache.org/licenses/LICENSE-2.0"},
     contact={"name": "Strathon", "url": "https://getstrathon.com"},
     openapi_tags=[
         {"name": "health", "description": "Liveness, readiness, and metrics"},

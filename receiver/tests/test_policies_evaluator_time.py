@@ -1,8 +1,8 @@
 """Tests for time-based CEL on the receiver's policy evaluator.
 
 Mirrors the SDK suite in ``sdk/tests/test_policy_time.py``. The
-receiver vendors its own copy of the CEL evaluator (Apache vs MIT
-licensing means we can't share the module across packages), so this
+receiver vendors its own copy of the CEL evaluator (the packages are
+installed independently and share no runtime dependency), so this
 file proves the two implementations stay in sync.
 
 The receiver's evaluator is called from two paths: the policy CRUD

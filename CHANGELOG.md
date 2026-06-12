@@ -9,6 +9,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Relicensed the receiver and CLI from MIT to Apache License 2.0. The whole
+  project is now uniformly Apache 2.0; NOTICE files added. No code changes.
+
 ### Fixed
 
 - **Shadow policies no longer enforce.** The SDK dropped the `shadow` field

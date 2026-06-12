@@ -8,7 +8,7 @@ version = "1.1.0"
 description = "Open-source AI agent firewall. Blocks dangerous agent tool calls before they execute, with in-process CEL enforcement at the tool-call boundary."
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "NOTICE"]
 authors = [{name = "Strathon", email = "hello@getstrathon.com"}]
 requires-python = ">=3.10"
 keywords = ["ai", "agents", "firewall", "security", "llm", "opentelemetry", "cel", "compliance"]

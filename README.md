@@ -15,7 +15,7 @@
 
   <a href="https://pypi.org/project/strathon"><img src="https://img.shields.io/pypi/v/strathon?color=blue&logo=python&logoColor=white" alt="PyPI"></a>
   <a href="https://github.com/strathon/strathon/actions/workflows/ci.yml"><img src="https://github.com/strathon/strathon/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/strathon/strathon/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT%20%2F%20Apache%202.0-blue.svg" alt="License"></a>
+  <a href="https://github.com/strathon/strathon/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"></a>
   <a href="https://discord.gg/Ta9XRmh4H"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
   <a href="https://twitter.com/strathonai"><img src="https://img.shields.io/twitter/follow/strathonai?logo=X&color=%23f5f5f5" alt="X"></a>
   <a href="https://www.linkedin.com/company/strathonai"><img src="https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff" alt="LinkedIn"></a>
@@ -320,7 +320,5 @@ A managed cloud offering is planned. Self-hosting is the supported deployment to
 
 ## License
 
-- **SDK** (`sdk/`) under the Apache License 2.0
-- **Receiver** (`receiver/`) under the MIT License
-
-See [LICENSING.md](LICENSING.md) for details.
+Apache License 2.0, across all components. See [LICENSE](LICENSE) and
+[LICENSING.md](LICENSING.md).
