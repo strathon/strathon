@@ -8,7 +8,7 @@
 help:
 	@echo "Strathon dev commands:"
 	@echo ""
-	@echo "  make up                    Start Postgres + receiver (docker compose)"
+	@echo "  make up                    Start the stack: Postgres, receiver, dashboard"
 	@echo "  make down                  Stop everything"
 	@echo "  make logs                  Tail receiver logs"
 	@echo "  make reset                 Stop, wipe Postgres volume, restart fresh"

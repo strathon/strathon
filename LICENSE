@@ -6,7 +6,6 @@ open-source licenses. The summary:
   examples/   MIT License          (same terms as receiver)
   docs/       MIT License
   tests/      MIT License
-  db/         MIT License
 
 See LICENSING.md for the rationale behind the split.
 
