@@ -9,28 +9,97 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Changed
+## [1.2.0] - 2026-06-16
 
-- Relicensed the receiver and CLI from MIT to Apache License 2.0. The whole
-  project is now uniformly Apache 2.0; NOTICE files added. No code changes.
+### Changed
+- The dashboard now targets Node 24 (current LTS). Updated dependencies
+  across the SDK and dashboard to current releases.
+
+- Relicensed the receiver and CLI from MIT to Apache 2.0. The project is now
+  uniformly Apache 2.0 with NOTICE files and the canonical license text.
+- The seeded development API key is now opt-in (`STRATHON_SEED_DEV_KEY=true`)
+  and is never seeded in cloud mode. The local `docker compose` setup opts in
+  so the quickstart works out of the box; production does not.
+- Documentation overhauled end to end: framework guides now state
+  per-surface enforcement scope, reference pages are cross-linked, and the
+  README, PyPI pages, and CLI examples are verified against the shipped
+  code.
+- Ownership transfer is now a two-step, consent-based flow: the owner sends a
+  request to an existing admin, who accepts or declines it from a card under
+  Members before any roles change. Previously the swap was immediate.
+- Changing your password now requires a current MFA code when the account has
+  MFA enabled, matching the verification required for other sensitive actions.
+- Sensitive member actions (reset password, disable MFA, change role, remove)
+  now require the caller to outrank the target: an admin can manage operators
+  and viewers but not a peer admin or the owner. Enforced server-side and
+  reflected in the dashboard.
+
+### Added
+
+- Broader PII detection: crypto wallet addresses, IBAN (mod-97 validated),
+  IPv6, US ITIN, and Indian Aadhaar (Verhoeff validated) join the existing
+  email, phone, SSN, credit-card, and IP recognizers.
+- Broader credential detection across modern AI providers (Hugging Face, Groq,
+  xAI, Cohere, Perplexity, Replicate) and SaaS platforms (Vercel, Supabase,
+  Cloudflare, DigitalOcean, Shopify, Datadog, Notion, Linear, Sentry,
+  Atlassian, Square).
+- `allow` is selectable when creating policies from the CLI and the dashboard,
+  not just the API.
+- The SDK ships a PEP 561 `py.typed` marker: type checkers now consume the
+  SDK's annotations in downstream projects.
+- Python 3.13 is tested in CI and officially supported by the SDK.
+- Notification channels: route approvals, incidents, policy interventions,
+  and budget alerts to Slack, Discord, a generic webhook, or GitHub issues,
+  configurable from the dashboard with per-channel event selection.
+- Dashboard: an enforcement-mix overview, per-agent budget spend, a usage
+  section (metered usage in cloud mode), and an activity log on the trace
+  detail view.
+- `strathon-admin reset-password` CLI for break-glass account recovery: an
+  operator with database access can reset a locked-out owner's password (and
+  optionally clear their MFA) without a running receiver.
+- Users can change their own password and display name from the dashboard
+  (`POST /v1/auth/change-password`, `PATCH /v1/auth/me`).
 
 ### Fixed
+- Human-in-the-loop approvals now work end to end. The SDK posts to a new
+  POST /v1/approvals endpoint to open a pending approval when a require_approval
+  policy matches; the held call resumes or is denied on the human decision.
+  Approval requests can be routed to a notification channel with approve/deny
+  links.
 
 - **Shadow policies no longer enforce.** The SDK dropped the `shadow` field
   when parsing `/v1/policies`, so a shadow `block` policy blocked live
   traffic in-process; the MCP gateway and egress proxy had the same gap.
   All three enforcement surfaces now skip shadow policies; server-side
   recording of shadow decisions is unchanged.
-- `instrument()` now raises `ValueError` on an unknown framework name
-  (as its docstring already stated) instead of logging a warning and
-  silently skipping — a typo'd name meant requested enforcement that
-  never attached.
+- `instrument()` raises `ValueError` on an unknown framework name instead of
+  logging a warning and silently skipping, so a typo no longer leaves
+  enforcement unattached.
+- The dashboard's password-reset proxy pointed at the wrong receiver paths,
+  so self-service reset returned a 404. It now targets the correct endpoints.
+- Slack interactive approve/deny buttons resolve the approval in-process,
+  authenticated by the verified Slack request signature, instead of an
+  internal HTTP call that relied on the seeded development key.
+- Admin-generated temporary passwords (member reset, the admin reset endpoint,
+  and the recovery CLI) now always satisfy the password policy, so they no
+  longer fail validation on the member's first sign-in.
+- Dashboard data correctness: the approvals filter, the blocked statistic
+  (which counted shadow-mode hits), trace rollups now derived from spans, and
+  timestamps in the viewer's local time zone.
+- Various dashboard UI fixes.
+- Agent-health alerts (missed heartbeat, behavioral drift, SDK integrity
+  violation) are now selectable notification events. They were dispatched but
+  not in the subscribable set, so channels with an event filter dropped them;
+  they now route to Slack, Discord, webhook, and GitHub with proper formatting.
+- The Docker Compose files now pass the security keys
+  (`STRATHON_AUDIT_HMAC_KEY`, `STRATHON_ENCRYPTION_KEY`,
+  `STRATHON_PASSWORD_PEPPER`) through from `.env`, so a self-hosted deployment
+  can set real values.
 - Fail-closed approval messages on the LangGraph and Pydantic AI surfaces
   referenced a decorator that does not exist; they now point at
   `enforce_steer`.
 - The `claude-agent` and `all` extras now install `claude-agent-sdk`,
   the package the Claude Agent SDK integration instruments.
-
 
 ## [1.1.0] - 2026-06-06
 

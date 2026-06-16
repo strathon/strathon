@@ -1,6 +1,6 @@
 {
   "name": "strathon-dash",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9,8 +9,8 @@
   },
   "dependencies": {
     "clsx": "^2.1.1",
-    "lucide-react": "^1.17.0",
-    "next": "16.2.7",
+    "lucide-react": "^1.18.0",
+    "next": "16.2.9",
     "qrcode": "^1.5.4",
     "react": "19.2.7",
     "react-dom": "19.2.7"
@@ -19,13 +19,13 @@
     "postcss": "^8.5.15"
   },
   "devDependencies": {
-    "@types/node": "^22",
+    "@types/node": "^24",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "typescript": "^5"
   },
   "engines": {
-    "node": ">=22 <23"
+    "node": ">=24 <25"
   }
 }

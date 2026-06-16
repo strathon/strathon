@@ -9,6 +9,7 @@ Usage:
     strathon halts create --scope project
     strathon templates list
     strathon templates apply <template-id>
+    strathon keys create --name ci-agent --scope traces:write
 
 Environment variables:
     STRATHON_API_KEY       Required. API key (stra_...).
@@ -1073,6 +1074,107 @@ def notifications_list(as_json):
             events[:30],
         )
     console.print(table)
+
+
+# ---- API keys ----------------------------------------------------------------
+
+@cli.group()
+def keys():
+    """Manage API keys."""
+
+
+@keys.command("list")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def keys_list(as_json: bool):
+    """List API keys for the current project.
+
+    Only the key prefix is shown. The full key is returned once at
+    creation and never stored, so it cannot be displayed again.
+    """
+    data = api_get("/v1/api_keys")
+    items = data.get("data", []) if isinstance(data, dict) else (data or [])
+
+    if as_json:
+        click.echo(json_mod.dumps(items, indent=2))
+        return
+
+    if not items:
+        click.echo("No API keys found.")
+        return
+
+    table = Table(title="API Keys")
+    table.add_column("ID", style="dim", max_width=12)
+    table.add_column("Name", style="bold")
+    table.add_column("Prefix", style="cyan")
+    table.add_column("Scopes")
+    table.add_column("Expires", style="dim")
+    for k in items:
+        scopes = k.get("scopes") or []
+        table.add_row(
+            str(k.get("id", ""))[:12],
+            k.get("name", "-"),
+            k.get("key_prefix", "-"),
+            ", ".join(scopes) if scopes else "default",
+            str(k.get("expires_at") or "never")[:19],
+        )
+    console.print(table)
+
+
+@keys.command("create")
+@click.option("--name", required=True, help="Human-readable key name")
+@click.option(
+    "--scope", "scopes", multiple=True,
+    help="Capability scope (repeatable). Omit for the SDK default "
+         "(traces:write, policies:read). Use '*' for an admin key.",
+)
+@click.option("--expires-at", default=None, help="ISO 8601 expiry (optional)")
+def keys_create(name: str, scopes: tuple[str, ...], expires_at: str | None):
+    """Create an API key. Prints the full key once — copy it now.
+
+    The raw key is shown only here and is never recoverable afterward.
+    """
+    body: dict[str, Any] = {"name": name}
+    if scopes:
+        body["scopes"] = list(scopes)
+    if expires_at:
+        body["expires_at"] = expires_at
+    result = api_post("/v1/api_keys", json=body)
+    if not result:
+        return
+    raw = result.get("key", "")
+    console.print(f"[green]Created API key '{name}'[/]")
+    console.print(f"[bold]{raw}[/]")
+    console.print(
+        "[yellow]Copy this now — it will not be shown again.[/]"
+    )
+
+
+@keys.command("rotate")
+@click.argument("key_id")
+def keys_rotate(key_id: str):
+    """Rotate an API key: issue a new secret, invalidate the old one.
+
+    Prints the new key once. Update your agents before the old key's
+    grace period ends.
+    """
+    result = api_post(f"/v1/api_keys/{key_id}/rotate")
+    if not result:
+        return
+    raw = result.get("key", "")
+    console.print(f"[green]Rotated key {key_id[:12]}[/]")
+    console.print(f"[bold]{raw}[/]")
+    console.print(
+        "[yellow]Copy this now — it will not be shown again.[/]"
+    )
+
+
+@keys.command("revoke")
+@click.argument("key_id")
+@click.confirmation_option(prompt="Revoke this API key? Agents using it will stop working.")
+def keys_revoke(key_id: str):
+    """Revoke (delete) an API key by ID."""
+    api_delete(f"/v1/api_keys/{key_id}")
+    console.print(f"[green]Revoked key {key_id[:12]}[/]")
 
 
 # ---- Admin commands ----------------------------------------------------------
