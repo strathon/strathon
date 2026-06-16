@@ -121,6 +121,9 @@ jobs:
         working-directory: receiver
         env:
           DATABASE_URL: postgresql://strathon:strathon_dev@127.0.0.1:5432/strathon
+          # The integration tests authenticate with the seeded development
+          # key, which migration 003 only creates when this is set.
+          STRATHON_SEED_DEV_KEY: "true"
         run: alembic upgrade head
 
       - name: Run receiver tests
@@ -176,6 +179,9 @@ jobs:
         working-directory: receiver
         env:
           DATABASE_URL: postgresql://strathon:strathon_dev@127.0.0.1:5432/strathon
+          # The integration tests authenticate with the seeded development
+          # key, which migration 003 only creates when this is set.
+          STRATHON_SEED_DEV_KEY: "true"
         run: alembic upgrade head
 
       - name: Run integration tests
