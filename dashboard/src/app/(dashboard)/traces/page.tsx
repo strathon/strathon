@@ -78,7 +78,7 @@ instrument(client, frameworks=["langgraph"])
                   <td className="mono text-secondary" style={{ fontSize: 12 }}>{(t.shortId || t.id).slice(0, 16)}</td>
                   <td>{t.agent}</td><td className="mono text-secondary">{t.operation}</td>
                   <td style={{ fontVariantNumeric: "tabular-nums" }}>{t.spans || t.span_count}</td>
-                  <td style={{ fontVariantNumeric: "tabular-nums" }}>{t.durationMs || t.duration_ms}ms</td>
+                  <td style={{ fontVariantNumeric: "tabular-nums" }}>{(t.durationMs ?? t.duration_ms ?? 0)}ms</td>
                   <td>{StatusBadge[t.status as keyof typeof StatusBadge]?.() || t.status}</td>
                   <td className="text-secondary t-sm"><Time ago={t.started || t.start_time} /></td>
                 </tr>

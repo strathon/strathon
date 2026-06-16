@@ -28,7 +28,7 @@ export default function SpansPage() {
             <thead><tr><th>Span ID</th><th>Operation</th><th>Service</th><th>Duration</th><th>Status</th><th>Started</th></tr></thead>
             <tbody>{spans.map((s: any) => (
               <tr key={s.id || s.span_id}><td className="mono text-secondary" style={{ fontSize: 12 }}>{(s.span_id || s.id).slice(0, 16)}</td><td>{s.name || s.operation}</td><td className="text-secondary">{s.service_name || s.service}</td>
-                <td style={{ fontVariantNumeric: "tabular-nums" }}>{s.dur || s.duration_ms}ms</td><td><Badge kind={s.status === "ok" ? "success" : s.status === "blocked" ? "danger" : "warning"} dot>{s.status}</Badge></td>
+                <td style={{ fontVariantNumeric: "tabular-nums" }}>{(s.dur ?? s.duration_ms ?? 0)}ms</td><td><Badge kind={s.status === "ok" ? "success" : s.status === "blocked" ? "danger" : "warning"} dot>{s.status}</Badge></td>
                 <td className="text-secondary t-sm"><Time ago={s.started || s.start_time} /></td></tr>
             ))}</tbody>
           </table>

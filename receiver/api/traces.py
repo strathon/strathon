@@ -450,6 +450,11 @@ async def ingest_traces(
                 agent_name = (
                     span_attrs.get("gen_ai.agent.name")
                     or span_attrs.get("strathon.agent.name")
+                    # Fall back to the resource service.name, which the SDK
+                    # always sets. For single-agent deployments this is the
+                    # agent identity; without it, tool spans (which carry no
+                    # explicit agent.name) leave the traces list blank.
+                    or merged_attrs.get("service.name")
                 )
                 agent_id = (
                     span_attrs.get("gen_ai.agent.id")
@@ -570,6 +575,13 @@ async def ingest_traces(
     # Batch insert all spans in one SQL round-trip.
     if _pending_spans:
         await traces_repo.bulk_upsert_spans(session, _pending_spans)
+
+    # Recompute denormalized trace-summary columns (span_count, end_time,
+    # agent/workflow names) from the spans now stored. The traces list reads
+    # these; upsert_trace alone leaves them empty. Derived-from-spans so it
+    # is correct under batching and span streaming.
+    if trace_ids_seen:
+        await traces_repo.recompute_trace_rollup(session, list(trace_ids_seen))
 
     logger.info(
         "Ingested %d spans across %d traces",

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Icons } from "@/components/icons";
 import { Badge, useToast, Skeleton, Modal, Dropdown, Empty } from "@/components/ui";
-import { GeneralSettings, RetentionSliders, ExportSection, ApiKeysSection } from "./_parts";
+import { GeneralSettings, RetentionSliders, ExportSection, ApiKeysSection, IntegrationsSection } from "./_parts";
 import { MfaCard } from "./MfaCard";
 import { useUser } from "@/lib/user-context";
 import { useApi, api } from "@/lib/api-client";
@@ -33,6 +33,8 @@ export default function SettingsPage() {
   const [confirmPass, setConfirmPass] = useState("");
   const [changingPass, setChangingPass] = useState(false);
   const [passError, setPassError] = useState<string | null>(null);
+  const [passMfaCode, setPassMfaCode] = useState("");
+  const [passMfaRequired, setPassMfaRequired] = useState(false);
 
   useEffect(() => {
     const s = searchParams.get("section");
@@ -40,7 +42,20 @@ export default function SettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  const { data: membersData, loading: membersLoading, refetch: refetchMembers } = useApi<{ data: any[] }>("/api/members");
+  const { data: membersData, loading: membersLoading, refetch: refetchMembers } = useApi<{ data: any[] }>("/api/members", undefined, [currentUser?.display_name]);
+  const { data: pendingTransfers, refetch: refetchTransfers } = useApi<{ data: any[] }>("/api/ownership-transfers/pending");
+
+  const respondToTransfer = async (transferId: string, action: "accept" | "reject") => {
+    try {
+      await api.post(`/api/ownership-transfers/${transferId}/${action}`);
+      toast.push({ tone: "success", title: action === "accept" ? "You are now the owner" : "Transfer declined" });
+      refetchTransfers();
+      refetchMembers();
+      refetch();
+    } catch (err) {
+      toast.push({ tone: "danger", title: err instanceof Error ? err.message : "Failed" });
+    }
+  };
   const members = membersData?.data || [];
   const { data: pendingData, refetch: refetchPending } = useApi<{ data: any[] }>("/api/members/pending");
   const pending = pendingData?.data || [];
@@ -54,6 +69,7 @@ export default function SettingsPage() {
     { id: "apikeys", label: "API keys" },
     { id: "retention", label: "Retention" },
     { id: "export", label: "Export" },
+    { id: "integrations", label: "Integrations" },
     ...(mode === "cloud" ? [{ id: "billing", label: "Billing" }] : []),
     { id: "account", label: "Account" },
   ];
@@ -63,15 +79,22 @@ export default function SettingsPage() {
     const passErr = validatePassword(newPass);
     if (passErr) { setPassError(passErr); return; }
     if (newPass !== confirmPass) { setPassError("Passwords do not match"); return; }
+    if (passMfaRequired && !passMfaCode) { setPassError("An authentication code is required"); return; }
     setChangingPass(true);
     setPassError(null);
     try {
-      await api.post("/api/auth/change-password", { current_password: currentPass, new_password: newPass });
+      await api.post("/api/auth/change-password", { current_password: currentPass, new_password: newPass, ...(passMfaCode ? { mfa_code: passMfaCode } : {}) });
       toast.push({ tone: "success", title: "Password changed" });
-      setCurrentPass(""); setNewPass(""); setConfirmPass("");
+      setCurrentPass(""); setNewPass(""); setConfirmPass(""); setPassMfaCode(""); setPassMfaRequired(false);
       refetch();
     } catch (err) {
-      setPassError(err instanceof Error ? err.message : "Failed");
+      const msg = err instanceof Error ? err.message : "Failed";
+      if (msg.toLowerCase().includes("mfa code is required")) {
+        setPassMfaRequired(true);
+        setPassError("Enter the code from your authenticator app to continue.");
+      } else {
+        setPassError(msg);
+      }
     } finally {
       setChangingPass(false);
     }
@@ -100,7 +123,7 @@ export default function SettingsPage() {
   const transferOwnership = async (memberId: string) => {
     try {
       await api.post(`/api/members/${memberId}/transfer-ownership`);
-      toast.push({ tone: "success", title: "Ownership transferred" });
+      toast.push({ tone: "success", title: "Transfer request sent", body: "Ownership changes once they accept." });
       setTransferTarget(null);
       refetchMembers();
       refetch();
@@ -152,6 +175,23 @@ export default function SettingsPage() {
           <>
             <h2 className="t-h2" style={{ marginBottom: 4 }}>Members</h2>
             <p className="text-secondary" style={{ marginBottom: 24 }}>People with access to this workspace.</p>
+            {(pendingTransfers?.data || []).map((t: any) => (
+              <div key={t.id} className="card" style={{ marginBottom: 20, padding: 16, border: "1px solid var(--accent-border)", background: "var(--accent-bg)" }}>
+                <div className="row" style={{ alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                  <div className="row" style={{ alignItems: "center", gap: 10 }}>
+                    <Icons.Shield size={18} style={{ color: "var(--accent)" }} />
+                    <div>
+                      <div style={{ fontWeight: 600 }}>Ownership transfer request</div>
+                      <div className="t-sm text-secondary"><strong>{t.display_name || t.email}</strong> wants to make you the owner of {t.project_name}. Accepting makes them an admin.</div>
+                    </div>
+                  </div>
+                  <div className="row" style={{ gap: 8 }}>
+                    <button className="btn ghost" onClick={() => respondToTransfer(t.id, "reject")}>Decline</button>
+                    <button className="btn primary" onClick={() => respondToTransfer(t.id, "accept")}>Accept ownership</button>
+                  </div>
+                </div>
+              </div>
+            ))}
             <div className="table-toolbar">
               <div className="input-wrap" style={{ flex: 1, maxWidth: 320 }}><Icons.Search size={14} /><input className="input search" placeholder="Search members&hellip;" /></div>
               {isAdmin && <button className="btn primary" onClick={() => setInviteOpen(true)}><Icons.Plus size={13} /> Invite member</button>}
@@ -167,6 +207,9 @@ export default function SettingsPage() {
                   {members.map((m: any) => {
                     const isSelf = m.email === currentUser?.email;
                     const isOwner = m.role === "owner";
+                    // Strict outrank, mirroring the backend's can_manage_role.
+                    const _rank: Record<string, number> = { owner: 4, admin: 3, operator: 2, viewer: 1 };
+                    const canManage = (_rank[currentUser?.role || ""] || 0) > (_rank[m.role] || 0);
                     return (
                     <tr key={m.id || m.email}>
                       <td>
@@ -176,7 +219,7 @@ export default function SettingsPage() {
                         </div>
                       </td>
                       <td>
-                        {isAdmin && !isOwner && !isSelf ? (
+                        {isAdmin && canManage && !isSelf ? (
                         <select className="select" value={m.role} style={{ width: 130 }}
                           onChange={async (e) => {
                             try { await api.patch(`/api/members/${m.id}`, { role: e.target.value }); toast.push({ tone: "success", title: "Role updated" }); refetchMembers(); }
@@ -191,16 +234,21 @@ export default function SettingsPage() {
                       <td className="text-secondary">{m.joined_at || m.joined ? formatDate(m.joined_at || m.joined) : ""}</td>
                       <td className="text-secondary">{m.last_active ? formatRelative(m.last_active) : ""}</td>
                       <td>
-                        {isAdmin && !isSelf && (
-                          <Dropdown align="right" width={200}
-                            trigger={({ toggle }) => <button className="btn icon ghost sm" onClick={toggle}><Icons.MoreHorizontal size={14} /></button>}
-                            items={[
-                              ...(!isOwner ? [{ icon: <Icons.Key size={13} />, label: "Reset password", onClick: () => resetMemberPassword(m.id, m.display_name || m.name || m.email) }] : []),
-                              ...(!isOwner ? [{ icon: <Icons.Lock size={13} />, label: "Disable MFA", onClick: () => setDisableMfaTarget({ id: m.id, name: m.display_name || m.name || m.email }) }] : []),
-                              ...(currentUser?.role === "owner" && m.role === "admin" ? [{ icon: <Icons.Shield size={13} />, label: "Transfer ownership", onClick: () => setTransferTarget({ id: m.id, name: m.display_name || m.name || m.email }) }] : []),
-                              ...(!isOwner ? [{ divider: true }, { icon: <Icons.Trash size={13} />, label: "Remove", danger: true, onClick: () => setRemoveConfirm({ id: m.id, name: m.display_name || m.name || m.email }) }] : []),
-                            ]} />
-                        )}
+                        {(() => {
+                          if (!isAdmin || isSelf) return null;
+                          const items = [
+                            ...(canManage ? [{ icon: <Icons.Key size={13} />, label: "Reset password", onClick: () => resetMemberPassword(m.id, m.display_name || m.name || m.email) }] : []),
+                            ...(canManage ? [{ icon: <Icons.Lock size={13} />, label: "Disable MFA", onClick: () => setDisableMfaTarget({ id: m.id, name: m.display_name || m.name || m.email }) }] : []),
+                            ...(currentUser?.role === "owner" && m.role === "admin" ? [{ icon: <Icons.Shield size={13} />, label: "Transfer ownership", onClick: () => setTransferTarget({ id: m.id, name: m.display_name || m.name || m.email }) }] : []),
+                            ...(canManage ? [{ divider: true }, { icon: <Icons.Trash size={13} />, label: "Remove", danger: true, onClick: () => setRemoveConfirm({ id: m.id, name: m.display_name || m.name || m.email }) }] : []),
+                          ];
+                          if (items.length === 0) return null;
+                          return (
+                            <Dropdown align="right" width={200}
+                              trigger={({ toggle }) => <button className="btn icon ghost sm" onClick={toggle}><Icons.MoreHorizontal size={14} /></button>}
+                              items={items} />
+                          );
+                        })()}
                       </td>
                     </tr>
                     );
@@ -259,6 +307,9 @@ export default function SettingsPage() {
                 <input className="input" type="password" placeholder="Current password" value={currentPass} onChange={(e) => setCurrentPass(e.target.value)} autoComplete="current-password" />
                 <input className="input" type="password" placeholder="New password" value={newPass} onChange={(e) => setNewPass(e.target.value)} autoComplete="new-password" />
                 <input className="input" type="password" placeholder="Confirm new password" value={confirmPass} onChange={(e) => setConfirmPass(e.target.value)} autoComplete="new-password" />
+                {passMfaRequired && (
+                  <input className="input" inputMode="numeric" placeholder="Authentication code" value={passMfaCode} onChange={(e) => setPassMfaCode(e.target.value)} autoComplete="one-time-code" autoFocus />
+                )}
                 {passError && <div className="t-sm" style={{ color: "var(--danger)" }}>{passError}</div>}
                 <div style={{ display: "flex", justifyContent: "flex-end" }}>
                   <button className="btn primary" onClick={changePassword} disabled={changingPass}>
@@ -281,6 +332,8 @@ export default function SettingsPage() {
         {section === "export" && <ExportSection />}
 
         {section === "apikeys" && <ApiKeysSection />}
+
+        {section === "integrations" && <IntegrationsSection />}
 
         {section === "billing" && (
           <>
@@ -342,8 +395,8 @@ export default function SettingsPage() {
         ) : null}
         confirmLabel="Done" onConfirm={() => setTempPassword(null)} />
 
-      <Modal open={!!transferTarget} onClose={() => setTransferTarget(null)} title="Transfer ownership?" danger confirmLabel="Transfer"
-        body={<>Transfer workspace ownership to <strong>{transferTarget?.name}</strong>? You will become an admin. This cannot be undone.</>}
+      <Modal open={!!transferTarget} onClose={() => setTransferTarget(null)} title="Transfer ownership?" confirmLabel="Send request"
+        body={<>Send an ownership transfer request to <strong>{transferTarget?.name}</strong>? They must accept before anything changes. Once they accept, you become an admin.</>}
         onConfirm={() => transferTarget && transferOwnership(transferTarget.id)} />
 
       <Modal open={!!disableMfaTarget} onClose={() => setDisableMfaTarget(null)} title="Disable MFA?" danger confirmLabel="Disable MFA"

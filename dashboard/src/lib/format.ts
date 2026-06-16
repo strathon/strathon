@@ -16,6 +16,9 @@ export function formatDateTime(value: string | number | Date | null | undefined)
   return d.toLocaleString(undefined, {
     year: "numeric", month: "short", day: "numeric",
     hour: "numeric", minute: "2-digit",
+    // Label the zone (PST / IST shows as GMT+5:30 / UTC) so an absolute time
+    // is never ambiguous about which timezone it is in.
+    timeZoneName: "short",
   });
 }
 

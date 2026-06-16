@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Icons } from "@/components/icons";
-import { Badge, StatusBadge, Sparkline, Ring, CountUp, SkeletonTable, Skeleton, useToast } from "@/components/ui";
+import { Badge, StatusBadge, Sparkline, Ring, CountUp, SkeletonTable, Skeleton, useToast, Time } from "@/components/ui";
 import { useApi, api } from "@/lib/api-client";
 
 export default function OverviewPage() {
@@ -139,7 +139,7 @@ export default function OverviewPage() {
                   <span className="mono text-secondary" style={{ flexShrink: 0 }}>{(t.shortId || t.id).slice(0, 10)}</span>
                   <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.agent}</span>
                   <span className="text-muted mono" style={{ flexShrink: 0 }}>{t.operation}</span>
-                  <span className="text-muted" style={{ flexShrink: 0, marginLeft: 4 }}>{t.started}</span>
+                  <span className="text-muted" style={{ flexShrink: 0, marginLeft: 4 }}><Time ago={t.started} /></span>
                 </div>
               ))}
             </div>

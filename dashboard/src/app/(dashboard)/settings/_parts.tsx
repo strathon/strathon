@@ -16,11 +16,10 @@ export function GeneralSettings() {
   const [confirmDeleteProject, setConfirmDeleteProject] = useState(false);
   const [deleteProjectText, setDeleteProjectText] = useState("");
   const [deletingProject, setDeletingProject] = useState(false);
-  const { data: settingsData, loading: sLoading } = useApi<{ project_name?: string; project_slug?: string; timezone?: string }>("/api/settings");
+  const { data: settingsData, loading: sLoading } = useApi<{ project_name?: string; project_slug?: string }>("/api/settings");
   const [name, setName] = useState("");
   const [avatarIdx, setAvatarIdx] = useState(0);
   const [projectName, setProjectName] = useState("");
-  const [timezone, setTimezone] = useState("utc");
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
@@ -28,7 +27,6 @@ export function GeneralSettings() {
   useEffect(() => {
     if (settingsData) {
       if (settingsData.project_name) setProjectName(settingsData.project_name);
-      if (settingsData.timezone) setTimezone(settingsData.timezone);
     }
   }, [settingsData]);
   useEffect(() => { try { const s = parseInt(localStorage.getItem("strathon-avatar-idx") || "0", 10); if (s >= 0 && s < 7) setAvatarIdx(s); } catch {} }, []);
@@ -51,7 +49,14 @@ export function GeneralSettings() {
   const saveSettings = async () => {
     setSaving(true);
     try {
-      await api.patch("/api/settings", { project_name: projectName, timezone });
+      await api.patch("/api/settings", { project_name: projectName });
+      const trimmedName = name.trim();
+      if (trimmedName && trimmedName !== currentUser?.display_name) {
+        await api.patch("/api/auth/me", { display_name: trimmedName });
+      }
+      // Refresh user context so the new name and project name propagate to
+      // the project switcher, members list, and avatar menu immediately.
+      refetch();
       toast.push({ tone: "success", title: "Settings saved" });
     } catch (err) {
       toast.push({ tone: "danger", title: err instanceof Error ? err.message : "Failed to save" });
@@ -107,15 +112,16 @@ export function GeneralSettings() {
         </div>
       </Row>
       <Row label="Timezone">
-        <select className="select" value={timezone} onChange={(e) => setTimezone(e.target.value)} style={{ width: 200 }}>
-          <option value="utc">UTC</option><option value="pt">America/Los_Angeles</option><option value="et">America/New_York</option><option value="cet">Europe/Berlin</option><option value="ist">Asia/Kolkata</option><option value="jst">Asia/Tokyo</option>
-        </select>
+        <span className="text-secondary" style={{ fontSize: 14 }}>UTC</span>
+      </Row>
+      <Row label="Language">
+        <span className="text-secondary" style={{ fontSize: 14 }}>English (US)</span>
       </Row>
 
       <div className="settings-section-title" style={{ marginTop: 8 }}>Workspace</div>
       <Row label="Project name">
         {sLoading ? <Skeleton width={200} height={32} /> : (
-          <input className="input" value={projectName} onChange={(e) => setProjectName(e.target.value)} style={{ maxWidth: 240, textAlign: "right" }} />
+          <input className="input" value={projectName} onChange={(e) => setProjectName(e.target.value)} style={{ maxWidth: 240 }} />
         )}
       </Row>
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12, gap: 8 }}>
@@ -433,6 +439,184 @@ export function ExportSection() {
         </div>
         <button className="btn primary" disabled={generating || selected.size === 0} onClick={generate}>{generating ? <><span className="spinner" /> Generating&hellip;</> : <><Icons.Download size={13} /> Generate export</>}</button>
       </div>
+    </>
+  );
+}
+
+
+const CHANNEL_TYPES = [
+  { id: "slack", label: "Slack", configKey: "webhook_url", configLabel: "Incoming webhook URL", placeholder: "https://hooks.slack.com/services/..." },
+  { id: "discord", label: "Discord", configKey: "webhook_url", configLabel: "Webhook URL", placeholder: "https://discord.com/api/webhooks/..." },
+  { id: "webhook", label: "Webhook", configKey: "url", configLabel: "Endpoint URL", placeholder: "https://example.com/hooks/strathon" },
+  { id: "github", label: "GitHub", configKey: "repo", configLabel: "Repository (owner/repo)", placeholder: "your-org/your-repo" },
+] as const;
+
+const CHANNEL_EVENTS = [
+  "approval_request", "incident", "policy_blocked", "policy_steered",
+  "policy_throttled", "policy_alert", "budget_alert", "budget_halt",
+  "heartbeat_missed", "behavioral_drift", "sdk_integrity_violation",
+];
+
+// High-signal events we suggest by default: the "something important happened"
+// set. The steered/throttled/alert events can be chatty on busy agents, so they
+// are opt-in rather than recommended.
+const RECOMMENDED_EVENTS = new Set([
+  "approval_request", "incident", "policy_blocked", "budget_halt",
+  "behavioral_drift", "sdk_integrity_violation",
+]);
+
+export function IntegrationsSection() {
+  const perms = usePermissions();
+  const { data, loading, refetch } = useApi<{ data: any[] }>("/api/notifications");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [chType, setChType] = useState<string>("slack");
+  const [chName, setChName] = useState("");
+  const [chConfig, setChConfig] = useState("");
+  const [chToken, setChToken] = useState("");
+  const [chEvents, setChEvents] = useState<string[]>(() => CHANNEL_EVENTS.filter((e) => RECOMMENDED_EVENTS.has(e)));
+  const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const toast = useToast();
+
+  const channels = data?.data || [];
+  const typeMeta = CHANNEL_TYPES.find((t) => t.id === chType) || CHANNEL_TYPES[0];
+
+  const resetForm = () => { setChType("slack"); setChName(""); setChConfig(""); setChToken(""); setChEvents(CHANNEL_EVENTS.filter((e) => RECOMMENDED_EVENTS.has(e))); };
+
+  const createChannel = async () => {
+    if (!chName.trim()) { toast.push({ tone: "warning", title: "Name is required" }); return; }
+    if (!chConfig.trim()) { toast.push({ tone: "warning", title: `${typeMeta.configLabel} is required` }); return; }
+    if (chType === "github" && !chToken.trim()) { toast.push({ tone: "warning", title: "GitHub token is required" }); return; }
+    if (chEvents.length === 0) { toast.push({ tone: "warning", title: "Select at least one event" }); return; }
+    setSaving(true);
+    try {
+      const config: Record<string, string> = { [typeMeta.configKey]: chConfig.trim() };
+      if (chType === "github") config.token = chToken.trim();
+      await api.post("/api/notifications", {
+        channel_type: chType,
+        name: chName.trim(),
+        config,
+        events: chEvents,
+        enabled: true,
+      });
+      toast.push({ tone: "success", title: "Integration added" });
+      setCreateOpen(false);
+      resetForm();
+      refetch();
+    } catch (err) {
+      toast.push({ tone: "danger", title: err instanceof Error ? err.message : "Failed to add" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleEnabled = async (ch: any) => {
+    try {
+      await api.patch(`/api/notifications/${ch.id}`, { enabled: !ch.enabled });
+      refetch();
+    } catch (err) {
+      toast.push({ tone: "danger", title: err instanceof Error ? err.message : "Failed" });
+    }
+  };
+
+  const deleteChannel = async (id: string) => {
+    try {
+      await api.del(`/api/notifications/${id}`);
+      toast.push({ tone: "success", title: "Integration removed" });
+      setDeleteTarget(null);
+      refetch();
+    } catch (err) {
+      toast.push({ tone: "danger", title: err instanceof Error ? err.message : "Failed" });
+    }
+  };
+
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24 }}>
+        <div>
+          <h2 className="t-h2" style={{ marginBottom: 4 }}>Integrations</h2>
+          <p className="text-secondary">Send approvals, incidents, and policy alerts to Slack, Discord, GitHub, or a webhook.</p>
+        </div>
+        {perms.canEditSettings && <button className="btn primary" onClick={() => { resetForm(); setCreateOpen(true); }}><Icons.Plus size={13} /> Add integration</button>}
+      </div>
+
+      {loading ? <Skeleton width="100%" height={120} /> : channels.length === 0 ? (
+        <Empty icon={<Icons.Bell size={24} />} title="No integrations yet" subtitle="Add a Slack, Discord, GitHub, or webhook channel to receive alerts." />
+      ) : (
+        <div className="col" style={{ gap: 10 }}>
+          {channels.map((ch: any) => {
+            const meta = CHANNEL_TYPES.find((t) => t.id === ch.channel_type);
+            return (
+              <div key={ch.id} className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontWeight: 600 }}>{ch.name}</span>
+                    <Badge kind="muted">{meta?.label || ch.channel_type}</Badge>
+                    {!ch.enabled && <Badge kind="muted">Disabled</Badge>}
+                  </div>
+                  <div className="t-sm text-secondary" style={{ marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {(ch.events || []).length} event{(ch.events || []).length === 1 ? "" : "s"}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+                  {perms.canEditSettings && <Switch on={!!ch.enabled} onChange={() => toggleEnabled(ch)} />}
+                  {perms.canEditSettings && <button className="btn icon ghost" onClick={() => setDeleteTarget({ id: ch.id, name: ch.name })}><Icons.Trash size={14} /></button>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <Sheet open={createOpen} onClose={() => setCreateOpen(false)} eyebrow="Integrations" title="Add integration">
+        <div className="col" style={{ gap: 14 }}>
+          <div>
+            <div className="form-label">Type</div>
+            <Segmented value={chType} onChange={setChType} options={CHANNEL_TYPES.map((t) => ({ label: t.label, value: t.id }))} />
+          </div>
+          <div>
+            <div className="form-label">Name</div>
+            <input className="input" value={chName} onChange={(e) => setChName(e.target.value)} placeholder="e.g. Engineering alerts" />
+          </div>
+          <div>
+            <div className="form-label">{typeMeta.configLabel}</div>
+            <input className="input" value={chConfig} onChange={(e) => setChConfig(e.target.value)} placeholder={typeMeta.placeholder} />
+          </div>
+          {chType === "github" && (
+            <div>
+              <div className="form-label">GitHub token</div>
+              <input className="input" type="password" value={chToken} onChange={(e) => setChToken(e.target.value)} placeholder="ghp_..." autoComplete="off" />
+            </div>
+          )}
+          <div>
+            <div className="form-label">Events</div>
+            <div className="t-sm text-secondary" style={{ marginTop: -4, marginBottom: 8 }}>
+              The recommended set covers the important alerts without noise. Steered, throttled, and alert events can be chatty on busy agents.
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {CHANNEL_EVENTS.map((ev) => {
+                const on = chEvents.includes(ev);
+                const rec = RECOMMENDED_EVENTS.has(ev);
+                return (
+                  <button key={ev} type="button" className="chip" data-active={on}
+                    title={rec ? "Recommended" : undefined}
+                    onClick={() => setChEvents((prev) => on ? prev.filter((x) => x !== ev) : [...prev, ev])}>
+                    {ev.replace(/_/g, " ")}{rec && <span style={{ marginLeft: 5, color: "var(--accent)", fontWeight: 600 }}>· rec</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4, paddingTop: 16, borderTop: "1px solid var(--border-subtle)" }}>
+            <button className="btn ghost" onClick={() => setCreateOpen(false)}>Cancel</button>
+            <button className="btn primary" onClick={createChannel} disabled={saving}>{saving ? <><span className="spinner" /> Adding&hellip;</> : "Add integration"}</button>
+          </div>
+        </div>
+      </Sheet>
+
+      <Modal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Remove integration?" danger confirmLabel="Remove"
+        body={<>Remove <strong>{deleteTarget?.name}</strong>? Alerts will no longer be sent to this channel.</>}
+        onConfirm={() => { if (deleteTarget) deleteChannel(deleteTarget.id); }} />
     </>
   );
 }

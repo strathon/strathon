@@ -91,7 +91,7 @@ export default function BudgetsPage() {
 
   const series = budgets?.series || [];
   const rules = budgets?.rules || [];
-  const agents = budgets?.agents || ["atlas", "orca", "nova", "kepler", "helix"];
+  const agents = budgets?.agents || [];
   const colors = ["var(--svc-2)", "var(--svc-1)", "var(--svc-3)", "var(--svc-5)", "var(--svc-4)", "var(--svc-6)"];
   const spendMtd = budgets?.spend_mtd || 0;
   const forecast = budgets?.forecast || 0;

@@ -1,7 +1,7 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 import { Icons } from "@/components/icons";
-import { Badge, Segmented, Sheet, SkeletonTable } from "@/components/ui";
+import { Badge, Segmented, Sheet, SkeletonTable, Time } from "@/components/ui";
 import { useApi, api } from "@/lib/api-client";
 
 export default function AuditPage() {
@@ -84,7 +84,7 @@ export default function AuditPage() {
                       </div>
                     )}
                   </td>
-                  <td className="mono text-secondary" style={{ fontSize: 12 }}>{e.ts || e.timestamp}</td>
+                  <td className="mono text-secondary" style={{ fontSize: 12 }}><Time absolute ago={e.ts || e.timestamp} /></td>
                   <td><Badge kind={e.action.includes("delete") || e.action.includes("revoke") || e.action.includes("deny") ? "danger" : e.action.includes("create") ? "success" : "muted"} mono>{e.action}</Badge></td>
                   <td className="text-secondary">{e.category}</td><td>{e.actor}</td><td className="mono" style={{ fontSize: 12.5 }}>{e.resource}</td><td className="mono text-muted" style={{ fontSize: 12 }}>{e.ip}</td>
                 </tr>
@@ -94,7 +94,7 @@ export default function AuditPage() {
         )}
       </div>
       <Sheet open={!!diff} onClose={() => setDiff(null)} eyebrow="Audit entry" title={diff?.action || ""} wide>
-        {diff && <div><div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}><Badge mono>{diff.id}</Badge><Badge kind="muted">{diff.category}</Badge><span className="t-sm text-secondary">{diff.actor} &middot; {diff.ts || diff.timestamp}</span></div>
+        {diff && <div><div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}><Badge mono>{diff.id}</Badge><Badge kind="muted">{diff.category}</Badge><span className="t-sm text-secondary">{diff.actor} &middot; <Time absolute ago={diff.ts || diff.timestamp} /></span></div>
           <div className="t-caption text-muted" style={{ marginBottom: 6 }}>Resource</div><div className="code" style={{ marginBottom: 16 }}>{diff.resource}</div>
           {diff.hash && <><div className="t-caption text-muted" style={{ marginTop: 16, marginBottom: 6 }}>Verified hash</div><div className="code" style={{ wordBreak: "break-all", fontSize: 11, whiteSpace: "pre-wrap" }}>{diff.hash}</div></>}
         </div>}

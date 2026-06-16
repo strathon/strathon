@@ -145,7 +145,7 @@ export default function PolicyDetailPage({ params }: { params: Promise<{ id: str
               <span style={{ fontWeight: 600, fontSize: 13 }}>Policy Impact Simulator</span>
               <div style={{ flex: 1 }} />
               <button className="btn sm" onClick={runSimulation} disabled={simRunning}>
-                {simRunning ? <><span className="spinner" /> Running\u2026</> : <><Icons.Play size={12} /> Run against traces</>}
+                {simRunning ? <><span className="spinner" /> Running&hellip;</> : <><Icons.Play size={12} /> Run against traces</>}
               </button>
             </div>
             {simResult && (

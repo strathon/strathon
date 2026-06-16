@@ -67,6 +67,28 @@ export async function GET() {
   return Response.json(data, { status: res.status });
 }
 
+export async function PATCH(req: Request) {
+  const cookieStore = await cookies();
+  const session = cookieStore.get("strathon-session")?.value;
+  if (!session) {
+    return Response.json({ error: { message: "Not authenticated" } }, { status: 401 });
+  }
+  const body = await req.text();
+  let res: Response;
+  try {
+    res = await fetch(`${RECEIVER_URL}/v1/auth/me`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${session}`, "Content-Type": "application/json" },
+      body,
+      cache: "no-store",
+    });
+  } catch {
+    return Response.json({ error: { message: "Receiver unreachable" } }, { status: 502 });
+  }
+  const data = await res.json().catch(() => null);
+  return Response.json(data, { status: res.status });
+}
+
 export async function DELETE() {
   const res = await proxyToReceiver("/v1/auth/me", { method: "DELETE" });
   if (res.status === 200) await clearSessionCookie();

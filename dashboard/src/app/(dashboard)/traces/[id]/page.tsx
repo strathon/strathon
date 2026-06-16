@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { Icons } from "@/components/icons";
-import { Badge, StatusBadge, Segmented, Sheet, ServiceDot, CopyableCode, Skeleton } from "@/components/ui";
+import { Badge, StatusBadge, Segmented, Sheet, ServiceDot, CopyableCode, Skeleton, Time, Empty } from "@/components/ui";
 import { useApi } from "@/lib/api-client";
 
 interface WaterfallSpan {
@@ -126,8 +126,24 @@ export default function WaterfallPage() {
   const spans: WaterfallSpan[] = traceResp?.spans || traceResp?.waterfall_spans || [];
   const totalDur = useMemo(() => spans.length > 0 ? Math.max(...spans.map((s) => s.start + s.dur)) : 1, [spans]);
 
-  if (traceLoading) return <div className="page"><Skeleton width="100%" height={400} /></div>;
-  if (traceError) return <div className="page"><div className="card" style={{ padding: 24, textAlign: "center" }}><div style={{ color: "var(--danger)", marginBottom: 8 }}>{traceError}</div><button className="btn" onClick={refetch}>Retry</button></div></div>;
+  // Build a chronological log view from the trace's real spans. Each span
+  // becomes a line: time offset from trace start, the operation/service, its
+  // status, and duration. Blocked spans are called out. This replaces what was
+  // previously placeholder text with the actual recorded activity.
+  const logLines = useMemo(() => {
+    return [...spans]
+      .sort((a, b) => a.start - b.start)
+      .map((sp) => {
+        const t = (sp.start / 1000).toFixed(3).padStart(7, "0");
+        const op = sp.name || sp.service_name || "span";
+        const status = sp.status === "blocked"
+          ? `BLOCK${sp.blockedBy ? ` policy=${sp.blockedBy}` : ""}`
+          : sp.status === "error" ? "ERROR" : "ok";
+        return `[+${t}s] ${op} status=${status} dur=${sp.dur}ms`;
+      })
+      .join("\n");
+  }, [spans]);
+
 
   const [selected, setSelected] = useState<string | null>(null);
   const [pinned, setPinned] = useState(false);
@@ -212,6 +228,9 @@ export default function WaterfallPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [selected, pinned]);
 
+  if (traceLoading) return <div className="page"><Skeleton width="100%" height={400} /></div>;
+  if (traceError) return <div className="page"><div className="card" style={{ padding: 24, textAlign: "center" }}><div style={{ color: "var(--danger)", marginBottom: 8 }}>{traceError}</div><button className="btn" onClick={refetch}>Retry</button></div></div>;
+
   return (
     <div className="page full">
       <div className="waterfall-shell">
@@ -224,7 +243,7 @@ export default function WaterfallPage() {
               {StatusBadge[trace.status as keyof typeof StatusBadge]?.() || trace.status}
             </div>
             <div className="t-sm text-secondary" style={{ marginTop: 4 }}>
-              <span className="mono">{trace.operation}</span> · {trace.agent} · {trace.spans} spans · {(totalDur / 1000).toFixed(2)} s · {trace.started}
+              <span className="mono">{trace.operation}</span> · {trace.agent} · {trace.spans} spans · {(totalDur / 1000).toFixed(2)} s · <Time ago={trace.started} />
             </div>
           </div>
           <div style={{ flex: 1 }} />
@@ -326,19 +345,13 @@ export default function WaterfallPage() {
 
         {tab === "logs" && (
           <div style={{ padding: "16px 24px", overflow: "auto" }}>
-            <CopyableCode filename={`trace-${trace.shortId}.log`}>
-{`[14:32:01.024] agent.run started agent=atlas-support trace=${trace.shortId}
-[14:32:01.032] agent.plan model=claude-sonnet-4 tokens.in=412
-[14:32:01.327] policy.evaluate count=14 matched=[require-approval-on-writes]
-[14:32:01.348] tool.call vector.search kb=kb-docs k=8 ms=142
-[14:32:01.500] llm.complete tokens.in=1842 tokens.out=287 ms=612
-[14:32:02.460] policy.evaluate count=14 matched=[block-secret-leakage]
-[14:32:02.478] BLOCK tool.call=http.request reason="output contained bearer token"
-[14:32:02.488] agent.replan
-[14:32:02.660] tool.call email.send to="customer-…" ms=311
-[14:32:03.020] memory.write key=run_summary ttl=86400
-[14:32:03.434] agent.run completed status=ok`}
-            </CopyableCode>
+            {spans.length === 0 ? (
+              <Empty icon={<Icons.ScrollText size={24} />} title="No spans in this trace" subtitle="Logs are derived from the trace's spans." />
+            ) : (
+              <CopyableCode filename={`trace-${trace.shortId}.log`}>
+{logLines}
+              </CopyableCode>
+            )}
           </div>
         )}
       </div>

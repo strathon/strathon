@@ -136,21 +136,6 @@ export function Sidebar({ collapsed, setCollapsed, pendingCount, isMobile, setMo
   );
 }
 
-/* ════════════ SpanTicker ════════════ */
-export function SpanTicker() {
-  const [rate, setRate] = useState(42);
-  useEffect(() => {
-    const t = setInterval(() => setRate((r) => Math.max(8, Math.min(120, r + Math.round((Math.random() - 0.5) * 12)))), 1500);
-    return () => clearInterval(t);
-  }, []);
-  return (
-    <span className="span-ticker" title="Spans per second (live)">
-      <span className="pulse-dot" />
-      {rate.toLocaleString()} <span style={{ color: "var(--text-muted)" }}>spans/s</span>
-    </span>
-  );
-}
-
 /* ════════════ Header ════════════ */
 interface Crumb { label: string; href?: string; }
 export function Header({ breadcrumbs, onOpenCmd, cmdOpen, mobileOpen, setMobileOpen, collapsed, setCollapsed, isMobile }: {
@@ -267,7 +252,6 @@ export function Header({ breadcrumbs, onOpenCmd, cmdOpen, mobileOpen, setMobileO
 export function UserMenu({ open, onClose, user }: { open: boolean; onClose: () => void; theme?: string; onToggleTheme?: () => void; setTheme?: (v: string) => void; user?: { name: string; email: string } }) {
   const router = useRouter();
   const ref = useRef<HTMLDivElement>(null);
-  const [langOpen, setLangOpen] = useState(false);
   const { user: currentUser, mode } = useUser();
   useEffect(() => {
     if (!open) return;
@@ -285,23 +269,10 @@ export function UserMenu({ open, onClose, user }: { open: boolean; onClose: () =
     <div ref={ref} role="menu" className="user-menu-popup">
       <div className="user-menu-header"><div className="user-menu-email">{user?.email || currentUser?.email || ""}</div></div>
       <button className="user-menu-item" onClick={() => { onClose(); router.push("/settings"); }}><Icons.Settings size={14} /> Settings<Kbd>⇧⌘,</Kbd></button>
-      <button className="user-menu-item" onClick={() => setLangOpen((o) => !o)} aria-expanded={langOpen}>
+      <div className="user-menu-item" style={{ cursor: "default" }}>
         <Icons.Languages size={14} /> Language
-        <span style={{ marginLeft: "auto", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6 }}>
-          <span className="t-sm">English (US)</span>
-          <Icons.ChevronRight size={12} style={{ transform: langOpen ? "rotate(90deg)" : "rotate(0)", transition: "transform 120ms" }} />
-        </span>
-      </button>
-      {langOpen && (
-        <div className="user-menu-submenu">
-          {["English (US)", "English (UK)", "Español", "Français", "Deutsch", "日本語", "中文"].map((l, i) => (
-            <button key={l} className="user-menu-item user-menu-subitem" onClick={() => setLangOpen(false)}>
-              <span style={{ width: 14, display: "inline-flex", justifyContent: "center" }}>{i === 0 && <Icons.Check size={12} style={{ color: "var(--accent)" }} />}</span>
-              <span>{l}</span>
-            </button>
-          ))}
-        </div>
-      )}
+        <span style={{ marginLeft: "auto", color: "var(--text-muted)" }} className="t-sm">English (US)</span>
+      </div>
       <button className="user-menu-item" onClick={() => { onClose(); window.open("https://getstrathon.com/docs", "_blank", "noopener"); }}><Icons.HelpCircle size={14} /> Get help</button>
       <button className="user-menu-item" onClick={() => { onClose(); router.push("/settings?section=apikeys"); }}><Icons.Key size={14} /> API keys</button>
       <button className="user-menu-item" onClick={() => { onClose(); window.open("https://getstrathon.com/docs", "_blank", "noopener"); }}><Icons.Book size={14} /> Documentation<Icons.ExternalLink size={12} style={{ marginLeft: "auto", color: "var(--text-muted)" }} /></button>

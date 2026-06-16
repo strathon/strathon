@@ -14,6 +14,8 @@ export default function ChangePasswordPage() {
   const [current, setCurrent] = useState("");
   const [newPass, setNewPass] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaRequired, setMfaRequired] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -23,6 +25,7 @@ export default function ChangePasswordPage() {
     const passErr = validatePassword(newPass);
     if (passErr) { setError(passErr); return; }
     if (newPass !== confirm) { setError("Passwords do not match"); return; }
+    if (mfaRequired && !mfaCode) { setError("An authentication code is required"); return; }
 
     setLoading(true);
     setError(null);
@@ -30,10 +33,18 @@ export default function ChangePasswordPage() {
       await api.post("/api/auth/change-password", {
         current_password: current,
         new_password: newPass,
+        ...(mfaCode ? { mfa_code: mfaCode } : {}),
       });
       router.push("/overview");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Password change failed");
+      const msg = e instanceof Error ? e.message : "Password change failed";
+      // If the account has MFA, the receiver asks for a code; reveal the field.
+      if (msg.toLowerCase().includes("mfa code is required")) {
+        setMfaRequired(true);
+        setError("Enter the code from your authenticator app to continue.");
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -63,6 +74,12 @@ export default function ChangePasswordPage() {
             <label className="form-label">Confirm new password</label>
             <input className="input" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" />
           </div>
+          {mfaRequired && (
+            <div className="form-row">
+              <label className="form-label">Authentication code</label>
+              <input className="input" inputMode="numeric" value={mfaCode} onChange={(e) => setMfaCode(e.target.value)} placeholder="6-digit code or backup code" autoComplete="one-time-code" autoFocus />
+            </div>
+          )}
           {error && <div className="t-sm" style={{ color: "var(--danger)", marginBottom: 10 }}>{error}</div>}
           <button className="btn primary" style={{ width: "100%", height: 38 }} type="submit" disabled={loading}>
             {loading ? "Updating\u2026" : "Update password"}

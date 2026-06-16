@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, createContext, useContext } from "react";
 import { createPortal } from "react-dom";
 import { Icons } from "./icons";
-import { formatRelative } from "@/lib/format";
+import { formatRelative, formatDateTime } from "@/lib/format";
 
 /* ════════════ Badge ════════════ */
 export function Badge({ kind = "muted", dot = false, mono = false, children }: {
@@ -178,7 +178,7 @@ export function Sheet({ open, onClose, title, eyebrow, wide, tabs, activeTab, on
         )}
         <div className="sheet-body">{children}</div>
         {footer && (
-          <div style={{ borderTop: "1px solid var(--border-subtle)", padding: "12px 20px", display: "flex", gap: 8, justifyContent: "flex-end" }}>{footer}</div>
+          <div className="sheet-footer">{footer}</div>
         )}
       </aside>
     </>
@@ -689,29 +689,35 @@ export function Truncated({ text, maxWidth, mono, className = "", style = {} }: 
 }
 
 /* ════════════ Time ════════════ */
-const TIME_BASIS = Date.now();
-export function parseAgo(ago?: string): Date {
-  if (!ago) return new Date(TIME_BASIS);
-  const s = String(ago).trim().toLowerCase();
-  if (s === "now" || s.startsWith("just")) return new Date(TIME_BASIS - 4000);
-  if (s === "yesterday") return new Date(TIME_BASIS - 86400000);
-  const m = s.match(/(\d+)\s*(s|sec|seconds?|m|min|minutes?|h|hr|hours?|d|days?|w|weeks?|mo|months?|y|years?)\b/);
-  if (!m) return new Date(TIME_BASIS);
-  const n = parseInt(m[1], 10), unit = m[2];
-  const ms = unit.startsWith("s") ? n * 1000 : unit.startsWith("mi") || unit === "m" ? n * 60000 :
-    unit.startsWith("h") ? n * 3600000 : unit.startsWith("d") ? n * 86400000 :
-    unit.startsWith("w") ? n * 604800000 : unit.startsWith("mo") ? n * 2592000000 :
-    unit.startsWith("y") ? n * 31536000000 : 0;
-  return new Date(TIME_BASIS - ms);
-}
 export function fmtExactTime(d: Date): string {
   if (!d) return "";
+  // Fullest unambiguous form for the tooltip: local time with the abbreviated
+  // zone (e.g. "PST" / "GMT+5:30") plus the IANA zone name in parens.
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  return `${d.toLocaleString(undefined, { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })} (${tz})`;
+  const stamp = d.toLocaleString(undefined, {
+    year: "numeric", month: "short", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    hour12: false, timeZoneName: "short",
+  });
+  return `${stamp} (${tz})`;
 }
-export function Time({ ago, className = "" }: { ago?: string; className?: string }) {
-  const d = useMemo(() => parseAgo(ago), [ago]);
-  return <Tooltip content={fmtExactTime(d)}><span className={className}>{d ? formatRelative(d) : (ago || "")}</span></Tooltip>;
+export function Time({ ago, className = "", absolute = false }: { ago?: string; className?: string; absolute?: boolean }) {
+  // `ago` is a real UTC ISO timestamp from the receiver. Render it in the
+  // viewer's local timezone: relative for recent events (capped at ~30d, then
+  // an absolute date), or always-absolute when `absolute` is set (e.g. audit
+  // log, where an exact local datetime matters more than "2 min ago"). The
+  // tooltip always shows the precise local datetime with the timezone label.
+  const d = useMemo(() => {
+    if (!ago) return null;
+    const parsed = new Date(ago);
+    return isNaN(parsed.getTime()) ? null : parsed;
+  }, [ago]);
+  if (!d) return <span className={className}>{ago || ""}</span>;
+  return (
+    <Tooltip content={fmtExactTime(d)}>
+      <span className={className}>{absolute ? formatDateTime(d) : formatRelative(d)}</span>
+    </Tooltip>
+  );
 }
 
 /* ════════════ CopyableCode ════════════ */

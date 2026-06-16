@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icons } from "@/components/icons";
-import { Badge, Ring, Sparkline, Segmented, Empty, Splash, CopyableCode, SkeletonCards } from "@/components/ui";
+import { Badge, Ring, Sparkline, Segmented, Empty, Splash, CopyableCode, SkeletonCards, Time } from "@/components/ui";
 import { useApi } from "@/lib/api-client";
 
 export default function AgentsPage() {
@@ -76,7 +76,7 @@ instrument(client, frameworks=["langgraph"])`}</CopyableCode>
                 <td><Badge kind={a.risk > 70 ? "danger" : a.risk > 40 ? "warning" : "success"}>{a.risk}</Badge></td>
                 <td style={{ fontVariantNumeric: "tabular-nums" }}>{a.calls?.toLocaleString()}</td><td>{a.models}</td>
                 <td style={{ fontVariantNumeric: "tabular-nums" }}>${a.spend?.toFixed(2)}</td><td>{a.policies}</td>
-                <td className="text-secondary t-sm">{a.lastActive || a.last_active}</td>
+                <td className="text-secondary t-sm"><Time ago={a.lastActive || a.last_active} /></td>
               </tr>
             ))}</tbody>
           </table>

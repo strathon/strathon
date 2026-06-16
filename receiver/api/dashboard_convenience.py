@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import os
 import secrets
+
+from rbac import can_manage_role
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request as FastAPIRequest, status
@@ -28,7 +30,7 @@ from ._deps import require_scope
 
 router = APIRouter(tags=["dashboard"])
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 API_VERSION = "v1"
 
 
@@ -327,6 +329,51 @@ async def remove_member(
 
 # ---- Member admin actions ----------------------------------------------------
 
+async def _require_can_manage_member(session, ctx, member_id: str) -> None:
+    """403 unless the caller strictly outranks the target member.
+
+    Used for sensitive member actions (password reset, MFA disable). An admin
+    may act on operators and viewers, but not on a peer admin or the owner.
+    Owners outrank everyone. Falls open only when the caller has no session
+    role (pure API-key calls with the manage scope), which is by design.
+    """
+    if not getattr(ctx, "role", None):
+        return
+    row = (await session.execute(
+        text(
+            "SELECT role FROM project_members "
+            "WHERE user_id = :uid AND project_id = :pid"
+        ),
+        {"uid": member_id, "pid": ctx.project_id},
+    )).first()
+    if not row:
+        raise HTTPException(404, "Member not found")
+    if not can_manage_role(ctx.role, row[0]):
+        raise HTTPException(
+            403,
+            "You can only manage members whose role is below your own.",
+        )
+
+
+def _gen_member_temp_password() -> str:
+    """Temp password that satisfies the password policy.
+
+    Guarantees a letter, a digit, and a special character so the value passes
+    validation. The member is forced to change it on next login.
+    """
+    import string
+    specials = "!@#$%^&*-_=+"
+    chars = [
+        secrets.choice(string.ascii_letters),
+        secrets.choice(string.digits),
+        secrets.choice(specials),
+    ]
+    pool = string.ascii_letters + string.digits + specials
+    chars += [secrets.choice(pool) for _ in range(13)]
+    secrets.SystemRandom().shuffle(chars)
+    return "".join(chars)
+
+
 @router.post("/v1/members/{member_id}/reset-password")
 async def reset_member_password(
     member_id: str,
@@ -336,7 +383,8 @@ async def reset_member_password(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Admin resets a member's password. Returns temp password ONCE."""
-    temp_password = secrets.token_urlsafe(16)
+    await _require_can_manage_member(session, ctx, member_id)
+    temp_password = _gen_member_temp_password()
     new_hash = hash_password(temp_password)
     result = await session.execute(
         text(
@@ -367,6 +415,7 @@ async def disable_member_mfa(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Admin disables MFA for a member who lost their device + backup codes."""
+    await _require_can_manage_member(session, ctx, member_id)
     result = await session.execute(
         text(
             "UPDATE users SET mfa_enabled = false, totp_secret = NULL, "
@@ -382,58 +431,192 @@ async def disable_member_mfa(
     return {"status": "mfa_disabled", "email": row[0]}
 
 
+async def _require_owner(session, user_id, project_id) -> None:
+    """Raise 403 unless the user is the owner of the project."""
+    row = (await session.execute(
+        text(
+            "SELECT role FROM project_members "
+            "WHERE user_id = :uid AND project_id = :pid"
+        ),
+        {"uid": user_id, "pid": project_id},
+    )).first()
+    if not row or row[0] != "owner":
+        raise HTTPException(403, "Only the project owner can transfer ownership")
+
+
 @router.post("/v1/members/{member_id}/transfer-ownership")
-async def transfer_ownership(
+async def initiate_transfer_ownership(
     member_id: str,
     ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_PROJECT_SETTINGS_WRITE)
     ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    """Transfer project ownership. Only current owner can call."""
-    # Verify caller is owner.
-    caller_role = await session.execute(
-        text(
-            "SELECT role FROM project_members "
-            "WHERE user_id = :uid AND project_id = :pid"
-        ),
-        {"uid": ctx.user_id, "pid": ctx.project_id},
-    )
-    caller_row = caller_role.first()
-    if not caller_row or caller_row[0] != "owner":
-        raise HTTPException(403, "Only the project owner can transfer ownership")
+    """Initiate an ownership transfer to an existing admin member.
 
-    # Verify target is admin.
-    target_role = await session.execute(
+    This does NOT change any roles. It records a pending transfer that the
+    recipient must explicitly accept. Only the current owner may initiate,
+    and the target must already be an admin of the project.
+    """
+    await _require_owner(session, ctx.user_id, ctx.project_id)
+
+    if str(member_id) == str(ctx.user_id):
+        raise HTTPException(400, "You are already the owner")
+
+    target = (await session.execute(
         text(
             "SELECT role FROM project_members "
             "WHERE user_id = :uid AND project_id = :pid"
         ),
         {"uid": member_id, "pid": ctx.project_id},
-    )
-    target_row = target_role.first()
-    if not target_row:
+    )).first()
+    if not target:
         raise HTTPException(404, "Member not found")
-    if target_row[0] not in ("admin",):
+    if target[0] != "admin":
         raise HTTPException(400, "Target must be an admin to become owner")
 
-    # Swap roles.
+    # One pending transfer per project; re-initiating replaces the prior one.
+    await session.execute(
+        text(
+            "INSERT INTO pending_ownership_transfers "
+            "(project_id, from_user_id, to_user_id) "
+            "VALUES (:pid, :from_uid, :to_uid) "
+            "ON CONFLICT (project_id) DO UPDATE "
+            "SET from_user_id = :from_uid, to_user_id = :to_uid, "
+            "created_at = NOW()"
+        ),
+        {"pid": ctx.project_id, "from_uid": ctx.user_id, "to_uid": member_id},
+    )
+    await session.commit()
+    return {"status": "transfer_pending"}
+
+
+@router.get("/v1/ownership-transfers/pending")
+async def list_pending_transfers(
+    ctx: auth_mod.ApiKeyContext = Depends(
+        require_scope(auth_mod.SCOPE_AUDIT_READ)
+    ),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """List pending ownership transfers addressed to the current user.
+
+    The dashboard renders these as accept/reject cards under Members.
+    """
+    rows = (await session.execute(
+        text(
+            "SELECT t.id, t.project_id, t.from_user_id, t.created_at, "
+            "       u.display_name, u.email, p.name AS project_name "
+            "FROM pending_ownership_transfers t "
+            "JOIN users u ON u.id = t.from_user_id "
+            "JOIN projects p ON p.id = t.project_id "
+            "WHERE t.to_user_id = :uid AND t.project_id = :pid"
+        ),
+        {"uid": ctx.user_id, "pid": ctx.project_id},
+    )).mappings().all()
+    return {"data": [dict(r) for r in rows]}
+
+
+@router.post("/v1/ownership-transfers/{transfer_id}/accept")
+async def accept_transfer_ownership(
+    transfer_id: str,
+    ctx: auth_mod.ApiKeyContext = Depends(
+        require_scope(auth_mod.SCOPE_PROJECT_SETTINGS_WRITE)
+    ),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Accept a pending ownership transfer. Only the recipient may accept.
+
+    On accept, the role swap happens atomically and the pending record is
+    removed. If the initiating owner is no longer the owner (e.g. another
+    transfer completed first), the swap is rejected.
+    """
+    row = (await session.execute(
+        text(
+            "SELECT project_id, from_user_id, to_user_id "
+            "FROM pending_ownership_transfers "
+            "WHERE id = :tid FOR UPDATE"
+        ),
+        {"tid": transfer_id},
+    )).first()
+    if not row:
+        raise HTTPException(404, "Transfer not found")
+    project_id, from_user_id, to_user_id = row[0], row[1], row[2]
+
+    if str(to_user_id) != str(ctx.user_id):
+        raise HTTPException(403, "Only the transfer recipient can accept")
+    if str(project_id) != str(ctx.project_id):
+        raise HTTPException(400, "Transfer is for a different project")
+
+    # The initiator must still be the owner.
+    owner = (await session.execute(
+        text(
+            "SELECT role FROM project_members "
+            "WHERE user_id = :uid AND project_id = :pid"
+        ),
+        {"uid": from_user_id, "pid": project_id},
+    )).first()
+    if not owner or owner[0] != "owner":
+        await session.execute(
+            text("DELETE FROM pending_ownership_transfers WHERE id = :tid"),
+            {"tid": transfer_id},
+        )
+        await session.commit()
+        raise HTTPException(409, "The initiating owner is no longer the owner")
+
     await session.execute(
         text(
             "UPDATE project_members SET role = 'admin' "
             "WHERE user_id = :uid AND project_id = :pid"
         ),
-        {"uid": ctx.user_id, "pid": ctx.project_id},
+        {"uid": from_user_id, "pid": project_id},
     )
     await session.execute(
         text(
             "UPDATE project_members SET role = 'owner' "
             "WHERE user_id = :uid AND project_id = :pid"
         ),
-        {"uid": member_id, "pid": ctx.project_id},
+        {"uid": to_user_id, "pid": project_id},
+    )
+    await session.execute(
+        text("DELETE FROM pending_ownership_transfers WHERE id = :tid"),
+        {"tid": transfer_id},
     )
     await session.commit()
     return {"status": "ownership_transferred"}
+
+
+@router.post("/v1/ownership-transfers/{transfer_id}/reject")
+async def reject_transfer_ownership(
+    transfer_id: str,
+    ctx: auth_mod.ApiKeyContext = Depends(
+        require_scope(auth_mod.SCOPE_PROJECT_SETTINGS_WRITE)
+    ),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Reject or cancel a pending transfer.
+
+    The recipient may reject; the initiating owner may cancel. Either way the
+    pending record is removed and no roles change.
+    """
+    row = (await session.execute(
+        text(
+            "SELECT from_user_id, to_user_id "
+            "FROM pending_ownership_transfers WHERE id = :tid"
+        ),
+        {"tid": transfer_id},
+    )).first()
+    if not row:
+        raise HTTPException(404, "Transfer not found")
+    from_user_id, to_user_id = row[0], row[1]
+    if str(ctx.user_id) not in (str(from_user_id), str(to_user_id)):
+        raise HTTPException(403, "Not a party to this transfer")
+
+    await session.execute(
+        text("DELETE FROM pending_ownership_transfers WHERE id = :tid"),
+        {"tid": transfer_id},
+    )
+    await session.commit()
+    return {"status": "transfer_cancelled"}
 
 
 # ---- Settings convenience (resolves project from auth context) ---------------

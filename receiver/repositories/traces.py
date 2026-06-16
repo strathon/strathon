@@ -275,3 +275,67 @@ async def bulk_upsert_spans(
                 await session.execute(individual)
             except Exception:
                 pass  # Skip individual span on error.
+
+
+async def recompute_trace_rollup(
+    session: AsyncSession,
+    trace_ids: list[bytes],
+) -> None:
+    """Recompute denormalized trace-summary columns from the spans table.
+
+    A trace row is a cache of facts that live authoritatively in its spans:
+    span_count, end_time, and the agent/workflow names. ``upsert_trace``
+    creates the row on first sight of a trace but cannot fill these in,
+    because at that point the trace's spans are not all present (and a
+    streaming span has no end_time yet). This recomputes them from the
+    spans actually stored, so the traces list reflects reality.
+
+    Derived-from-spans (not incrementally maintained) so it is correct
+    regardless of batching, span streaming, or re-ingest. Called inline
+    after a span batch is written; isolated here so it can move to a
+    background actor unchanged if ingest throughput ever requires it.
+
+    No-op on an empty list. Idempotent: running it twice yields the same
+    result. COALESCE keeps any agent/workflow name already on the trace
+    row rather than overwriting it with a NULL from a span that lacks it.
+    """
+    if not trace_ids:
+        return
+
+    await session.execute(
+        text(
+            """
+            UPDATE traces t SET
+                span_count = s.span_count,
+                end_time_unix_nano = s.end_time_unix_nano,
+                agent_name = COALESCE(t.agent_name, s.agent_name),
+                workflow_name = COALESCE(
+                    t.workflow_name, s.workflow_name, s.root_operation
+                )
+            FROM (
+                SELECT
+                    trace_id,
+                    COUNT(*) AS span_count,
+                    MAX(end_time_unix_nano) AS end_time_unix_nano,
+                    MIN(agent_name) FILTER (WHERE agent_name IS NOT NULL)
+                        AS agent_name,
+                    MIN(workflow_name) FILTER (WHERE workflow_name IS NOT NULL)
+                        AS workflow_name,
+                    -- Trace operation: the root span's name (the entry-point
+                    -- action), falling back to any span's operation_name. This
+                    -- is what observability backends show as the trace name, so
+                    -- the operation column reads e.g. "langgraph.tool.send_email"
+                    -- rather than repeating the agent name.
+                    COALESCE(
+                        MIN(name) FILTER (WHERE parent_span_id IS NULL),
+                        MIN(operation_name) FILTER (WHERE operation_name IS NOT NULL)
+                    ) AS root_operation
+                FROM spans
+                WHERE trace_id = ANY(:trace_ids)
+                GROUP BY trace_id
+            ) s
+            WHERE t.id = s.trace_id
+            """
+        ),
+        {"trace_ids": trace_ids},
+    )

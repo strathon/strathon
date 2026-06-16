@@ -255,7 +255,9 @@ export function mapTraceTree(body: unknown): unknown {
       const end = parseMs(n.end_time);
       return Number.isFinite(startMs) && Number.isFinite(end) ? Math.max(0, end - startMs) : 0;
     })();
-    const label = (n.tool_name as string) || (n.agent_name as string) || (n.request_model as string) || (n.operation_name as string) || "span";
+    // Service identity is the agent/app, not the tool. Prefer agent_name so
+    // the Service column shows e.g. "intervention-demo", not "send_email".
+    const label = (n.agent_name as string) || (n.request_model as string) || (n.tool_name as string) || (n.operation_name as string) || "span";
     return {
       id: n.span_id,
       parent: n._parent ?? null,
@@ -326,7 +328,7 @@ export function mapTraces(body: unknown): unknown {
   const data = rows.map((t) => {
     const startNano = num(t.start_time_unix_nano);
     const endNano = num(t.end_time_unix_nano);
-    const durMs = startNano && endNano ? Math.round((endNano - startNano) / 1e6) : 0;
+    const durMs = startNano && endNano ? Math.round((endNano - startNano) / 1e5) / 10 : 0;
     const intervened = String(t.intervention_state || "").toLowerCase();
     const status = intervened.includes("block") || intervened.includes("halt") ? "blocked"
       : intervened.includes("error") ? "error" : "ok";
