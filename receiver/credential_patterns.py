@@ -1,6 +1,6 @@
 """Built-in credential and secret detection patterns.
 
-50+ patterns covering cloud provider keys, API tokens, database
+70+ patterns covering cloud provider keys, API tokens, database
 connection strings, private keys, and common secret formats.
 
 Each pattern has: id, name, regex (compiled with re2 for linear
@@ -137,6 +137,24 @@ PATTERNS: list[CredentialPattern] = [
     _p("anthropic-api-key", "Anthropic API Key",
        r"sk-ant-[A-Za-z0-9_-]{40,}",
        "critical", "token"),
+    _p("huggingface-token", "Hugging Face Token",
+       r"hf_[A-Za-z0-9]{34,}",
+       "high", "token"),
+    _p("groq-api-key", "Groq API Key",
+       r"gsk_[A-Za-z0-9]{52}",
+       "high", "token"),
+    _p("xai-api-key", "xAI (Grok) API Key",
+       r"xai-[A-Za-z0-9]{80}",
+       "high", "token"),
+    _p("cohere-api-key", "Cohere API Key",
+       r"(?i)cohere[_-]?api[_-]?key\s*[:=]\s*[A-Za-z0-9]{40}",
+       "high", "token"),
+    _p("perplexity-api-key", "Perplexity API Key",
+       r"pplx-[A-Za-z0-9]{48,}",
+       "high", "token"),
+    _p("replicate-api-token", "Replicate API Token",
+       r"r8_[A-Za-z0-9]{37}",
+       "high", "token"),
 
     # Stripe
     _p("stripe-secret-key", "Stripe Secret Key",
@@ -231,6 +249,54 @@ PATTERNS: list[CredentialPattern] = [
        "high", "token"),
     _p("vault-token", "HashiCorp Vault Token",
        r"(?:hvs|hvb|hvr)\.[A-Za-z0-9_-]{24,}",
+       "critical", "token"),
+
+    # ---- SaaS / Platform Tokens ----------------------------------------------
+
+    _p("vercel-token", "Vercel Token",
+       r"(?i)vercel[_-]?(?:api[_-]?)?token\s*[:=]\s*[A-Za-z0-9]{24}",
+       "high", "token"),
+    _p("supabase-service-key", "Supabase Service Key",
+       r"sbp_[A-Za-z0-9]{40}",
+       "critical", "token"),
+    _p("cloudflare-api-token", "Cloudflare API Token",
+       r"(?i)cloudflare[_-]?(?:api[_-]?)?token\s*[:=]\s*[A-Za-z0-9_-]{40}",
+       "high", "token"),
+    _p("cloudflare-origin-ca", "Cloudflare Origin CA Key",
+       r"v1\.0-[A-Za-z0-9]{24}-[A-Za-z0-9]{146}",
+       "high", "token"),
+    _p("digitalocean-pat", "DigitalOcean Personal Access Token",
+       r"dop_v1_[a-f0-9]{64}",
+       "critical", "token"),
+    _p("digitalocean-oauth", "DigitalOcean OAuth Token",
+       r"do[or]_v1_[a-f0-9]{64}",
+       "high", "token"),
+    _p("shopify-access-token", "Shopify Access Token",
+       r"shp(?:at|ca|pa|ss)_[a-fA-F0-9]{32}",
+       "critical", "token"),
+    _p("datadog-api-key", "Datadog API Key",
+       r"(?i)datadog[_-]?api[_-]?key\s*[:=]\s*[a-f0-9]{32}",
+       "high", "token"),
+    _p("newrelic-license-key", "New Relic License Key",
+       r"(?i)NRAK-[A-Z0-9]{27}",
+       "high", "token"),
+    _p("notion-token", "Notion Integration Token",
+       r"(?:secret_|ntn_)[A-Za-z0-9]{43,}",
+       "high", "token"),
+    _p("linear-api-key", "Linear API Key",
+       r"lin_api_[A-Za-z0-9]{40}",
+       "high", "token"),
+    _p("postmark-token", "Postmark Server Token",
+       r"(?i)postmark[_-]?(?:server[_-]?)?token\s*[:=]\s*[a-f0-9-]{36}",
+       "high", "token"),
+    _p("sentry-dsn", "Sentry DSN",
+       r"https://[a-f0-9]{32}@[a-z0-9.-]+\.ingest\.sentry\.io/[0-9]+",
+       "medium", "token"),
+    _p("atlassian-api-token", "Atlassian API Token",
+       r"ATATT3[A-Za-z0-9_=-]{180,}",
+       "high", "token"),
+    _p("square-access-token", "Square Access Token",
+       r"(?:sq0atp-|EAAA)[A-Za-z0-9_-]{22,}",
        "critical", "token"),
 
     # ---- Generic Secrets -----------------------------------------------------

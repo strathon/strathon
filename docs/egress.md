@@ -32,7 +32,7 @@ out of is on the roadmap.
 It does two things on every request, and one on every response:
 
 - **Request body credential scan.** If the outbound request body contains a
-  secret matching the credential-pattern library (the same 50+ patterns used
+  secret matching the credential-pattern library (the same 70+ patterns used
   everywhere in Strathon), the request is blocked with a `403` and an
   `X-Strathon-Block-Reason: credential-leak` header. This stops an agent from
   exfiltrating a key it shouldn't have.

@@ -14,6 +14,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
@@ -29,6 +30,90 @@ from database import get_db_session
 from ._deps import build_audit_context, require_scope
 
 router = APIRouter(prefix="/v1/approvals", tags=["approvals"])
+
+
+class CreateApprovalRequest(BaseModel):
+    policy_id: str
+    policy_name: Optional[str] = None
+    span_name: Optional[str] = None
+    tool_name: Optional[str] = None
+    tool_args: Optional[str] = None
+    timeout_seconds: int = 300
+
+
+@router.post("", status_code=201)
+async def create_approval(
+    body: CreateApprovalRequest,
+    request: Request,
+    ctx: auth_mod.ApiKeyContext = Depends(
+        require_scope(auth_mod.SCOPE_TRACES_WRITE)
+    ),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Create a pending approval for a held tool call.
+
+    Called by the SDK when a require_approval policy matches on an async
+    surface: the agent's call blocks until a human approves or denies, or
+    the approval times out. Authenticated with the agent's ingest key
+    (traces:write), since the agent creates the request; resolving it
+    (approve/deny) requires the operator's policies:write scope.
+
+    Fires a best-effort notification to any channel subscribed to
+    approval_request so a human sees it without polling the dashboard.
+    """
+    try:
+        policy_uuid = UUID(body.policy_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid policy_id")
+
+    if body.timeout_seconds <= 0:
+        raise HTTPException(
+            status_code=400, detail="timeout_seconds must be positive"
+        )
+
+    approval = await approvals_repo.create_approval(
+        session,
+        ctx.project_id,
+        policy_uuid,
+        span_name=body.span_name,
+        tool_name=body.tool_name,
+        tool_args=body.tool_args,
+        policy_name=body.policy_name,
+        timeout_seconds=body.timeout_seconds,
+    )
+    # create_approval flushes and refreshes, so approval.id is populated here.
+    # The request boundary (get_db_session) commits on success; we do not
+    # commit explicitly, matching the approve/deny endpoints. The notification
+    # reads a different table (notification_channels), so it does not depend on
+    # the approval being committed first.
+
+    # Best-effort notification. A dispatch failure must never fail the
+    # approval creation itself, so it is isolated.
+    try:
+        from config import get_settings
+        from integrations.dispatcher import dispatch_event
+
+        await dispatch_event(
+            session,
+            ctx.project_id,
+            "approval_request",
+            {
+                "approval_id": str(approval.id),
+                "agent_name": approval.span_name or "agent",
+                "tool_name": body.tool_name or "unknown",
+                "policy_name": body.policy_name or "unknown",
+                "timeout_seconds": body.timeout_seconds,
+            },
+            base_url=get_settings().public_url,
+        )
+    except Exception:
+        import logging
+
+        logging.getLogger("strathon.approvals").exception(
+            "Failed to dispatch approval_request notification"
+        )
+
+    return {"approval": approval.to_json()}
 
 
 @router.get("")

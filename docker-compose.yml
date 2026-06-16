@@ -32,11 +32,22 @@ services:
       STRATHON_LOG_LEVEL: ${STRATHON_LOG_LEVEL:-INFO}
       STRATHON_LOG_FORMAT: ${STRATHON_LOG_FORMAT:-text}
       STRATHON_AUTO_MIGRATE: ${STRATHON_AUTO_MIGRATE:-true}
+      # Seed the local development API key so the quickstart curl and the
+      # examples/ demos work out of the box. This is the public, well-known
+      # dev key — fine for local Compose, never for a real deployment.
+      # docker-compose.prod.yml deliberately omits this.
+      STRATHON_SEED_DEV_KEY: ${STRATHON_SEED_DEV_KEY:-true}
       STRATHON_SAMPLING_RATE: ${STRATHON_SAMPLING_RATE:-1.0}
       STRATHON_RETENTION_ENABLED: ${STRATHON_RETENTION_ENABLED:-true}
       STRATHON_RETENTION_INTERVAL_SECONDS: ${STRATHON_RETENTION_INTERVAL_SECONDS:-3600}
       STRATHON_RETENTION_BATCH_SIZE: ${STRATHON_RETENTION_BATCH_SIZE:-5000}
       STRATHON_AI_API_KEY: ${STRATHON_AI_API_KEY:-}
+      # Security keys: pass through from .env so a real deployment can set
+      # them. Empty in self-hosted mode falls back to dev defaults with a
+      # warning; set real values (see docs/self-hosting.md) for production.
+      STRATHON_AUDIT_HMAC_KEY: ${STRATHON_AUDIT_HMAC_KEY:-}
+      STRATHON_ENCRYPTION_KEY: ${STRATHON_ENCRYPTION_KEY:-}
+      STRATHON_PASSWORD_PEPPER: ${STRATHON_PASSWORD_PEPPER:-}
     ports:
       - "4318:4318"
     healthcheck:

@@ -24,7 +24,8 @@ Layer 2 — value-based pattern matching
 
 Entity names mirror Microsoft Presidio
     ``EMAIL_ADDRESS``, ``PHONE_NUMBER``, ``CREDIT_CARD``, ``US_SSN``,
-    ``IP_ADDRESS``, ``API_KEY``. Operators who later swap in a
+    ``US_ITIN``, ``IP_ADDRESS``, ``IPV6_ADDRESS``, ``IBAN_CODE``,
+    ``CRYPTO``, ``IN_AADHAAR``, ``API_KEY``. Operators who later swap in a
     Presidio sidecar (v2 plan) keep their entity-name config working.
 
 Per-entity actions match LiteLLM's vocabulary
@@ -57,7 +58,7 @@ alerts never see the raw PII either. Same property holds end-to-end.
 Performance notes
 =================
 
-For a 10 KB ``strathon.tool.args`` value with 6 default patterns, a
+For a 10 KB ``strathon.tool.args`` value with the default pattern set, a
 single scan completes in well under 1 ms on modest hardware. The
 ingest path is the budget here: each span is scanned exactly once,
 and the patterns are compiled at module import (`re2.compile` where
@@ -143,6 +144,75 @@ def _luhn_check(s: str) -> bool:
     return total % 10 == 0
 
 
+def _iban_check(s: str) -> bool:
+    """ISO 7064 mod-97 checksum for IBAN validation.
+
+    The IBAN regex matches any country-code + check-digit + alnum run,
+    which catches plenty of non-IBAN uppercase tokens. The mod-97 check
+    is the real discriminator: move the first four chars to the end,
+    map letters to numbers (A=10..Z=35), and the integer mod 97 must
+    equal 1. Drops almost all false positives.
+    """
+    s = s.replace(" ", "").upper()
+    if len(s) < 15 or len(s) > 34:
+        return False
+    rearranged = s[4:] + s[:4]
+    digits = []
+    for ch in rearranged:
+        if ch.isdigit():
+            digits.append(ch)
+        elif ch.isalpha():
+            digits.append(str(ord(ch) - 55))
+        else:
+            return False
+    try:
+        return int("".join(digits)) % 97 == 1
+    except ValueError:
+        return False
+
+
+# Verhoeff multiplication and permutation tables (Dihedral group D5).
+_VERHOEFF_D = (
+    (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
+    (1, 2, 3, 4, 0, 6, 7, 8, 9, 5),
+    (2, 3, 4, 0, 1, 7, 8, 9, 5, 6),
+    (3, 4, 0, 1, 2, 8, 9, 5, 6, 7),
+    (4, 0, 1, 2, 3, 9, 5, 6, 7, 8),
+    (5, 9, 8, 7, 6, 0, 4, 3, 2, 1),
+    (6, 5, 9, 8, 7, 1, 0, 4, 3, 2),
+    (7, 6, 5, 9, 8, 2, 1, 0, 4, 3),
+    (8, 7, 6, 5, 9, 3, 2, 1, 0, 4),
+    (9, 8, 7, 6, 5, 4, 3, 2, 1, 0),
+)
+_VERHOEFF_P = (
+    (0, 1, 2, 3, 4, 5, 6, 7, 8, 9),
+    (1, 5, 7, 6, 2, 8, 3, 0, 9, 4),
+    (5, 8, 0, 3, 7, 9, 6, 1, 4, 2),
+    (8, 9, 1, 6, 0, 4, 3, 5, 2, 7),
+    (9, 4, 5, 3, 1, 2, 6, 8, 7, 0),
+    (4, 2, 8, 6, 5, 7, 3, 9, 0, 1),
+    (2, 7, 9, 3, 8, 0, 6, 4, 1, 5),
+    (7, 0, 4, 6, 9, 1, 3, 2, 5, 8),
+)
+
+
+def _aadhaar_check(s: str) -> bool:
+    """Verhoeff checksum for Indian Aadhaar numbers.
+
+    A 12-digit Aadhaar's last digit is a Verhoeff check digit over the
+    first 11. Random 12-digit runs (version strings, parts of card
+    numbers) almost never satisfy it, so this validator is what makes the
+    pattern safe to run against free text.
+    """
+    digits = [int(c) for c in s if c.isdigit()]
+    if len(digits) != 12:
+        return False
+    c = 0
+    for i, d in enumerate(reversed(digits)):
+        c = _VERHOEFF_D[c][_VERHOEFF_P[i % 8][d]]
+    return c == 0
+
+
 # Email: a permissive RFC-5322-ish pattern. Avoids over-matching things
 # like "foo@bar" by requiring a TLD with 2+ chars.
 _EMAIL = _re_engine.compile(
@@ -182,6 +252,39 @@ _PHONE_US = re.compile(
 # IPv4. We catch obvious things like 192.168.x.x; IPv6 deferred.
 _IPV4 = _re_engine.compile(
     r"\b(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)){3}\b"
+)
+
+# IPv6. Matches the common full and compressed forms. Anchored on a
+# group of hex digits with colons so it does not grab ordinary text.
+_IPV6 = _re_engine.compile(
+    r"\b(?:[A-Fa-f0-9]{1,4}:){2,7}[A-Fa-f0-9]{1,4}\b"
+    r"|\b(?:[A-Fa-f0-9]{1,4}:){1,7}:\b"
+)
+
+# IBAN (ISO 13616): 2-letter country code, 2 check digits, then up to 30
+# alphanumeric BBAN characters. We require at least 11 total so we don't
+# match short uppercase tokens. Validated with the mod-97 checksum after.
+_IBAN = _re_engine.compile(
+    r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b"
+)
+
+# Crypto wallet. Bitcoin (legacy 1.../3... and bech32 bc1...) and
+# Ethereum (0x + 40 hex). High-entropy and distinctive, low FP risk.
+_CRYPTO_WALLET = _re_engine.compile(
+    r"\b(?:bc1[a-z0-9]{25,59}|[13][a-km-zA-HJ-NP-Z1-9]{25,34}|0x[a-fA-F0-9]{40})\b"
+)
+
+# US ITIN: 9xx-xx-xxxx where the group digit ranges are IRS-assigned.
+# Same shape as SSN but the leading 9 and the 4th/5th-digit ranges are
+# what distinguish an ITIN.
+_US_ITIN = _re_engine.compile(
+    r"\b9\d{2}-(?:7\d|8[0-8]|9[0-2]|9[4-9])-\d{4}\b"
+)
+
+# Indian Aadhaar: 12 digits in 4-4-4 groups, first digit 2-9 (1 and 0
+# are not valid leading digits). Spaces or hyphens between groups.
+_IN_AADHAAR = _re_engine.compile(
+    r"\b[2-9]\d{3}[ -]?\d{4}[ -]?\d{4}\b"
 )
 
 # API key heuristic. Catches common secret-shaped tokens by their
@@ -224,12 +327,17 @@ class EntityDef:
 # to find numbers inside the local-part. CREDIT_CARD before PHONE so
 # 16-digit card numbers don't get mis-classified as phone candidates.
 DEFAULT_ENTITIES: Tuple[EntityDef, ...] = (
-    EntityDef("API_KEY",       _API_KEY,     None),
-    EntityDef("EMAIL_ADDRESS", _EMAIL,       None),
-    EntityDef("CREDIT_CARD",   _CREDIT_CARD, _luhn_check),
-    EntityDef("US_SSN",        _US_SSN,      None),
-    EntityDef("PHONE_NUMBER",  _PHONE_US,    None),
-    EntityDef("IP_ADDRESS",    _IPV4,        None),
+    EntityDef("API_KEY",       _API_KEY,       None),
+    EntityDef("EMAIL_ADDRESS", _EMAIL,         None),
+    EntityDef("CRYPTO",        _CRYPTO_WALLET, None),
+    EntityDef("IBAN_CODE",     _IBAN,          _iban_check),
+    EntityDef("CREDIT_CARD",   _CREDIT_CARD,   _luhn_check),
+    EntityDef("US_ITIN",       _US_ITIN,       None),
+    EntityDef("US_SSN",        _US_SSN,        None),
+    EntityDef("IN_AADHAAR",    _IN_AADHAAR,    _aadhaar_check),
+    EntityDef("PHONE_NUMBER",  _PHONE_US,      None),
+    EntityDef("IP_ADDRESS",    _IPV4,          None),
+    EntityDef("IPV6_ADDRESS",  _IPV6,          None),
 )
 
 
@@ -391,7 +499,7 @@ def redact_string(
     # the ENCODED chunk in the original string.
     out = _base64_decode_rescan(out, strategy, entities)
 
-    # Built-in credential pattern scanning (50+ patterns for API keys,
+    # Built-in credential pattern scanning (70+ patterns for API keys,
     # cloud credentials, private keys, database URIs, tokens).
     # Only scan strings long enough to contain credentials (20+ chars).
     # Short strings (tool names, model names, status codes) can't contain

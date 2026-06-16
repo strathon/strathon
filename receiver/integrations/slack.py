@@ -24,6 +24,7 @@ import hmac
 import json
 import logging
 import time
+from functools import partial
 from typing import Any, Callable
 
 import httpx
@@ -194,6 +195,52 @@ def format_budget_alert(event: dict[str, Any]) -> dict:
     }
 
 
+_AGENT_HEALTH_TITLES = {
+    "heartbeat_missed": "Agent Heartbeat Missed",
+    "behavioral_drift": "Behavioral Drift Detected",
+    "sdk_integrity_violation": "SDK Integrity Violation",
+}
+
+
+def format_agent_health(event: dict[str, Any], event_type: str) -> dict:
+    """Format an agent-health alert (heartbeat, drift, integrity).
+
+    These three events share a payload shape (agent_name, severity, and a
+    human-readable message), so one formatter renders all of them with an
+    event-specific title.
+    """
+    severity = event.get("severity", "medium")
+    agent = event.get("agent_name", "unknown")
+    message = event.get("message", "")
+    title = _AGENT_HEALTH_TITLES.get(event_type, "Agent Alert")
+
+    emoji = {
+        "critical": ":red_circle:",
+        "high": ":large_orange_circle:",
+        "medium": ":large_yellow_circle:",
+    }.get(severity, ":white_circle:")
+
+    blocks = [
+        {
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": f"{emoji} {title} — {severity.upper()}",
+            },
+        },
+        {
+            "type": "section",
+            "fields": [{"type": "mrkdwn", "text": f"*Agent:*\n{agent}"}],
+        },
+    ]
+    if message:
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": message},
+        })
+    return {"blocks": blocks, "text": f"{title}: {agent} ({severity})"}
+
+
 EVENT_FORMATTERS: dict[str, Callable[..., dict[str, Any]]] = {
     "approval_request": format_approval_request,
     "incident": format_incident,
@@ -203,6 +250,11 @@ EVENT_FORMATTERS: dict[str, Callable[..., dict[str, Any]]] = {
     "policy_alert": format_policy_event,
     "budget_alert": format_budget_alert,
     "budget_halt": format_budget_alert,
+    "heartbeat_missed": partial(format_agent_health, event_type="heartbeat_missed"),
+    "behavioral_drift": partial(format_agent_health, event_type="behavioral_drift"),
+    "sdk_integrity_violation": partial(
+        format_agent_health, event_type="sdk_integrity_violation"
+    ),
 }
 
 

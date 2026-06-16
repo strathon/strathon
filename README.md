@@ -124,7 +124,7 @@ Govern the traffic no SDK can see. Run the proxy in front of the agent, set `HTT
 
 ### Credential Leak Detection
 
-Catch secrets in motion. 50+ patterns cover AWS keys, GCP service accounts, GitHub tokens, Stripe keys, database URIs, private keys, JWTs, and more, scanned across tool arguments and request and response bodies. Pair the detector with a CEL policy to block any tool call carrying a credential, and stored spans are scrubbed at ingest so a leaked key never sits in your trace history. [Learn more → getstrathon.com/docs/redaction](https://getstrathon.com/docs/redaction)
+Catch secrets in motion. 70+ patterns cover AWS keys, GCP service accounts, GitHub tokens, Stripe keys, database URIs, private keys, JWTs, and more, scanned across tool arguments and request and response bodies. Pair the detector with a CEL policy to block any tool call carrying a credential, and stored spans are scrubbed at ingest so a leaked key never sits in your trace history. [Learn more → getstrathon.com/docs/redaction](https://getstrathon.com/docs/redaction)
 
 ### Behavioral Drift Detection
 
@@ -226,7 +226,7 @@ python benchmarks/loadtest.py --endpoint http://127.0.0.1:4318 \
     --api-key "$STRATHON_API_KEY" --requests 5000 --concurrency 16
 ```
 
-It drives the full per-span pipeline (protobuf parse, CEL policy evaluation, 50+ credential patterns, PII redaction, and the batched PostgreSQL write) and reports sustained spans/sec, latency p50/p95/p99, and error rate for the hardware it ran on. (Reference environment we test against: MacBook Pro M-series, 4 uvicorn workers, PostgreSQL 16, 50,000 spans.)
+It drives the full per-span pipeline (protobuf parse, CEL policy evaluation, 70+ credential patterns, PII redaction, and the batched PostgreSQL write) and reports sustained spans/sec, latency p50/p95/p99, and error rate for the hardware it ran on. (Reference environment we test against: MacBook Pro M-series, 4 uvicorn workers, PostgreSQL 16, 50,000 spans.)
 
 Receivers are stateless and scale horizontally behind a load balancer. The receiver tier scales near-linearly until the shared PostgreSQL becomes the bottleneck: all receivers write to one primary, so plan capacity around the database write path (PgBouncer, a larger primary, read replicas for dashboard queries), not the receiver count. See the [Scaling Guide](https://getstrathon.com/docs/scaling).
 
@@ -253,7 +253,7 @@ Strathon enforces policy at the **tool-call boundary**: it inspects each tool ca
 
 It is one layer of agent security, not the whole of it. Two honesty notes worth stating up front, with the full picture in [docs/scope.md](docs/scope.md):
 
-- **Credentials: detection today, injection later.** Strathon detects and redacts secrets (50+ patterns) in tool arguments and request/response bodies, which is reactive protection against a leak in progress. Gateway-side credential *injection*, where the agent never holds the secret at all, is stronger and is on the roadmap, not shipped.
+- **Credentials: detection today, injection later.** Strathon detects and redacts secrets (70+ patterns) in tool arguments and request/response bodies, which is reactive protection against a leak in progress. Gateway-side credential *injection*, where the agent never holds the secret at all, is stronger and is on the roadmap, not shipped.
 - **Egress: explicit today, transparent later.** The egress proxy runs in explicit (`HTTP_PROXY`) mode, which is defense-in-depth for a cooperating agent. Transparent, network-level interception that an agent cannot opt out of is on the roadmap.
 
 Some attack classes are not solvable at the tool-call boundary alone, and we would rather say so than imply otherwise:
@@ -294,7 +294,9 @@ git clone https://github.com/strathon/strathon.git
 cd strathon && docker compose up
 ```
 
-Register the first account, create a policy, get an API key, and connect your agent. No email server needed; the only dependency is PostgreSQL, included in the Compose stack. Strathon ships as two images, `ghcr.io/strathon/receiver` and `ghcr.io/strathon/dashboard`, plus PostgreSQL. Compose runs all three; you can also run the receiver on its own or scale the dashboard independently. See [Self-Hosting](https://getstrathon.com/docs/self-hosting).
+Register the first account, create a policy, get an API key, and connect your agent. No email server needed; the only dependency is PostgreSQL, included in the Compose stack. Strathon ships as two images, `ghcr.io/strathon/receiver` and `ghcr.io/strathon/dashboard`, plus PostgreSQL. Compose runs all three; you can also run the receiver on its own or scale the dashboard independently.
+
+Before running in production, set the security keys (`STRATHON_AUDIT_HMAC_KEY`, `STRATHON_ENCRYPTION_KEY`, `STRATHON_PASSWORD_PEPPER`) in your `.env`; without them the receiver falls back to development defaults with a warning. See [Self-Hosting](https://getstrathon.com/docs/self-hosting).
 
 ### Docker images
 

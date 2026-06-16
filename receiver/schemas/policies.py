@@ -71,7 +71,7 @@ class PolicyCreate(BaseModel):
 
     Field validation:
     - name and match_expression must be non-empty
-    - action must be one of the five valid values
+    - action must be one of the seven valid values
     - applies_to defaults to empty list (= all spans)
     - action_config defaults to empty dict
     """

@@ -36,6 +36,13 @@ services:
     environment:
       STRATHON_AUTO_MIGRATE: "false"
       DATABASE_URL: postgresql://strathon:${POSTGRES_PASSWORD:-strathon_dev}@pgbouncer:6432/strathon
+      # Required in production. Generate each with
+      # python -c 'import secrets; print(secrets.token_hex(32))'
+      # and set in .env. See docs/self-hosting.md (Security keys).
+      STRATHON_MODE: ${STRATHON_MODE:-self-hosted}
+      STRATHON_AUDIT_HMAC_KEY: ${STRATHON_AUDIT_HMAC_KEY:-}
+      STRATHON_ENCRYPTION_KEY: ${STRATHON_ENCRYPTION_KEY:-}
+      STRATHON_PASSWORD_PEPPER: ${STRATHON_PASSWORD_PEPPER:-}
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -2,7 +2,7 @@
 
 Intercepts all outbound HTTP from agent processes. Evaluates against
 Strathon policies via the receiver API. Scans request and response
-bodies for credential leakage using the built-in 50+ pattern library.
+bodies for credential leakage using the built-in 70+ pattern library.
 
 Usage:
     pip install strathon[proxy]    # or: pip install mitmproxy

@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db_session
+from models.identity import User
 from password import check_needs_rehash, hash_password, verify_password
 from repositories import members as members_repo
 from repositories import sessions as sessions_repo
@@ -456,6 +457,163 @@ async def me(
     )
 
 
+class UpdateMeRequest(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=200)
+
+    model_config = {"extra": "forbid"}
+
+
+async def _resolve_session_user(
+    authorization: str | None, session: AsyncSession
+) -> User:
+    """Resolve a session-token Authorization header to a User, or raise 401.
+
+    Shared by the session-only profile endpoints. API keys are rejected:
+    they represent a project credential, not a human user profile.
+    """
+    if not authorization:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Authorization header",
+        )
+    parts = authorization.split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Malformed Authorization header",
+        )
+    token = parts[1].strip()
+    if token.startswith("stra_"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="/auth/me is for session-based auth. API keys don't have user profiles.",
+        )
+    sess = await sessions_repo.resolve_session_token(session, token)
+    if sess is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired session token",
+        )
+    user = await users_repo.find_by_id(session, sess.user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+        )
+    return user
+
+
+@router.patch("/me")
+async def update_me(
+    body: UpdateMeRequest,
+    authorization: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Update the current user's editable profile fields (display name).
+
+    Session-authenticated only. Returns the updated profile fields.
+    """
+    user = await _resolve_session_user(authorization, session)
+
+    if body.display_name is not None:
+        await users_repo.update_display_name(session, user.id, body.display_name.strip())
+        await session.commit()
+
+    refreshed = await users_repo.find_by_id(session, user.id)
+    if refreshed is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+    return {
+        "id": str(refreshed.id),
+        "email": refreshed.email,
+        "display_name": refreshed.display_name,
+    }
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+    mfa_code: str | None = None
+
+    model_config = {"extra": "forbid"}
+
+
+@router.post("/change-password")
+async def change_password(
+    body: ChangePasswordRequest,
+    authorization: str | None = Header(default=None),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Change the current user's password (logged-in, session-authenticated).
+
+    Requires the current password. On success, all of the user's other
+    sessions are invalidated; the caller's current session remains valid.
+    """
+    # Resolve the caller's session directly so we can keep it alive while
+    # invalidating their other sessions after the change.
+    token = ""
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+    if not token or token.startswith("stra_"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session authentication required",
+        )
+    sess = await sessions_repo.resolve_session_token(session, token)
+    if sess is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired session token",
+        )
+    user = await users_repo.find_by_id(session, sess.user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
+        )
+
+    if user.password_hash is None or not verify_password(
+        user.password_hash, body.current_password
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect",
+        )
+
+    # If the account has MFA enabled, changing the password is a sensitive
+    # action that must be re-verified with a current TOTP (or backup) code.
+    if getattr(user, "mfa_enabled", False):
+        import repositories.mfa as mfa_repo
+        if not body.mfa_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="An MFA code is required to change the password.",
+            )
+        valid = await mfa_repo.verify_mfa_code(
+            session, user.id, body.mfa_code,
+        )
+        if not valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid MFA code.",
+            )
+
+    _validate_password(body.new_password)
+
+    new_hash = hash_password(body.new_password)
+    await users_repo.update_password_hash(session, user.id, new_hash)
+    # Clear the force-password-change flag if it was set (e.g. after an
+    # admin/break-glass reset), since the user has now chosen a new password.
+    await users_repo.set_force_password_change(session, user.id, False)
+    # Invalidate the user's OTHER sessions (log out other devices) while
+    # keeping the caller's current session valid, so the dashboard stays
+    # logged in after the change.
+    await sessions_repo.delete_other_user_sessions(session, user.id, sess.id)
+    await session.commit()
+
+    return {"message": "Password changed successfully."}
+
+
 # ---- MFA (TOTP) endpoints ------------------------------------------------
 
 
@@ -717,10 +875,15 @@ async def admin_reset_password(
 
     Two authentication paths:
       1. A logged-in owner/admin (session token) resetting another user.
-      2. Break-glass: a privileged API key with the projects:manage scope.
-         This is the recovery path when the sole owner is locked out — an
-         operator with server/env access can mint or use such a key via the
-         CLI to reset the owner's password without being able to log in.
+      2. Break-glass over HTTP: a privileged API key carrying the
+         projects:manage scope (a high-privilege, out-of-band credential).
+
+    For full sole-owner lockout (no session and no such key), use the
+    offline recovery CLI instead, which resets directly against the
+    database and needs no running receiver (run from the receiver/
+    directory; `strathon-admin ...` also works if the package is installed):
+
+        python -m admin_cli reset-password --email owner@example.com [--disable-mfa]
     """
     token = (authorization or "")[7:].strip() if (authorization or "").lower().startswith("bearer ") else ""
 
@@ -760,9 +923,20 @@ async def admin_reset_password(
             detail="User not found",
         )
 
-    # Generate temporary password.
+    # Generate temporary password that satisfies the password policy
+    # (letter + digit + special), so it validates on the user's next login.
     import secrets
-    temp_password = secrets.token_urlsafe(16)
+    import string
+    _specials = "!@#$%^&*-_=+"
+    _chars = [
+        secrets.choice(string.ascii_letters),
+        secrets.choice(string.digits),
+        secrets.choice(_specials),
+    ]
+    _pool = string.ascii_letters + string.digits + _specials
+    _chars += [secrets.choice(_pool) for _ in range(13)]
+    secrets.SystemRandom().shuffle(_chars)
+    temp_password = "".join(_chars)
     new_hash = hash_password(temp_password)
     await reset_repo.reset_password(session, target_user.id, new_hash)
     await session.commit()

@@ -81,6 +81,11 @@ def receiver(database_url: str) -> Iterator[str]:
 
     env = os.environ.copy()
     env["DATABASE_URL"] = database_url
+    # The integration tests authenticate with the seeded development key
+    # (DEV_API_KEY above). Since seeding is now opt-in, the receiver
+    # subprocess must be told to seed it; this is a throwaway local test
+    # receiver, never cloud.
+    env["STRATHON_SEED_DEV_KEY"] = "true"
     # Keep the test receiver quiet; we'll grep specific log lines if needed
     env["STRATHON_LOG_LEVEL"] = env.get("STRATHON_LOG_LEVEL", "WARNING")
     # Don't make the test wait for a real retention sweep

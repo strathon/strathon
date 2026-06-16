@@ -25,10 +25,13 @@ On first start:
 1. Postgres pulls and initializes (empty database)
 2. The receiver builds and starts
 3. The receiver runs `alembic upgrade head` in its startup lifespan,
-   creating the schema and seeding the dev API key. Idempotent on every
-   subsequent start.
-4. The receiver detects the seeded dev API key and prints a quickstart
-   banner with the key value, endpoint, and rotation hint
+   creating the schema. Idempotent on every subsequent start.
+4. If you set `STRATHON_SEED_DEV_KEY=true`, a well-known development API
+   key is seeded and the receiver prints a quickstart banner with the key
+   value, endpoint, and rotation hint. This is off by default (and never
+   seeded in cloud mode) because the key value is publicly known; enable it
+   only for local development. Without it, create a real key with
+   `POST /v1/api_keys` after registering the first user.
 
 The banner looks like this:
 
@@ -110,6 +113,57 @@ defaults; the compose file picks it up automatically.
 | `STRATHON_RATE_LIMIT_REQUESTS_PER_SECOND`      | `100`            | Sustained per-key throughput. Token bucket refills at this rate.                                |
 | `STRATHON_RATE_LIMIT_BURST`                    | `200`            | Token-bucket capacity. Maximum momentary burst before throttling.                               |
 
+### Security keys
+
+Three secrets harden a production deployment. Each is an environment variable:
+generate a value once, put it in your `.env` (or your secrets manager), and the
+receiver reads it at boot. The values are never written to a file or the
+database, so the only copy is the one you set. Keep each value stable for the
+life of the deployment unless you are deliberately rotating it.
+
+Password salts are separate and need no configuration: Argon2id generates a
+unique random salt for every password automatically and stores it alongside
+the hash, so there is nothing to set.
+
+Generate each one (the commands differ; the encryption key is not a plain hex
+string):
+
+```bash
+# STRATHON_AUDIT_HMAC_KEY  (64-char hex)
+python -c 'import secrets; print(secrets.token_hex(32))'
+
+# STRATHON_ENCRYPTION_KEY  (Fernet key, base64; generated differently)
+python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+
+# STRATHON_PASSWORD_PEPPER (64-char hex)
+python -c 'import secrets; print(secrets.token_hex(32))'
+```
+
+Then add them to `.env`:
+
+```
+STRATHON_AUDIT_HMAC_KEY=<paste the hex value>
+STRATHON_ENCRYPTION_KEY=<paste the Fernet value>
+STRATHON_PASSWORD_PEPPER=<paste the hex value>
+```
+
+| Variable                     | Required?            | Purpose                                                                 |
+|------------------------------|----------------------|-------------------------------------------------------------------------|
+| `STRATHON_AUDIT_HMAC_KEY`    | Yes for production   | Signs the tamper-evident audit hash chain. Empty in self-hosted mode falls back to a dev key with a warning; empty in cloud mode it raises rather than sign with a known value. At least 32 bytes. |
+| `STRATHON_ENCRYPTION_KEY`    | Recommended          | Encrypts stored TOTP secrets at rest. Without it, TOTP secrets are stored unencrypted. Must be a valid Fernet key. |
+| `STRATHON_PASSWORD_PEPPER`   | Recommended          | Extra secret mixed into password hashing for defense in depth.          |
+
+Changing a value after first use has consequences, so treat them as fixed:
+a new `STRATHON_PASSWORD_PEPPER` invalidates every existing password, and a new
+`STRATHON_ENCRYPTION_KEY` makes already-encrypted TOTP secrets unreadable.
+
+Rotating `STRATHON_AUDIT_HMAC_KEY`: each audit row records the `hmac_key_id`
+it was signed with, so historical rows keep verifying under their original key.
+This release ships a single key (`hmac_key_id = 1`); rotation in a future
+release increments the id and keeps the previous key available for verifying
+old rows. Until then, treat the audit key as fixed. Full detail is in
+[docs/audit.md](audit.md).
+
 ## Lifecycle commands
 
 ```bash
@@ -137,6 +191,29 @@ make logs      # tail receiver logs
 make down      # stop
 make reset     # wipe volume + restart fresh
 ```
+
+## Account recovery (locked-out owner)
+
+If the sole owner loses their password and second factor (and no SMTP is
+configured for the email reset flow), use the offline recovery CLI. It runs
+directly against the database, so it needs `DATABASE_URL` and host access but
+not a running receiver:
+
+```bash
+cd receiver
+DATABASE_URL=postgresql://localhost/strathon \
+  python -m admin_cli reset-password --email owner@example.com
+
+# If the owner also lost their TOTP device / recovery codes:
+DATABASE_URL=postgresql://localhost/strathon \
+  python -m admin_cli reset-password --email owner@example.com --disable-mfa
+```
+
+It prints a one-time temporary password; the user must change it on next
+login. (`strathon-admin reset-password ...` is the same command if the
+receiver package is pip-installed.) Because it requires direct database
+access, only an operator who already controls the host can run it; it
+grants no privilege beyond what raw database access already implies.
 
 ## Migrations & schema changes
 

@@ -33,9 +33,14 @@ sanitized. This property is the firewall semantic Strathon protects.
 | `API_KEY`        | OpenAI (`sk-...`), Stripe (`sk_live_...`, `pk_live_...`), GitHub PAT (`ghp_...`, `github_pat_...`), Standard Webhooks (`whsec_...`), Slack (`xox*-...`), AWS access key (`AKIA...`), Google API key (`AIza...`), JWTs (`eyJ...`) | none |
 | `EMAIL_ADDRESS`  | Standard `local@domain.tld` form, TLD 2+ chars | none |
 | `CREDIT_CARD`    | 13-19 digit number, optionally hyphenated or spaced | Luhn check rejects ~90% of false positives |
+| `CRYPTO`         | Bitcoin (`1...`, `3...`, `bc1...`) and Ethereum (`0x...`) wallet addresses | none |
+| `IBAN_CODE`      | ISO 13616 international bank account numbers | ISO 7064 mod-97 checksum |
 | `US_SSN`         | `XXX-XX-XXXX` with hyphens | none |
+| `US_ITIN`        | `9XX-XX-XXXX` with IRS-assigned group ranges | none |
+| `IN_AADHAAR`     | 12-digit Indian Aadhaar in 4-4-4 groups | Verhoeff checksum |
 | `PHONE_NUMBER`   | US-style: `(XXX) XXX-XXXX`, `XXX-XXX-XXXX`, `XXX.XXX.XXXX` | none |
 | `IP_ADDRESS`     | IPv4 dotted-quad | none |
+| `IPV6_ADDRESS`   | IPv6 full and compressed forms | none |
 
 Order matters. `API_KEY` runs first because keys are catastrophic to
 leak. `CREDIT_CARD` runs before `PHONE_NUMBER` so 16-digit card numbers
@@ -152,7 +157,7 @@ the match expression saw it and the firewall would silently break.
 
 ## Performance
 
-For a 10 KB `strathon.tool.args` value with 6 default patterns, a
+For a 10 KB `strathon.tool.args` value with the default patterns, a
 single scan completes well under 1 ms on modest hardware. Each span is
 scanned once and patterns are compiled at module import. The
 project's redaction config is loaded once per ingest batch (not per

@@ -1,7 +1,8 @@
 """Seed development API key for the default project
 
-Inserts the well-known development API key into the default project so
-demos and local-dev workflows work out of the box. The key value is
+Optionally inserts a well-known development API key into the default
+project for local-dev convenience. OFF by default; enable with the env
+var STRATHON_SEED_DEV_KEY=true (never seeded in cloud mode). The key is
 
     stra_dev_local_default_project_do_not_use_in_production
 
@@ -43,7 +44,7 @@ _UPGRADE_SQL = r"""-- ==========================================================
 --     d167e0111ebddd7e1001ad51ded8b7f9f7887c127a626063a83e02b6e6807924
 --
 -- !!! SECURITY !!!
--- This key has cleartext-known. Anyone with HTTP access to the receiver
+-- This key's cleartext value is publicly known. Anyone with HTTP access to the receiver
 -- can act as the default project. ROTATE BEFORE PRODUCTION:
 --   1. POST /v1/api_keys to create a real key
 --   2. DELETE /v1/api_keys/<this-key-id> to revoke this seed
@@ -69,6 +70,20 @@ DELETE FROM api_keys WHERE id = '00000000-0000-0000-0000-000000000010';
 
 
 def upgrade() -> None:
+    # SECURITY: the seeded key value is publicly known (it ships in this
+    # migration). Seeding it into every database — including hosted/cloud
+    # tenants — would mean every tenant shares a known credential, breaking
+    # tenant isolation. So seeding is OFF by default and must be explicitly
+    # opted into for local development via STRATHON_SEED_DEV_KEY=true. It is
+    # never seeded in cloud mode regardless of that flag.
+    import os
+
+    mode = os.environ.get("STRATHON_MODE", "self-hosted").strip().lower()
+    opt_in = os.environ.get("STRATHON_SEED_DEV_KEY", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+    if mode == "cloud" or not opt_in:
+        return
     op.execute(_UPGRADE_SQL)
 
 

@@ -84,6 +84,21 @@ async def get_approval(
     return result.scalar_one_or_none()
 
 
+async def get_approval_by_id(
+    session: AsyncSession, approval_id: UUID
+) -> Optional[Approval]:
+    """Look up an approval by ID alone, without project scoping.
+
+    Used by trusted internal callers that have authenticated by another
+    means (e.g. a verified Slack request signature) and only have the
+    approval ID, not the owning project. Project-scoped reads should use
+    get_approval instead.
+    """
+    stmt = select(Approval).where(Approval.id == approval_id)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 async def resolve_approval(
     session: AsyncSession,
     project_id: UUID,

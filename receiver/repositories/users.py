@@ -80,6 +80,30 @@ async def update_password_hash(
     await session.execute(stmt)
 
 
+async def update_display_name(
+    session: AsyncSession, user_id: UUID, display_name: str
+) -> None:
+    """Update the user's display name."""
+    stmt = (
+        update(User)
+        .where(User.id == user_id)
+        .values(display_name=display_name)
+    )
+    await session.execute(stmt)
+
+
+async def set_force_password_change(
+    session: AsyncSession, user_id: UUID, value: bool
+) -> None:
+    """Set the force-password-change flag (used by admin/break-glass reset)."""
+    stmt = (
+        update(User)
+        .where(User.id == user_id)
+        .values(force_password_change=value)
+    )
+    await session.execute(stmt)
+
+
 async def count_users(session: AsyncSession) -> int:
     """Return total user count. Used to detect first-user registration."""
     stmt = select(func.count()).select_from(User)

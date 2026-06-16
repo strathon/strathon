@@ -140,20 +140,35 @@ async def _send_github(
     if not token or not repo:
         return False
 
-    if event_type not in ("incident", "budget_halt"):
-        return True  # Only create issues for incidents.
+    # Issues are for events worth a durable, assignable record. Incidents,
+    # budget halts, SDK integrity violations, and behavioral drift qualify;
+    # high-frequency signals like missed heartbeats do not (they would file
+    # an issue every time an agent is simply not running).
+    issue_events = (
+        "incident", "budget_halt", "sdk_integrity_violation", "behavioral_drift",
+    )
+    if event_type not in issue_events:
+        return True
 
     severity = event_data.get("severity", "medium")
-    trigger = event_data.get("trigger", "unknown")
+    # Incidents carry a "trigger"; other events carry a human-readable
+    # "message". Use whichever is present for the issue title and body.
+    summary = event_data.get("trigger") or event_data.get("message") or event_type
     labels = [
-        "strathon-incident",
+        f"strathon-{event_type.replace('_', '-')}",
         f"severity-{severity}",
     ]
 
     body_parts = [
+        f"**Event:** {event_type}",
         f"**Severity:** {severity}",
-        f"**Trigger:** {trigger}",
     ]
+    if event_data.get("agent_name"):
+        body_parts.append(f"**Agent:** {event_data['agent_name']}")
+    if event_data.get("trigger"):
+        body_parts.append(f"**Trigger:** {event_data['trigger']}")
+    if event_data.get("message"):
+        body_parts.append(f"\n{event_data['message']}")
     if event_data.get("affected_agents"):
         body_parts.append(
             f"**Agents:** {', '.join(event_data['affected_agents'])}"
@@ -180,7 +195,7 @@ async def _send_github(
                     "Accept": "application/vnd.github.v3+json",
                 },
                 json={
-                    "title": f"[Strathon Incident] {trigger} ({severity})",
+                    "title": f"[Strathon] {summary} ({severity})",
                     "body": "\n".join(body_parts),
                     "labels": labels,
                 },

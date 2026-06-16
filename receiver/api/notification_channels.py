@@ -36,6 +36,7 @@ VALID_CHANNEL_TYPES = {"slack", "discord", "github", "webhook"}
 VALID_EVENTS = {
     "approval_request", "incident", "policy_blocked", "policy_steered",
     "policy_throttled", "policy_alert", "budget_alert", "budget_halt",
+    "heartbeat_missed", "behavioral_drift", "sdk_integrity_violation",
 }
 
 
@@ -183,7 +184,10 @@ async def delete_channel(
 # ---- Slack Interactive Actions Handler --------------------------------------
 
 @router.post("/v1/integrations/slack/actions")
-async def handle_slack_action(request: Request):
+async def handle_slack_action(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
     """Handle Slack interactive button clicks (approve/deny).
 
     Slack sends a POST with Content-Type: application/x-www-form-urlencoded
@@ -215,38 +219,42 @@ async def handle_slack_action(request: Request):
     action_id = action.get("action_id", "")
     value = json.loads(action.get("value", "{}"))
     approval_id = value.get("approval_id")
-    base_url = value.get("base_url", "http://localhost:4318")
     response_url = payload.get("response_url")
     user_name = payload.get("user", {}).get("name", "unknown")
 
     if not approval_id:
         return Response(status_code=200)
 
-    # Resolve the approval via internal API call.
-    import httpx
+    # Map the Slack action to a decision.
     if action_id == "strathon_approve":
-        endpoint = f"{base_url}/v1/approvals/{approval_id}/approve"
         decision = "approved"
     elif action_id == "strathon_deny":
-        endpoint = f"{base_url}/v1/approvals/{approval_id}/deny"
         decision = "denied"
     else:
         return Response(status_code=200)
 
-    # Use internal admin key for the approval action.
-    admin_key = os.environ.get(
-        "STRATHON_INTERNAL_API_KEY",
-        "stra_dev_local_default_project_do_not_use_in_production",
-    )
+    # Resolve the approval in-process. The Slack request signature was already
+    # verified above, which authenticates this call; there is no need for an
+    # HTTP round-trip or an API credential. We look the approval up by ID to
+    # find its owning project, then record the decision.
+    import repositories.approvals as approvals_repo
     try:
-        async with httpx.AsyncClient() as client:
-            await client.post(
-                endpoint,
-                headers={"Authorization": f"Bearer {admin_key}"},
-                timeout=10.0,
+        aid = UUID(str(approval_id))
+    except (ValueError, TypeError):
+        return Response(status_code=200)
+    try:
+        approval = await approvals_repo.get_approval_by_id(session, aid)
+        if approval is not None:
+            await approvals_repo.resolve_approval(
+                session,
+                approval.project_id,
+                aid,
+                decision=decision,
+                resolved_by=f"slack:{user_name}",
             )
+            await session.commit()
     except Exception:
-        logger.exception("Failed to resolve approval via internal API")
+        logger.exception("Failed to resolve approval from Slack action")
 
     # Update the Slack message.
     if response_url:

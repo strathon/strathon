@@ -61,6 +61,55 @@ os.environ.setdefault("STRATHON_WEBHOOK_SSRF_GUARD", "false")
 
 # Enable interactive docs in tests (disabled by default in production).
 os.environ.setdefault("STRATHON_DOCS_ENABLED", "true")
+# The seeded dev API key is opt-in (migration 003 only seeds it when this is
+# set). The test suite authenticates many TestClient cases with that key, so
+# it opts in here — a local-dev/CI context where the well-known key is fine.
+os.environ.setdefault("STRATHON_SEED_DEV_KEY", "true")
+
+
+# Seed the well-known development API key at import time, so EVERY test file
+# has it — including the ones that build their own TestClient fixture and never
+# touch the async_engine fixture below. These tests authenticate with DEV_KEY
+# against an already-migrated database; migration 003 is now opt-in and a
+# no-op on a migrated DB, so we seed directly here. Idempotent, and a no-op if
+# the database is unreachable or the default project is absent.
+def _seed_dev_key_at_import() -> None:
+    try:
+        import psycopg
+    except Exception:
+        return
+    try:
+        conn = psycopg.connect(DB_URL, autocommit=True, connect_timeout=3)
+    except Exception:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO api_keys (id, project_id, name, key_hash, key_prefix, scopes)
+                SELECT
+                    '00000000-0000-0000-0000-000000000010',
+                    '00000000-0000-0000-0000-000000000001',
+                    'Local development (seeded for tests)',
+                    'd167e0111ebddd7e1001ad51ded8b7f9f7887c127a626063a83e02b6e6807924',
+                    'stra_dev_loc',
+                    ARRAY['*']::text[]
+                WHERE EXISTS (
+                    SELECT 1 FROM projects
+                    WHERE id = '00000000-0000-0000-0000-000000000001'
+                )
+                ON CONFLICT (id) DO NOTHING
+                """
+            )
+    except Exception:
+        # Schema may not exist yet on a brand-new DB; the async_engine fixture
+        # and the app lifespan migration cover that path. Best-effort here.
+        pass
+    finally:
+        conn.close()
+
+
+_seed_dev_key_at_import()
 
 
 @pytest_asyncio.fixture
@@ -125,6 +174,31 @@ async def async_engine():
     # Create the real production months via the worker (commits internally).
     async with AsyncSession(engine) as session:
         await ensure_partitions(session)
+
+    # Seed the well-known development API key directly, so the TestClient
+    # suite (which authenticates with DEV_KEY) does not depend on whether
+    # migration 003 happens to run on this database. Migration 003 is now
+    # opt-in and is a no-op on an already-migrated database, so relying on it
+    # for test auth is fragile. This insert is idempotent and only applies
+    # when the default project (seeded by migration 001) is present.
+    async with engine.begin() as conn:
+        await conn.execute(text(
+            """
+            INSERT INTO api_keys (id, project_id, name, key_hash, key_prefix, scopes)
+            SELECT
+                '00000000-0000-0000-0000-000000000010',
+                '00000000-0000-0000-0000-000000000001',
+                'Local development (seeded for tests)',
+                'd167e0111ebddd7e1001ad51ded8b7f9f7887c127a626063a83e02b6e6807924',
+                'stra_dev_loc',
+                ARRAY['*']::text[]
+            WHERE EXISTS (
+                SELECT 1 FROM projects
+                WHERE id = '00000000-0000-0000-0000-000000000001'
+            )
+            ON CONFLICT (id) DO NOTHING
+            """
+        ))
 
     # Historical catch-all up to the earliest production month, so synthetic
     # low timestamps and any pre-"now" fixtures land without a gap.

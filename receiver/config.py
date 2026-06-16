@@ -60,6 +60,14 @@ class Settings(BaseSettings):
         default="self-hosted", alias="STRATHON_MODE"
     )
 
+    # Public base URL of this receiver, used to build links in outbound
+    # notifications (e.g. the approve/deny buttons in a Slack approval
+    # message). Defaults to the local dev address; set this to the
+    # externally reachable URL in any deployment that uses notifications.
+    public_url: str = Field(
+        default="http://localhost:4318", alias="STRATHON_PUBLIC_URL"
+    )
+
     # ---- Logging ----
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
@@ -220,9 +228,10 @@ class Settings(BaseSettings):
             "Set to a stable value per deployment; rotating it requires "
             "a hmac_key_id bump (the previous key must remain available "
             "for chain verification of historical rows). If empty in "
-            "production the receiver refuses to start; in development "
-            "(DEBUG=true) a deterministic dev key is substituted with a "
-            "loud log warning."
+            "self-hosted mode a deterministic dev key is substituted with a "
+            "one-time log warning so the receiver runs out of the box; in "
+            "cloud mode an empty key raises instead. Set a real key for any "
+            "non-development deployment."
         ),
     )
     audit_hot_months: int = Field(

@@ -44,7 +44,7 @@ and response bodies for credential patterns, and blocks or redacts. See
 ## Credential handling: detection today, injection later
 
 Strathon's credential handling today is **detection and redaction**: it
-recognizes secrets (50+ patterns) in tool arguments and in request/response
+recognizes secrets (70+ patterns) in tool arguments and in request/response
 bodies, and it blocks the leak or masks the secret. This is reactive; it
 catches a secret that the agent is holding and about to send.
 

@@ -19,17 +19,20 @@ SHA-256 comparison.
 
 ## Local development
 
-The default Strathon Postgres schema includes a seeded development key for
-the default project:
+For local development you can opt into a seeded development key by setting
+`STRATHON_SEED_DEV_KEY=true` before the receiver runs its migrations. When
+enabled, this key is seeded for the default project:
 
 ```
 stra_dev_local_default_project_do_not_use_in_production
 ```
 
-This key is hard-coded into the migration so demos work out of the box. **It
-is not a secret**: anyone with HTTP access to your receiver can use it.
-Rotate immediately when moving to a shared or production deployment (see
-"Rotating the dev key" below).
+This is **off by default** and is **never seeded in cloud mode**, because the
+key value is publicly known, so anyone with HTTP access to your receiver could
+use it. Enable it only for local development and demos. On any shared or
+production deployment, leave it off and create a real key instead (see
+"Creating a real API key" below). If you did enable it and later move to
+production, rotate it (see "Rotating the dev key").
 
 ## Creating a real API key
 
@@ -44,7 +47,7 @@ curl -X POST http://localhost:4318/v1/api_keys \
   -d '{"name": "production deploy 2026-05"}'
 ```
 
-The response includes a `key` field exactly once. Save it — it cannot be
+The response includes a `key` field exactly once. Save it, because it cannot be
 retrieved later (only the SHA-256 hash is stored).
 
 ```json

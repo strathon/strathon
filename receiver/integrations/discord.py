@@ -10,6 +10,7 @@ API, Ed25519 signature verification for Discord interactions.
 from __future__ import annotations
 
 import logging
+from functools import partial
 from typing import Any, Callable
 
 import httpx
@@ -168,6 +169,45 @@ def format_budget_alert(event: dict[str, Any]) -> dict:
     }
 
 
+_AGENT_HEALTH_TITLES = {
+    "heartbeat_missed": "Agent Heartbeat Missed",
+    "behavioral_drift": "Behavioral Drift Detected",
+    "sdk_integrity_violation": "SDK Integrity Violation",
+}
+
+
+def format_agent_health(event: dict[str, Any], event_type: str) -> dict:
+    """Format an agent-health alert (heartbeat, drift, integrity) as an embed.
+
+    These three events share a payload shape (agent_name, severity, and a
+    human-readable message), so one formatter renders all of them with an
+    event-specific title.
+    """
+    severity = event.get("severity", "medium")
+    agent = event.get("agent_name", "unknown")
+    message = event.get("message", "")
+    title = _AGENT_HEALTH_TITLES.get(event_type, "Agent Alert")
+
+    color = {
+        "critical": COLOR_RED,
+        "high": COLOR_ORANGE,
+        "medium": COLOR_YELLOW,
+    }.get(severity, COLOR_BLUE)
+
+    fields = [
+        {"name": "Agent", "value": agent, "inline": True},
+        {"name": "Severity", "value": severity.upper(), "inline": True},
+    ]
+    embed: dict[str, Any] = {
+        "title": f"{title} — {severity.upper()}",
+        "color": color,
+        "fields": fields,
+    }
+    if message:
+        embed["description"] = message
+    return {"embeds": [embed]}
+
+
 EVENT_FORMATTERS: dict[str, Callable[..., dict[str, Any]]] = {
     "approval_request": format_approval_request,
     "incident": format_incident,
@@ -177,6 +217,11 @@ EVENT_FORMATTERS: dict[str, Callable[..., dict[str, Any]]] = {
     "policy_alert": format_policy_event,
     "budget_alert": format_budget_alert,
     "budget_halt": format_budget_alert,
+    "heartbeat_missed": partial(format_agent_health, event_type="heartbeat_missed"),
+    "behavioral_drift": partial(format_agent_health, event_type="behavioral_drift"),
+    "sdk_integrity_violation": partial(
+        format_agent_health, event_type="sdk_integrity_violation"
+    ),
 }
 
 

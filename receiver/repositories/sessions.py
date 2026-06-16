@@ -104,6 +104,20 @@ async def delete_all_user_sessions(session: AsyncSession, user_id: UUID) -> int:
     return result.rowcount  # type: ignore[attr-defined]
 
 
+async def delete_other_user_sessions(
+    session: AsyncSession, user_id: UUID, keep_session_id: UUID
+) -> int:
+    """Delete a user's sessions except one (e.g. after a password change,
+    log out every other device while keeping the current session alive)."""
+    stmt = (
+        delete(Session)
+        .where(Session.user_id == user_id)
+        .where(Session.id != keep_session_id)
+    )
+    result = await session.execute(stmt)
+    return result.rowcount  # type: ignore[attr-defined]
+
+
 async def cleanup_expired(session: AsyncSession) -> int:
     """Delete expired sessions. Returns count deleted."""
     stmt = delete(Session).where(Session.expires_at <= datetime.now(timezone.utc))
