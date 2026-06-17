@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "strathon"
-version = "1.2.0"
+version = "1.2.1"
 description = "Open-source AI agent firewall. Blocks dangerous agent tool calls before they execute, with in-process CEL enforcement at the tool-call boundary."
 readme = "README.md"
 license = "Apache-2.0"

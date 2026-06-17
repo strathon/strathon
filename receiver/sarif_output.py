@@ -21,7 +21,7 @@ SARIF_VERSION = "2.1.0"
 SARIF_SCHEMA = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json"
 
 TOOL_NAME = "strathon"
-TOOL_VERSION = "1.2.0"
+TOOL_VERSION = "1.2.1"
 TOOL_URI = "https://getstrathon.com"
 
 

@@ -9,6 +9,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-06-17
+
+### Fixed
+- The trace detail page (`/traces/{id}`) crashed on load. It read the span
+  count (a number) before the span array and tried to spread it; it now reads
+  the span array directly with a guard, so the waterfall, flame, and graph
+  views render correctly.
+- Approval cards showed "unknown agent" even when the triggering span carried
+  an agent name. Approvals now record and return the agent (`gen_ai.agent.name`)
+  so the real agent is shown.
+- Dashboard search placeholders rendered a literal escape sequence instead of
+  an ellipsis character.
+
+### Changed
+- Bumped `lucide-react` to 1.20 in the dashboard.
+
 ## [1.2.0] - 2026-06-16
 
 ### Changed
@@ -139,5 +155,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Enterprise scaling guide (horizontal scaling, PgBouncer, read replicas)
 - Published to PyPI: `pip install strathon`
 
-[Unreleased]: https://github.com/strathon/strathon/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/strathon/strathon/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/strathon/strathon/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/strathon/strathon/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/strathon/strathon/releases/tag/v1.1.0
