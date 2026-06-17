@@ -36,6 +36,7 @@ class CreateApprovalRequest(BaseModel):
     policy_id: str
     policy_name: Optional[str] = None
     span_name: Optional[str] = None
+    agent_name: Optional[str] = None
     tool_name: Optional[str] = None
     tool_args: Optional[str] = None
     timeout_seconds: int = 300
@@ -76,6 +77,7 @@ async def create_approval(
         ctx.project_id,
         policy_uuid,
         span_name=body.span_name,
+        agent_name=body.agent_name,
         tool_name=body.tool_name,
         tool_args=body.tool_args,
         policy_name=body.policy_name,
@@ -99,7 +101,7 @@ async def create_approval(
             "approval_request",
             {
                 "approval_id": str(approval.id),
-                "agent_name": approval.span_name or "agent",
+                "agent_name": approval.agent_name or "agent",
                 "tool_name": body.tool_name or "unknown",
                 "policy_name": body.policy_name or "unknown",
                 "timeout_seconds": body.timeout_seconds,

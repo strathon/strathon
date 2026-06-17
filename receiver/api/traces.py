@@ -391,6 +391,8 @@ async def ingest_traces(
                                     trace_id=trace_id,
                                     span_id=span_id,
                                     span_name=span.name,
+                                    agent_name=merged_attrs.get("gen_ai.agent.name")
+                                    or merged_attrs.get("strathon.agent.name"),
                                     tool_name=merged_attrs.get("gen_ai.tool.name"),
                                     tool_args=merged_attrs.get("strathon.tool.args"),
                                     policy_name=p["name"],

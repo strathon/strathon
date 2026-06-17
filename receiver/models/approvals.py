@@ -40,6 +40,7 @@ class Approval(Base):
     trace_id: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
     span_id: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
     span_name: Mapped[Optional[str]] = mapped_column(Text)
+    agent_name: Mapped[Optional[str]] = mapped_column(Text)
     tool_name: Mapped[Optional[str]] = mapped_column(Text)
     tool_args: Mapped[Optional[str]] = mapped_column(Text)
     policy_name: Mapped[Optional[str]] = mapped_column(Text)
@@ -100,6 +101,7 @@ class Approval(Base):
             "trace_id": self.trace_id.hex() if self.trace_id else None,
             "span_id": self.span_id.hex() if self.span_id else None,
             "span_name": self.span_name,
+            "agent_name": self.agent_name,
             "tool_name": self.tool_name,
             "tool_args": self.tool_args,
             "policy_name": self.policy_name,

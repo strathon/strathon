@@ -123,7 +123,11 @@ export default function WaterfallPage() {
   const { data: traceData, loading: traceLoading, error: traceError, refetch } = useApi<{ data: any }>(`/api/traces/${id}`);
   const traceResp = traceData?.data || traceData;
   const trace = traceResp || { id, agent: "", operation: "", status: "ok", started: "", model: "", durationMs: 0, spans: 0 };
-  const spans: WaterfallSpan[] = traceResp?.spans || traceResp?.waterfall_spans || [];
+  // `traceResp.spans` is the span *count* (a number); the actual array lives in
+  // `waterfall_spans`. Read the array field, and guard so a non-array can never
+  // reach the spreads below.
+  const rawSpans = traceResp?.waterfall_spans ?? traceResp?.spans;
+  const spans: WaterfallSpan[] = Array.isArray(rawSpans) ? rawSpans : [];
   const totalDur = useMemo(() => spans.length > 0 ? Math.max(...spans.map((s) => s.start + s.dur)) : 1, [spans]);
 
   // Build a chronological log view from the trace's real spans. Each span
