@@ -1,0 +1,229 @@
+<svg width="1320" height="740" viewBox="0 0 1320 740" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif">
+  <defs>
+    <style>
+      .h     { font-size: 17px; font-weight: 700; }
+      .l     { font-size: 14px; font-weight: 600; }
+      .s     { font-size: 12px; font-weight: 400; }
+      .tag   { font-size: 9.5px; font-weight: 700; letter-spacing: 0.10em; }
+      .cap   { font-size: 13px; font-weight: 400; }
+      .capL  { font-size: 14.5px; font-weight: 600; }
+      .mono  { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 11px; font-weight: 500; }
+    </style>
+
+    <!-- refined card shadow — two-layer for depth realism -->
+    <filter id="card" x="-15%" y="-15%" width="130%" height="135%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="#1a1008" flood-opacity="0.05"/>
+      <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#1a1008" flood-opacity="0.07"/>
+    </filter>
+    <!-- primary card has a richer warm glow -->
+    <filter id="cardA" x="-15%" y="-15%" width="130%" height="135%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="#1a1008" flood-opacity="0.06"/>
+      <feDropShadow dx="0" dy="6" stdDeviation="14" flood-color="#ad6035" flood-opacity="0.16"/>
+    </filter>
+    <!-- background side cards (depth stack) — softer shadow -->
+    <filter id="cardSoft" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#1a1008" flood-opacity="0.04"/>
+    </filter>
+
+    <!-- arrows -->
+    <marker id="ar" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10" fill="none" stroke="#a39584" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="arA" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10" fill="none" stroke="#ad6035" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+
+    <!-- subtle paper grain -->
+    <pattern id="grid" x="0" y="0" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0 L0 0 0 48" fill="none" stroke="#efe9dd" stroke-width="0.5" opacity="0.25"/>
+    </pattern>
+
+    <!-- card background gradient for subtle depth -->
+    <linearGradient id="cardBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#fbf8f1"/>
+    </linearGradient>
+    <linearGradient id="cardAccentBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fcf3eb"/>
+      <stop offset="100%" stop-color="#f8eadc"/>
+    </linearGradient>
+
+    <!-- vignette -->
+    <radialGradient id="vig" cx="50%" cy="55%" r="75%">
+      <stop offset="55%" stop-color="#fdfcf7" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#f0e7d3" stop-opacity="0.35"/>
+    </radialGradient>
+  </defs>
+
+  <!-- ============ BACKGROUND ============ -->
+  <rect width="1320" height="740" fill="#fdfcf7"/>
+  <rect width="1320" height="740" fill="url(#grid)"/>
+  <rect width="1320" height="740" fill="url(#vig)"/>
+
+  <!-- ============ COLUMN HEADERS — now centered on each column ============ -->
+  <g>
+    <text x="239"  y="66" class="tag" fill="#a39584" text-anchor="middle">YOUR APPLICATION</text>
+    <text x="609"  y="66" class="tag" fill="#a39584" text-anchor="middle">ENFORCEMENT</text>
+    <text x="964"  y="66" class="tag" fill="#a39584" text-anchor="middle">STRATHON RECEIVER</text>
+    <text x="1230" y="66" class="tag" fill="#a39584" text-anchor="middle">STATE &amp; UI</text>
+  </g>
+
+  <!-- subtle column separators (very faint) -->
+  <line x1="425" y1="84" x2="425" y2="620" stroke="#efe9dd" stroke-width="1" opacity="0.6"/>
+  <line x1="795" y1="84" x2="795" y2="620" stroke="#efe9dd" stroke-width="1" opacity="0.6"/>
+  <line x1="1138" y1="84" x2="1138" y2="620" stroke="#efe9dd" stroke-width="1" opacity="0.6"/>
+
+  <!-- ============ COL 1 · YOUR AGENT ============ -->
+  <g>
+    <rect x="80" y="100" width="318" height="196" rx="18" fill="url(#cardBg)" stroke="#e7e1d6" stroke-width="1.25" filter="url(#card)"/>
+    <text x="108" y="142" class="h" fill="#1a1008">Your agent</text>
+    <text x="108" y="166" class="s" fill="#7a7163">LangGraph · CrewAI · OpenAI · LangChain</text>
+    <text x="108" y="184" class="s" fill="#7a7163">AutoGen · Anthropic · Pydantic AI · +3 more</text>
+
+    <line x1="108" y1="210" x2="370" y2="210" stroke="#efe9dd" stroke-width="1"/>
+
+    <text x="108" y="238" class="l" fill="#3a342c">Agent code</text>
+    <text x="108" y="258" class="s" fill="#7a7163">Tool calls, model calls, your logic.</text>
+  </g>
+
+  <!-- ============ COL 2 · ENFORCEMENT ============ -->
+  <!-- PRIMARY: Strathon SDK (taller, more presence) -->
+  <g>
+    <rect x="450" y="100" width="318" height="196" rx="18" fill="url(#cardAccentBg)" stroke="#ad6035" stroke-width="2" filter="url(#cardA)"/>
+    <!-- accent indicator -->
+    <circle cx="478" cy="132" r="6" fill="#ad6035"/>
+    <text x="494" y="137" class="h" fill="#ad6035">Strathon SDK</text>
+    <rect x="694" y="118" width="60" height="24" rx="12" fill="#ad6035"/>
+    <text x="724" y="134" class="tag" fill="#ffffff" text-anchor="middle">PRIMARY</text>
+
+    <text x="478" y="168" class="s" fill="#7a4a25">In-process. Evaluates every tool call</text>
+    <text x="478" y="186" class="s" fill="#7a4a25">against CEL before it executes.</text>
+
+    <line x1="478" y1="212" x2="740" y2="212" stroke="#ecdfd2" stroke-width="1"/>
+
+    <text x="478" y="240" class="mono" fill="#ad6035">3 lines to integrate</text>
+    <text x="478" y="262" class="s" fill="#a48868">No proxy hop · sub-millisecond</text>
+  </g>
+
+  <!-- OPT-IN: MCP gateway (with visible depth stack behind) -->
+  <g transform="translate(0,330)">
+    <!-- 2 back layers offset for depth -->
+    <rect x="460" y="8" width="318" height="118" rx="16" fill="#f4ecdf" stroke="#dcd0bd" stroke-width="0.75" opacity="0.85"/>
+    <rect x="455" y="4" width="318" height="118" rx="16" fill="#f8f2e6" stroke="#e3dac6" stroke-width="0.75" opacity="0.9"/>
+    <!-- front -->
+    <rect x="450" y="0" width="318" height="118" rx="16" fill="url(#cardBg)" stroke="#d9d0c2" stroke-width="1.25" stroke-dasharray="6 4" filter="url(#cardSoft)"/>
+    <text x="478" y="38" class="l" fill="#3a342c">MCP gateway</text>
+    <rect x="694" y="22" width="60" height="22" rx="11" fill="#f0e9dd"/>
+    <text x="724" y="36.5" class="tag" fill="#9a8e7c" text-anchor="middle">OPT-IN</text>
+    <text x="478" y="64" class="s" fill="#7a7163">Screens any MCP client you</text>
+    <text x="478" y="82" class="s" fill="#7a7163">point at it. Ships in the receiver.</text>
+    <text x="478" y="104" class="mono" fill="#a39584">POST /v1/mcp/proxy</text>
+  </g>
+
+  <!-- OPT-IN: Egress proxy (same depth treatment) -->
+  <g transform="translate(0,490)">
+    <rect x="460" y="8" width="318" height="118" rx="16" fill="#f4ecdf" stroke="#dcd0bd" stroke-width="0.75" opacity="0.85"/>
+    <rect x="455" y="4" width="318" height="118" rx="16" fill="#f8f2e6" stroke="#e3dac6" stroke-width="0.75" opacity="0.9"/>
+    <rect x="450" y="0" width="318" height="118" rx="16" fill="url(#cardBg)" stroke="#d9d0c2" stroke-width="1.25" stroke-dasharray="6 4" filter="url(#cardSoft)"/>
+    <text x="478" y="38" class="l" fill="#3a342c">Egress proxy</text>
+    <rect x="694" y="22" width="60" height="22" rx="11" fill="#f0e9dd"/>
+    <text x="724" y="36.5" class="tag" fill="#9a8e7c" text-anchor="middle">OPT-IN</text>
+    <text x="478" y="64" class="s" fill="#7a7163">Governs raw outbound HTTP no</text>
+    <text x="478" y="82" class="s" fill="#7a7163">SDK can see. Separate process.</text>
+    <text x="478" y="104" class="mono" fill="#a39584">HTTP(S) · network-enforceable</text>
+  </g>
+
+  <!-- ============ COL 3 · RECEIVER ============ -->
+  <g>
+    <rect x="820" y="100" width="288" height="508" rx="18" fill="url(#cardBg)" stroke="#e7e1d6" stroke-width="1.25" filter="url(#card)"/>
+    <text x="848" y="142" class="h" fill="#1a1008">Receiver</text>
+    <text x="848" y="164" class="s" fill="#7a7163">FastAPI · Postgres-native</text>
+
+    <line x1="848" y1="190" x2="1080" y2="190" stroke="#efe9dd" stroke-width="1"/>
+
+    <g transform="translate(848, 218)">
+      <text class="l" fill="#3a342c">CEL evaluation</text>
+      <text y="20" class="s" fill="#7a7163">Seven actions, OWASP templates.</text>
+    </g>
+    <g transform="translate(848, 282)">
+      <text class="l" fill="#3a342c">Credential &amp; PII scan</text>
+      <text y="20" class="s" fill="#7a7163">70+ patterns, 11 PII entities.</text>
+    </g>
+    <g transform="translate(848, 346)">
+      <text class="l" fill="#3a342c">Tamper-evident audit</text>
+      <text y="20" class="s" fill="#7a7163">Hash-chained, hourly anchored.</text>
+    </g>
+    <g transform="translate(848, 410)">
+      <text class="l" fill="#3a342c">Approvals &amp; webhooks</text>
+      <text y="20" class="s" fill="#7a7163">Hold real calls for human review.</text>
+    </g>
+    <g transform="translate(848, 474)">
+      <text class="l" fill="#3a342c">Policy sync · halts</text>
+      <text y="20" class="s" fill="#7a7163">Pushed back to every layer.</text>
+    </g>
+
+    <line x1="848" y1="558" x2="1080" y2="558" stroke="#efe9dd" stroke-width="1"/>
+    <text x="848" y="584" class="mono" fill="#a39584">OTLP/HTTP ingest · /v1/policies</text>
+  </g>
+
+  <!-- ============ COL 4 · STATE & UI ============ -->
+  <!-- PostgreSQL — slightly refined glyph -->
+  <g>
+    <rect x="1160" y="100" width="140" height="196" rx="18" fill="url(#cardBg)" stroke="#e7e1d6" stroke-width="1.25" filter="url(#card)"/>
+    <ellipse cx="1230" cy="156" rx="36" ry="11" fill="#fbf6ec" stroke="#c4b89f" stroke-width="1.5"/>
+    <path d="M1194,156 L1194,188 A36,11 0 0 0 1266,188 L1266,156" fill="#fbf6ec" stroke="#c4b89f" stroke-width="1.5"/>
+    <ellipse cx="1230" cy="172" rx="36" ry="11" fill="none" stroke="#c4b89f" stroke-width="1" opacity="0.5"/>
+    <ellipse cx="1230" cy="188" rx="36" ry="11" fill="none" stroke="#c4b89f" stroke-width="1" opacity="0.3"/>
+    <text x="1230" y="232" class="l" fill="#3a342c" text-anchor="middle">PostgreSQL</text>
+    <text x="1230" y="256" class="s" fill="#7a7163" text-anchor="middle">The only</text>
+    <text x="1230" y="272" class="s" fill="#7a7163" text-anchor="middle">dependency.</text>
+  </g>
+
+  <!-- Dashboard glyph -->
+  <g>
+    <rect x="1160" y="330" width="140" height="196" rx="18" fill="url(#cardBg)" stroke="#e7e1d6" stroke-width="1.25" filter="url(#card)"/>
+    <rect x="1185" y="358" width="90" height="62" rx="7" fill="#fbf6ec" stroke="#c4b89f" stroke-width="1.5"/>
+    <line x1="1185" y1="378" x2="1275" y2="378" stroke="#c4b89f" stroke-width="1.2"/>
+    <circle cx="1192" cy="368" r="2" fill="#c4b89f"/>
+    <circle cx="1199" cy="368" r="2" fill="#c4b89f"/>
+    <rect x="1192" y="386" width="24" height="26" rx="3" fill="#f0e9dd"/>
+    <rect x="1220" y="386" width="24" height="26" rx="3" fill="#f0e9dd"/>
+    <rect x="1248" y="386" width="20" height="26" rx="3" fill="#f0e9dd"/>
+    <text x="1230" y="458" class="l" fill="#3a342c" text-anchor="middle">Dashboard</text>
+    <text x="1230" y="482" class="s" fill="#7a7163" text-anchor="middle">Policies, traces,</text>
+    <text x="1230" y="498" class="s" fill="#7a7163" text-anchor="middle">approvals.</text>
+  </g>
+
+  <!-- ============ ARROWS — clean horizontal flow ============ -->
+  <!-- agent -> SDK -->
+  <path d="M398,198 L444,198" fill="none" stroke="#ad6035" stroke-width="2.2" marker-end="url(#arA)"/>
+
+  <!-- SDK -> Receiver (primary path) -->
+  <path d="M768,198 C794,198 794,232 814,232" fill="none" stroke="#ad6035" stroke-width="2" marker-end="url(#arA)"/>
+
+  <!-- MCP -> Receiver -->
+  <path d="M768,389 C794,389 794,308 814,308" fill="none" stroke="#a39584" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <!-- Egress -> Receiver -->
+  <path d="M768,549 C794,549 794,470 814,470" fill="none" stroke="#a39584" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <!-- Receiver -> Postgres -->
+  <path d="M1108,198 L1154,198" fill="none" stroke="#a39584" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <!-- Receiver -> Dashboard -->
+  <path d="M1108,428 L1154,428" fill="none" stroke="#a39584" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <!-- ============ FOOTER STRIPE ============ -->
+  <g>
+    <rect x="80" y="650" width="1220" height="64" rx="14" fill="#fbf6f0" stroke="#ecdfd2" stroke-width="1.25" filter="url(#cardSoft)"/>
+    <rect x="80" y="650" width="6" height="64" rx="3" fill="#ad6035"/>
+    <text x="108" y="678" class="capL" fill="#ad6035">One CEL policy. Three layers. Fail closed.</text>
+    <text x="108" y="700" class="cap" fill="#7a7163">A surface that matches a policy it cannot fully execute is blocked and recorded, never silently allowed.</text>
+
+    <!-- legend -->
+    <rect x="1100" y="670" width="12" height="12" rx="3" fill="#fcf3eb" stroke="#ad6035" stroke-width="1.5"/>
+    <text x="1120" y="680" class="s" fill="#7a7163">primary path</text>
+    <rect x="1100" y="690" width="12" height="12" rx="3" fill="#ffffff" stroke="#d9d0c2" stroke-width="1.5" stroke-dasharray="3 2"/>
+    <text x="1120" y="700" class="s" fill="#7a7163">opt-in, advanced</text>
+  </g>
+</svg>

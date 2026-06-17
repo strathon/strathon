@@ -62,7 +62,7 @@ instrument(client, frameworks=["langgraph"])
         <Segmented value={timeRange} onChange={setTimeRange} options={[{ label: "5m", value: "5m" }, { label: "15m", value: "15m" }, { label: "1h", value: "1h" }, { label: "6h", value: "6h" }, { label: "24h", value: "24h" }]} />
       </div>
       <div className="table-toolbar">
-        <div className="input-wrap" style={{ width: 360 }}><Icons.Search size={14} /><input className="input search" placeholder="Search agent, operation, trace ID\u2026" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        <div className="input-wrap" style={{ width: 360 }}><Icons.Search size={14} /><input className="input search" placeholder="Search agent, operation, trace ID…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <div className="grow" />
         <span className="text-muted t-sm">{traces.length} results</span>
       </div>

@@ -75,7 +75,7 @@ export default function PoliciesPage() {
       <div className="table-toolbar">
         <div className="input-wrap" style={{ width: 320 }}>
           <Icons.Search size={14} />
-          <input className="input search" placeholder="Search by name\u2026" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
+          <input className="input search" placeholder="Search by name…" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
         </div>
         <Dropdown width={180} trigger={({ toggle }) => (
           <button className="btn" onClick={toggle}><Icons.Filter size={13} /> Status: {statusFilter === "all" ? "All" : statusFilter} <Icons.ChevronDown size={13} /></button>

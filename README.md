@@ -17,7 +17,7 @@
   <a href="https://github.com/strathon/strathon/actions/workflows/ci.yml"><img src="https://github.com/strathon/strathon/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/strathon/strathon/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"></a>
   <a href="https://discord.gg/Ta9XRmh4H"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
-  <a href="https://twitter.com/strathonai"><img src="https://img.shields.io/twitter/follow/strathonai?logo=X&color=%23f5f5f5" alt="X"></a>
+  <a href="https://x.com/strathonai"><img src="https://img.shields.io/twitter/follow/strathonai?logo=X&color=%23f5f5f5" alt="X"></a>
   <a href="https://www.linkedin.com/company/strathonai"><img src="https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff" alt="LinkedIn"></a>
   <br/>
   <a href="https://github.com/strathon/strathon/graphs/commit-activity"><img alt="Commits last month" src="https://img.shields.io/github/commit-activity/m/strathon/strathon?labelColor=%2332b583&color=%2312b76a" /></a>
@@ -203,6 +203,12 @@ strathon approvals approve <approval-id>
 strathon compliance export --format sarif
 strathon audit list --limit 100
 
+# API key management
+strathon keys list
+strathon keys create --name "ci-pipeline" --scope traces:read --scope policies:read
+strathon keys rotate <key-id>          # new secret, old one invalidated
+strathon keys revoke <key-id>
+
 # Administration
 strathon admin list-users
 strathon admin reset-password --email user@company.com
@@ -210,7 +216,7 @@ strathon admin transfer-ownership --to user@company.com
 strathon admin revoke-all-keys
 ```
 
-13 command groups, 36 subcommands. Every read command takes a `--json` flag for scripting and CI pipelines.
+14 command groups. Every read command takes a `--json` flag for scripting and CI pipelines. The CLI is fully headless: bootstrap with a dev key or `strathon` registration, then create and rotate scoped keys without ever opening the dashboard.
 
 ## Performance
 
@@ -267,20 +273,9 @@ The honest framing from the security community applies: an agent that combines a
 
 ## Architecture
 
-```
- Your Agent                       Strathon
-┌─────────────────┐              ┌──────────────────┐        ┌────────────┐
-│                 │   OTLP/HTTP  │    Receiver      │        │            │
-│   Agent code    │─────────────▶│    (FastAPI)     │───────▶│ PostgreSQL │
-│                 │              │                  │        │            │
-│  ┌───────────┐  │◀─────────────│  Ingest pipeline │        └────────────┘
-│  │ Strathon  │  │ policy sync, │  Credential scan │
-│  │ SDK       │  │ halts        │  PII redaction   │        ┌───────────┐
-│  │ (in-proc  │  │              │  Audit log       │───────▶│ Dashboard │
-│  │ enforce)  │  │              │  Webhooks        │        │ (Next.js) │
-│  └───────────┘  │              └──────────────────┘        └───────────┘
-└─────────────────┘
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/strathon/strathon/main/assets/architecture.png" alt="Strathon architecture: the SDK enforces in-process at the tool-call boundary as the primary path; the MCP gateway and egress proxy are opt-in layers; all three feed the FastAPI receiver backed by a single PostgreSQL, with a Next.js dashboard" width="900" />
+</p>
 
 Single PostgreSQL dependency. No ClickHouse, no S3, no required Redis (Redis is optional and only enables async webhook delivery). Self-host on one machine or scale horizontally behind a load balancer.
 

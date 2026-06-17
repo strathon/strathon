@@ -23,16 +23,16 @@ instrument(client, frameworks=["langgraph"])
 
 | Framework | Integration | Guide |
 |-----------|-------------|-------|
-| **LangGraph** | LangChain `BaseCallbackHandler`: intercepts tool calls before execution | [langgraph.md](langgraph.md) |
-| **CrewAI** | Event listener on the CrewAI event bus | [crewai.md](crewai.md) |
-| **LangChain** | Same callback handler as LangGraph | [langchain.md](langchain.md) |
-| **OpenAI Agents SDK** | `TracingProcessor` extension point | [openai-agents.md](openai-agents.md) |
-| **Google ADK** | First-class `BasePlugin` | [google-adk.md](google-adk.md) |
-| **Pydantic AI** | First-class `AbstractCapability` | [pydantic-ai.md](pydantic-ai.md) |
-| **Claude Agent SDK** | `query()` wrapper | [claude-agent-sdk.md](claude-agent-sdk.md) |
-| **AutoGen** | `BaseChatAgent.on_messages` wrapper | [autogen.md](autogen.md) |
-| **OpenAI** | Drop-in wrapper for `chat.completions.create` | [openai.md](openai.md) |
-| **Anthropic** | Drop-in wrapper for `messages.create` | [anthropic.md](anthropic.md) |
+| **LangGraph** | LangChain `BaseCallbackHandler`: intercepts tool calls before execution | [Guide](langgraph.md) |
+| **CrewAI** | Event listener on the CrewAI event bus | [Guide](crewai.md) |
+| **LangChain** | Same callback handler as LangGraph | [Guide](langchain.md) |
+| **OpenAI Agents SDK** | `TracingProcessor` extension point | [Guide](openai-agents.md) |
+| **Google ADK** | First-class `BasePlugin` | [Guide](google-adk.md) |
+| **Pydantic AI** | First-class `AbstractCapability` | [Guide](pydantic-ai.md) |
+| **Claude Agent SDK** | `query()` wrapper | [Guide](claude-agent-sdk.md) |
+| **AutoGen** | `BaseChatAgent.on_messages` wrapper | [Guide](autogen.md) |
+| **OpenAI** | Drop-in wrapper for `chat.completions.create` | [Guide](openai.md) |
+| **Anthropic** | Drop-in wrapper for `messages.create` | [Guide](anthropic.md) |
 
 ## Which should I use?
 

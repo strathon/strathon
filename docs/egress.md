@@ -27,7 +27,9 @@ set it up with one command, then verify it is actually in the traffic path (see
 "Verifying the proxy is in the path" below) rather than assume it. In the
 explicit-proxy mode shipped today it enforces on all traffic that honors the
 proxy variables; network-level transparent interception that an agent cannot opt
-out of is on the roadmap.
+out of is on the roadmap. In the meantime you can make the proxy mandatory
+*as deployed* by isolating the agent on a network whose only route out is the
+proxy — see [Locking egress](egress-locking.md).
 
 It does two things on every request, and one on every response:
 
