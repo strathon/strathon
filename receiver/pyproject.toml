@@ -16,9 +16,9 @@ dependencies = [
     "alembic>=1.14.0",
     "pydantic>=2.10.0",
     "pydantic-settings>=2.7.0",
-    "opentelemetry-proto>=1.29.0",
-    "opentelemetry-api>=1.29.0",
-    "opentelemetry-sdk>=1.29.0",
+    "opentelemetry-proto>=1.42.0",
+    "opentelemetry-api>=1.42.0",
+    "opentelemetry-sdk>=1.42.0",
     # Pin protobuf>=6.31.1 for CVE-2025-4565 (pure-Python DoS via
     # recursive protobuf parsing). opentelemetry-proto pulls protobuf
     # but doesn't floor the version high enough.
