@@ -112,6 +112,7 @@ defaults; the compose file picks it up automatically.
 | `STRATHON_RATE_LIMIT_ENABLED`                  | `true`           | Per-key in-memory rate limiter. Set `false` to bypass entirely.                                 |
 | `STRATHON_RATE_LIMIT_REQUESTS_PER_SECOND`      | `100`            | Sustained per-key throughput. Token bucket refills at this rate.                                |
 | `STRATHON_RATE_LIMIT_BURST`                    | `200`            | Token-bucket capacity. Maximum momentary burst before throttling.                               |
+| `STRATHON_WEBHOOK_REDIS_URL`                   | `` (empty)       | Redis broker for async webhook/alert delivery. Empty uses an in-memory broker (inline send, fine for dev). Set to e.g. `redis://localhost:6379/0` for durable, retried delivery in production. |
 
 ### Security keys
 
