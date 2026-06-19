@@ -29,7 +29,7 @@ Strathon is an **open-source firewall for AI agents**: it evaluates every tool c
 
 An agent that reads untrusted content will eventually be told, by that content, to misuse its tools. The moment that matters is the tool call: the email actually sent, the shell command actually run, the request actually made. Most agent tooling records what went wrong after the fact. Strathon enforces at the tool-call boundary, in-process, while the call can still be stopped.
 
-Enforcement runs at three layers, so a call is governed however the agent reaches the outside world. The **SDK** evaluates policies inside your agent process (no proxy hop, no latency tax) and works out of the box across 10 frameworks. The **MCP gateway** ships inside the receiver and screens any MCP client you point at it. The **egress proxy** is a separate process you deploy to govern raw outbound HTTP that no SDK can see. One invariant holds everywhere: a surface that matches a policy it cannot fully execute fails closed, blocked and recorded, never silently allowed.
+Enforcement runs at three layers, so a call is governed however the agent reaches the outside world. The **SDK** evaluates policies inside your agent process, in under a millisecond, and works out of the box across 10 frameworks. The **MCP gateway** ships inside the receiver and screens any MCP client you point at it. The **egress proxy** is a separate process you deploy to govern raw outbound HTTP that no SDK can see. One invariant holds everywhere: a surface that matches a policy it cannot fully execute fails closed, blocked and recorded, never silently allowed.
 
 Seven enforcement actions. 10 framework integrations. 1,400+ tests. One PostgreSQL, self-hosted in minutes.
 
@@ -88,6 +88,43 @@ except StrathonPolicyBlocked as e:
 ```
 
 `StrathonPolicyBlocked` is raised **before** the tool call executes. The function body never runs. The decision lands in the audit trail with the matched policy, trace context, and timestamp.
+
+## Dashboard
+
+The receiver ships with a Next.js operator console: live posture, the policy editor with OWASP-mapped templates, approval cards, trace waterfalls, audit log, and budget charts. Light and dark mode included.
+
+**Overview** — live posture across your agent firewall
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/strathon/strathon/main/assets/dashboard-overview-light.png" alt="Strathon dashboard overview: recent spans, blocked calls today, pending approvals, spend, and recent agent activity" width="900" />
+</p>
+
+**Policies** — every rule, its action, and how often it fires
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/strathon/strathon/main/assets/dashboard-policies-light.png" alt="Strathon policy list showing enabled policies with require_approval, block, log, and throttle actions" width="900" />
+</p>
+
+**Policy templates** — OWASP Agentic Top 10 mapped, ready to apply
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/strathon/strathon/main/assets/dashboard-policy-templates-light.png" alt="Strathon new-policy screen with OWASP-mapped templates for blocking dangerous tools, data exfiltration, SQL injection, and more" width="900" />
+</p>
+
+<details>
+<summary><b>Dark mode</b> — every view ships in dark too</summary>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/strathon/strathon/main/assets/dashboard-overview-dark.png" alt="Strathon dashboard overview in dark mode" width="900" />
+</p>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/strathon/strathon/main/assets/dashboard-policies-dark.png" alt="Strathon policy list in dark mode" width="900" />
+</p>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/strathon/strathon/main/assets/dashboard-policy-templates-dark.png" alt="Strathon policy templates in dark mode" width="900" />
+</p>
+
+</details>
 
 ## Failure Semantics
 
