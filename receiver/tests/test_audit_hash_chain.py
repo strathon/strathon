@@ -159,32 +159,67 @@ def test_chain_two_rows():
 
 
 def test_merkle_root_empty():
-    assert merkle_root([]) == b"\x00" * 32
+    # RFC 6962: MTH({}) = SHA-256() of the empty string.
+    assert merkle_root([]) == hashlib.sha256(b"").digest()
 
 
 def test_merkle_root_single():
+    # RFC 6962 leaf hash: SHA-256(0x00 || data). NOT the bare leaf.
     h = b"a" * 32
-    assert merkle_root([h]) == h
+    assert merkle_root([h]) == hashlib.sha256(b"\x00" + h).digest()
 
 
 def test_merkle_root_two_leaves():
-    """Combine two leaves via SHA-256(left || right)."""
-    left = b"a" * 32
-    right = b"b" * 32
-    expected = hashlib.sha256(left + right).digest()
-    assert merkle_root([left, right]) == expected
+    """RFC 6962: node = SHA-256(0x01 || MTH(left) || MTH(right))."""
+    left_in = b"a" * 32
+    right_in = b"b" * 32
+    left = hashlib.sha256(b"\x00" + left_in).digest()
+    right = hashlib.sha256(b"\x00" + right_in).digest()
+    expected = hashlib.sha256(b"\x01" + left + right).digest()
+    assert merkle_root([left_in, right_in]) == expected
 
 
-def test_merkle_root_odd_count_duplicates_last():
-    """RFC 6962 style: odd leaves pad by duplicating the last."""
+def test_merkle_root_odd_count_no_duplication():
+    """RFC 6962: odd leaf counts split at the largest power of two below n;
+    the final leaf is NEVER duplicated (the CVE-2012-2459 mistake)."""
     h1, h2, h3 = b"a" * 32, b"b" * 32, b"c" * 32
-    # Level 0: [h1, h2, h3] -> [h1, h2, h3, h3]
-    # Level 1: [SHA(h1||h2), SHA(h3||h3)]
-    # Root: SHA(level1_left || level1_right)
-    left = hashlib.sha256(h1 + h2).digest()
-    right = hashlib.sha256(h3 + h3).digest()
-    expected = hashlib.sha256(left + right).digest()
+    leaf = lambda d: hashlib.sha256(b"\x00" + d).digest()  # noqa: E731
+    node = lambda a, b: hashlib.sha256(b"\x01" + a + b).digest()  # noqa: E731
+    # n=3, k=2: left = MTH([h1,h2]), right = MTH([h3])
+    left = node(leaf(h1), leaf(h2))
+    right = leaf(h3)
+    expected = node(left, right)
     assert merkle_root([h1, h2, h3]) == expected
+
+
+def test_merkle_root_cve_2012_2459_no_collision():
+    """Regression: distinct leaf sets must not collapse to the same root.
+
+    Under the old duplicate-last-node construction, [1,2,3] and [1,2,3,3]
+    produced identical roots (CVE-2012-2459). The RFC 6962 construction must
+    keep them distinct.
+    """
+    a = [b"1" * 32, b"2" * 32, b"3" * 32]
+    b = [b"1" * 32, b"2" * 32, b"3" * 32, b"3" * 32]
+    assert merkle_root(a) != merkle_root(b)
+    # And a six-leaf variant of the classic example.
+    six = [bytes([i]) * 32 for i in range(1, 7)]
+    padded = six + [six[-2], six[-1]]  # [..,5,6,5,6]
+    assert merkle_root(six) != merkle_root(padded)
+
+
+def test_merkle_root_leaf_node_domain_separation():
+    """A 64-byte leaf input must not collide with an internal node over two
+    32-byte children (second-preimage / leaf-node confusion). Domain
+    separation (0x00 vs 0x01 prefix) guarantees this."""
+    c1, c2 = b"a" * 32, b"b" * 32
+    # Internal node over two single-leaf subtrees.
+    node_root = merkle_root([c1, c2])
+    # A single leaf whose data is the 64-byte concatenation of the two child
+    # inputs. With domain separation this hashes under 0x00, not 0x01, so it
+    # cannot equal the internal node.
+    confused_leaf = merkle_root([c1 + c2])
+    assert node_root != confused_leaf
 
 
 def test_merkle_root_change_detects_any_leaf():

@@ -123,28 +123,41 @@ def verify_row(
 
 
 def merkle_root(hashes: list[bytes]) -> bytes:
-    """Compute the Merkle root over an ordered list of row hashes.
+    """Compute the Merkle Tree Hash over an ordered list of leaf inputs.
 
-    Used by the per-interval anchor sealer. Uses SHA-256 (not HMAC)
-    for the tree itself because the leaf hashes are already
-    HMAC-keyed; nesting HMAC inside HMAC adds no security.
+    Implements the RFC 6962 / RFC 9162 (Certificate Transparency) Merkle
+    Tree Hash with **domain separation** and **no node duplication**:
 
-    Returns the 32-byte digest. Empty input returns ``b"\\x00" * 32``
-    by convention so an empty interval still produces a recordable
-    anchor.
+    - ``MTH({}) = SHA-256()`` (hash of the empty string).
+    - leaf:    ``SHA-256(0x00 || data)``
+    - node:    ``SHA-256(0x01 || MTH(left) || MTH(right))`` where the list is
+      split at ``k`` = the largest power of two strictly less than ``n``.
+
+    Two properties this guarantees, both of which the previous
+    duplicate-last-node construction lacked:
+
+    1. **No CVE-2012-2459 collision.** Because odd levels are never padded by
+       duplicating the final node, distinct leaf sequences cannot collapse to
+       the same root (e.g. ``[1,2,3]`` and ``[1,2,3,3]`` differ).
+    2. **Second-preimage resistance via domain separation.** Leaves and
+       internal nodes are hashed with distinct ``0x00`` / ``0x01`` prefixes, so
+       a 64-byte leaf cannot masquerade as the concatenation of two child
+       digests (RFC 6962 S2.1: this domain separation is required for second
+       preimage resistance). The HMAC-keyed leaf inputs do not remove this need
+       — the attack is on tree structure, not leaf authenticity.
+
+    The tree shape is uniquely determined by the number of leaves; leaves need
+    not be a power of two and are never duplicated.
     """
-    if not hashes:
-        return b"\x00" * 32
-    level = list(hashes)
-    while len(level) > 1:
-        if len(level) % 2 == 1:
-            # Duplicate the last node, RFC-6962-style.
-            level.append(level[-1])
-        next_level: list[bytes] = []
-        for i in range(0, len(level), 2):
-            h = sha256()
-            h.update(level[i])
-            h.update(level[i + 1])
-            next_level.append(h.digest())
-        level = next_level
-    return level[0]
+    n = len(hashes)
+    if n == 0:
+        return sha256(b"").digest()
+    if n == 1:
+        return sha256(b"\x00" + hashes[0]).digest()
+    # Largest power of two strictly less than n (RFC 6962 split point).
+    k = 1
+    while k << 1 < n:
+        k <<= 1
+    left = merkle_root(hashes[:k])
+    right = merkle_root(hashes[k:])
+    return sha256(b"\x01" + left + right).digest()

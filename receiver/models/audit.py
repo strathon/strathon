@@ -151,12 +151,22 @@ class AuditAnchor(Base):
     The sealer worker computes one of these every
     ``audit_anchor_interval_seconds`` (default 60s), recording the
     final sequence number of the prior interval and the Merkle root
-    over those events' ``row_hash`` values. Verification of a single
-    event's integrity requires the row plus a Merkle inclusion proof
-    against this anchor.
+    over those events' ``row_hash`` values. A single event's integrity
+    is checked today by recomputing its keyed ``row_hash`` against the
+    chain (see :func:`repositories.audit.verify_event`); the anchor's
+    Merkle root is a periodic commitment over a whole interval, against
+    which an inclusion proof could be checked once that path is built.
 
-    ``signature`` and ``signing_key_id`` are nullable: current
-    anchors are plaintext-verifiable Merkle roots; KMS signing is a planned extension.
+    ``signature`` and ``signing_key_id`` are reserved for signed anchoring
+    and are nullable because anchors are not yet signed. Today an anchor is an
+    unsigned Merkle root: it makes the log tamper-evident (altering any recorded
+    event changes the root, which is detectable) but it does not, on its own,
+    prove the log to a third party who does not trust this database. Signing the
+    root with a key held outside the database — and publishing the public key so
+    anyone can verify a root offline without trusting the server — is a planned
+    enhancement that these columns exist to carry. Until then, integrity rests on
+    the chain construction plus access controls on this schema, not on a
+    signature.
     """
 
     __tablename__ = "anchors"
