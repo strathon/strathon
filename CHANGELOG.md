@@ -9,6 +9,36 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-06-20
+
+### Security
+- Hardened the audit anchor Merkle tree against forgeability. The previous
+  construction could let two different event sequences produce the same root,
+  weakening tamper detection. The tree now follows RFC 6962 / RFC 9162 with
+  leaf/node domain separation and no node duplication, and regression tests
+  cover both issues. No production anchors used the old construction, so no
+  re-anchoring is required.
+
+### Fixed
+- Budgets now show real end-of-month forecast and remaining headroom (from
+  `/v1/costs/forecast`) and a real per-agent spend chart (from `/v1/costs`);
+  the overview spend trend reads the same series. These previously rendered
+  empty or placeholder values.
+- The audit log verifies integrity against the receiver: the header shows the
+  real chain-anchor state from `/v1/audit/anchors`, and any entry can be
+  inspected to recompute and check its hash via `/v1/audit/events/{id}/verify`.
+- Compliance evidence export downloads real JSON or SARIF from the receiver.
+- Sparklines no longer attempt to draw from a single data point.
+
+### Added
+- An overview agent-health card (liveness and risk) sharing data with the
+  Agents page so the two stay consistent.
+
+### Changed
+- Clarified the anchor model documentation: it now states that anchors are
+  unsigned Merkle roots and that single-event verification recomputes the keyed
+  row hash, with signed, independently-verifiable anchoring noted as planned.
+
 ## [1.2.1] - 2026-06-17
 
 ### Fixed
@@ -155,7 +185,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Enterprise scaling guide (horizontal scaling, PgBouncer, read replicas)
 - Published to PyPI: `pip install strathon`
 
-[Unreleased]: https://github.com/strathon/strathon/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/strathon/strathon/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/strathon/strathon/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/strathon/strathon/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/strathon/strathon/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/strathon/strathon/releases/tag/v1.1.0

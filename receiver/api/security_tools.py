@@ -255,7 +255,7 @@ def _to_cyclonedx(agents: list[dict]) -> dict:
         "version": 1,
         "metadata": {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "tools": [{"name": "strathon", "version": "1.2.1"}],
+            "tools": [{"name": "strathon", "version": "1.2.2"}],
         },
         "components": components,
     }

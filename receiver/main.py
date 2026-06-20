@@ -667,7 +667,7 @@ app = FastAPI(
         "An open-source firewall for AI agents. Write CEL rules, "
         "Strathon blocks the tool call before it runs."
     ),
-    version="1.2.1",
+    version="1.2.2",
     license_info={"name": "Apache-2.0", "url": "https://www.apache.org/licenses/LICENSE-2.0"},
     contact={"name": "Strathon", "url": "https://getstrathon.com"},
     openapi_tags=[

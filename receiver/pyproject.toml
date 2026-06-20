@@ -1,6 +1,6 @@
 [project]
 name = "strathon-receiver"
-version = "1.2.1"
+version = "1.2.2"
 description = "Strathon OTLP receiver and intervention API"
 requires-python = ">=3.12"
 license = "Apache-2.0"
