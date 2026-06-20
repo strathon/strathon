@@ -5,14 +5,30 @@ import { useRouter, useParams } from "next/navigation";
 import { Icons } from "@/components/icons";
 import { Badge, StatusBadge, Segmented, Sheet, ServiceDot, CopyableCode, Skeleton, Time, Empty } from "@/components/ui";
 import { useApi } from "@/lib/api-client";
+import { KIND_COLOR, spanColor } from "@/lib/span-colors";
 
 interface WaterfallSpan {
   id: string; parent: string | null; depth: number; name: string;
   service: number; start: number; dur: number; status: "ok" | "blocked" | "error"; blockedBy?: string;
   service_name?: string;
+  kind?: "agent" | "llm" | "tool" | "retrieval" | "other";
+  // Real fields surfaced by the transform from the receiver's tree response.
+  tool_name?: string;
+  request_model?: string;
+  provider_name?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  cost_usd?: string;
+  halt_reason?: string;
+  status_message?: string;
+  attributes?: Record<string, unknown>;
 }
 
 const SERVICES = ["orchestrator", "tool-shell", "tool-http", "vector-store", "llm-gateway", "policy-engine", "memory-store", "tool-sql"];
+
+// Colour spans by KIND (llm/tool/agent/retrieval), not by service: a single-agent
+// trace has one service and would render monochrome. Blocked always overrides to
+// danger. Uses the dashboard's semantic palette so it holds in light and dark.
 
 function FlameView({ spans, totalDur, onSelect, selected }: { spans: WaterfallSpan[]; totalDur: number; onSelect: (id: string) => void; selected: string | null }) {
   const byDepth: Record<number, WaterfallSpan[]> = {};
@@ -28,7 +44,7 @@ function FlameView({ spans, totalDur, onSelect, selected }: { spans: WaterfallSp
             {byDepth[d].map((s) => {
               const left = (s.start / totalDur) * 100;
               const w = Math.max(0.3, (s.dur / totalDur) * 100);
-              const color = s.status === "blocked" ? "var(--danger)" : `var(--svc-${(s.service % 8) + 1})`;
+              const color = spanColor(s);
               return (
                 <div key={s.id} onClick={() => onSelect(s.id)} title={`${s.name} · ${s.dur}ms`}
                   style={{ position: "absolute", left: `${left}%`, width: `${w}%`, top: 2, bottom: 2, background: color, borderRadius: 3,
@@ -104,7 +120,7 @@ function DependencyGraph({ spans, onSelect }: { spans: WaterfallSpan[]; onSelect
               <g key={n.svc} style={{ cursor: "pointer" }} onClick={() => { const sp = spans.find((s) => s.service === n.svc); if (sp) onSelect(sp.id); }}>
                 <circle cx={n.x} cy={n.y} r={size + 4} fill="none" stroke={color} strokeWidth="1" opacity="0.3" />
                 <circle cx={n.x} cy={n.y} r={size} fill={color} opacity="0.85" />
-                <text x={n.x} y={n.y - size - 8} fontSize="11" fontWeight="600" fill="var(--text)" textAnchor="middle" fontFamily="var(--font-mono)">{SERVICES[n.svc]}</text>
+                <text x={n.x} y={n.y - size - 8} fontSize="11" fontWeight="600" fill="var(--text)" textAnchor="middle" fontFamily="var(--font-mono)">{(spans.find((sp) => sp.service === n.svc)?.service_name) || `svc-${n.svc}`}</text>
                 <text x={n.x} y={n.y + 4} fontSize="11" fontWeight="600" fill="white" textAnchor="middle" fontFamily="var(--font-mono)">{c}</text>
               </g>
             );
@@ -178,7 +194,7 @@ export default function WaterfallPage() {
 
   const view = useMemo(() => {
     const visibleStart = brush.start * totalDur, visibleEnd = brush.end * totalDur;
-    return { visibleStart, visibleEnd, visibleDur: visibleEnd - visibleStart };
+    return { visibleStart, visibleEnd, visibleDur: Math.max(1, visibleEnd - visibleStart) };
   }, [brush, totalDur]);
 
   const matches = useMemo(() => {
@@ -271,13 +287,29 @@ export default function WaterfallPage() {
           <div className="minimap-bg" ref={minimapRef}>
             {spans.map((s) => {
               const left = (s.start / totalDur) * 100, w = Math.max(0.4, (s.dur / totalDur) * 100);
-              const color = s.status === "blocked" ? "var(--danger)" : `var(--svc-${(s.service % 8) + 1})`;
+              const color = spanColor(s);
               return <div key={s.id} style={{ position: "absolute", left: `${left}%`, width: `${w}%`, top: 6 + s.depth * 8, height: 4, background: color, opacity: 0.85, borderRadius: 1 }} />;
             })}
             <div className="minimap-brush" style={{ left: `${brush.start * 100}%`, width: `${(brush.end - brush.start) * 100}%` }}
               onMouseDown={(e) => { dragRef.current = { startX: e.clientX, startBrush: brush }; document.body.classList.add("is-resizing"); }} />
           </div>
         </div>
+
+        {tab === "waterfall" && (
+          <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "8px 24px", flexWrap: "wrap" }}>
+            {[
+              { label: "Agent", color: KIND_COLOR.agent },
+              { label: "LLM", color: KIND_COLOR.llm },
+              { label: "Tool", color: KIND_COLOR.tool },
+              { label: "Retrieval", color: KIND_COLOR.retrieval },
+              { label: "Blocked", color: "var(--danger)" },
+            ].map((k) => (
+              <span key={k.label} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-muted)" }}>
+                <span style={{ width: 9, height: 9, borderRadius: 2, background: k.color }} />{k.label}
+              </span>
+            ))}
+          </div>
+        )}
 
         {tab === "waterfall" && viewMode === "timeline" && (
           <div className="waterfall-body" style={{ gridTemplateColumns: `${treeW}px 5px 1fr` }}>
@@ -288,8 +320,8 @@ export default function WaterfallPage() {
                 return (
                   <div key={s.id} className="wf-row" data-selected={selected === s.id} style={{ paddingLeft: 12 + s.depth * 14, opacity: dim ? 0.35 : 1 }} onClick={() => setSelected(s.id)} title={s.name}>
                     <Icons.ChevronDown size={11} className="wf-caret" />
-                    <ServiceDot idx={s.service} />
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
+                    <ServiceDot idx={s.service} color={KIND_COLOR[s.kind ?? "other"]} />
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: s.status === "blocked" ? "var(--danger)" : undefined, fontWeight: s.status === "blocked" ? 500 : undefined }}>{s.name}</span>
                     <span style={{ color: "var(--text-muted)", fontVariantNumeric: "tabular-nums", fontFamily: "var(--font-mono)", fontSize: 11 }}>{s.dur}ms</span>
                   </div>
                 );
@@ -300,12 +332,13 @@ export default function WaterfallPage() {
               <div className="wf-time-ruler">
                 {ticks.map((t, i) => <div key={i} className="wf-tick" style={{ left: `${((t - view.visibleStart) / view.visibleDur) * 100}%` }}>{(t / 1000).toFixed(2)}s</div>)}
               </div>
-              {spans.map((s) => {
+              <div className="wf-timeline-content">
+                {spans.map((s) => {
                 const startRel = (s.start - view.visibleStart) / view.visibleDur;
-                const left = Math.max(0, startRel * 100);
-                const w = Math.max(0.1, (s.dur / view.visibleDur) * 100);
+                const left = Math.min(100, Math.max(0, startRel * 100));
+                const w = Math.min(100 - left, Math.max(0.1, (s.dur / view.visibleDur) * 100));
                 const dim = matches.size && !matches.has(s.id);
-                const color = s.status === "blocked" ? "var(--danger)" : `var(--svc-${(s.service % 8) + 1})`;
+                const color = spanColor(s);
                 const crit = showCritical && criticalIds.has(s.id);
                 return (
                   <div key={s.id} className="wf-bar-row" data-selected={selected === s.id} data-crit={crit} onClick={() => setSelected(s.id)}
@@ -313,12 +346,16 @@ export default function WaterfallPage() {
                     onMouseEnter={(e) => { setHovered(s); setTipPos({ x: e.clientX, y: e.currentTarget.getBoundingClientRect().top }); }}
                     onMouseMove={(e) => setTipPos({ x: e.clientX, y: e.currentTarget.getBoundingClientRect().top })}
                     onMouseLeave={() => setHovered(null)} style={{ opacity: dim ? 0.35 : 1 }}>
-                    <div className={`wf-bar${s.status === "blocked" ? " blocked" : ""}${crit ? " crit" : ""}`} style={{ left: `${left}%`, width: `${w}%`, background: color, boxShadow: selected === s.id ? "0 0 0 1.5px var(--text)" : "none" }}>
-                      {w > 4 ? `${s.dur}ms` : ""}
-                    </div>
+                    <div className={`wf-bar${s.status === "blocked" ? " blocked" : ""}${crit ? " crit" : ""}`} style={{ left: `${left}%`, width: `${w}%`, background: color, boxShadow: selected === s.id ? "0 0 0 1.5px var(--text)" : "none" }} />
+                    {s.status === "blocked" && (
+                      left + w > 82
+                        ? <span className="wf-blocked-label" style={{ right: `calc(${100 - left}% + 6px)` }}>BLOCKED</span>
+                        : <span className="wf-blocked-label" style={{ left: `calc(${left}% + ${w}% + 6px)` }}>BLOCKED</span>
+                    )}
                   </div>
                 );
               })}
+              </div>
             </div>
           </div>
         )}
@@ -335,7 +372,7 @@ export default function WaterfallPage() {
                   {spans.map((s) => (
                     <tr key={s.id} className="clickable" onClick={() => setSelected(s.id)}>
                       <td className="mono" style={{ fontSize: 12.5 }}>{s.name}</td>
-                      <td><div style={{ display: "flex", alignItems: "center", gap: 8 }}><ServiceDot idx={s.service} />{SERVICES[s.service]}</div></td>
+                      <td><div style={{ display: "flex", alignItems: "center", gap: 8 }}><ServiceDot idx={s.service} color={KIND_COLOR[s.kind ?? "other"]} />{s.service_name || "—"}</div></td>
                       <td className="mono" style={{ textAlign: "right", fontSize: 12 }}>{s.start}ms</td>
                       <td className="mono" style={{ textAlign: "right", fontSize: 12 }}>{s.dur}ms</td>
                       <td>{StatusBadge[s.status]()}</td>
@@ -367,7 +404,7 @@ export default function WaterfallPage() {
             <span className="mono" style={{ fontWeight: 600 }}>{hovered.name}</span>
           </div>
           <div className="t-sm text-secondary" style={{ display: "flex", gap: 10, fontVariantNumeric: "tabular-nums" }}>
-            <span>{SERVICES[hovered.service]}</span><span>·</span><span style={{ color: "var(--text)" }}>{hovered.dur}ms</span><span>·</span><span>start +{hovered.start}ms</span>
+            <span>{hovered.service_name || "—"}</span><span>·</span><span style={{ color: "var(--text)" }}>{hovered.dur}ms</span><span>·</span><span>start +{hovered.start}ms</span>
           </div>
           {hovered.status === "blocked" && <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--danger)", display: "flex", alignItems: "center", gap: 4 }}><Icons.AlertTriangle size={11} /> Blocked by {hovered.blockedBy}</div>}
         </div>
@@ -379,46 +416,150 @@ export default function WaterfallPage() {
         activeTab={sheetTab} onTab={setSheetTab}>
         {selectedSpan && sheetTab === "attrs" && (
           <div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>{StatusBadge[selectedSpan.status]()}<Badge mono>{SERVICES[selectedSpan.service]}</Badge><Badge>{selectedSpan.dur}ms</Badge></div>
-            <div className="t-caption text-muted" style={{ marginBottom: 8 }}>Attributes</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+              {StatusBadge[selectedSpan.status]()}
+              <Badge mono>{selectedSpan.service_name || "—"}</Badge>
+              <Badge>{selectedSpan.dur}ms</Badge>
+              {selectedSpan.kind && selectedSpan.kind !== "other" && <Badge mono>{selectedSpan.kind}</Badge>}
+            </div>
+            {/* Token + cost block: only render if the span actually has them.
+                LLM spans carry tokens; tool/agent spans usually don't. */}
+            {(selectedSpan.input_tokens != null || selectedSpan.output_tokens != null || selectedSpan.cost_usd) && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 16 }}>
+                {selectedSpan.input_tokens != null && (
+                  <div className="card dense" style={{ padding: "10px 12px" }}>
+                    <div className="t-caption text-muted">Input tokens</div>
+                    <div className="mono" style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{selectedSpan.input_tokens.toLocaleString()}</div>
+                  </div>
+                )}
+                {selectedSpan.output_tokens != null && (
+                  <div className="card dense" style={{ padding: "10px 12px" }}>
+                    <div className="t-caption text-muted">Output tokens</div>
+                    <div className="mono" style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{selectedSpan.output_tokens.toLocaleString()}</div>
+                  </div>
+                )}
+                {selectedSpan.cost_usd && (
+                  <div className="card dense" style={{ padding: "10px 12px" }}>
+                    <div className="t-caption text-muted">Cost</div>
+                    <div className="mono" style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>${Number(selectedSpan.cost_usd).toFixed(4)}</div>
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="t-caption text-muted" style={{ marginBottom: 8 }}>Core</div>
             <CopyableCode filename={`${selectedSpan.id}.attrs`} defaultWrap>
-{`span.id        = "${selectedSpan.id}"
-span.name      = "${selectedSpan.name}"
-span.parent    = ${selectedSpan.parent ? `"${selectedSpan.parent}"` : "null"}
-service.name   = "${SERVICES[selectedSpan.service]}"
-agent.id       = "${trace.agent}"
-duration_ms    = ${selectedSpan.dur}
-start_offset   = ${selectedSpan.start}ms
-status         = "${selectedSpan.status}"
-${selectedSpan.blockedBy ? `policy.blocked_by = "${selectedSpan.blockedBy}"` : ""}`}
+{[
+  `span.id        = "${selectedSpan.id}"`,
+  `span.name      = "${selectedSpan.name}"`,
+  `span.parent    = ${selectedSpan.parent ? `"${selectedSpan.parent}"` : "null"}`,
+  selectedSpan.service_name && `service.name   = "${selectedSpan.service_name}"`,
+  selectedSpan.tool_name && `tool.name      = "${selectedSpan.tool_name}"`,
+  selectedSpan.request_model && `gen_ai.request.model = "${selectedSpan.request_model}"`,
+  selectedSpan.provider_name && `gen_ai.provider.name = "${selectedSpan.provider_name}"`,
+  trace.agent && `agent.id       = "${trace.agent}"`,
+  `duration_ms    = ${selectedSpan.dur}`,
+  `start_offset   = ${selectedSpan.start}ms`,
+  `status         = "${selectedSpan.status}"`,
+  selectedSpan.status_message && `status_message = "${selectedSpan.status_message}"`,
+  selectedSpan.blockedBy && `policy.blocked_by = "${selectedSpan.blockedBy}"`,
+].filter(Boolean).join("\n")}
             </CopyableCode>
+            {/* The full attribute dict (gen_ai.*, strathon.*, http.*, etc) when
+                present. Hidden when empty so the sheet doesn't carry dead space. */}
+            {selectedSpan.attributes && Object.keys(selectedSpan.attributes).length > 0 && (
+              <>
+                <div className="t-caption text-muted" style={{ marginBottom: 8, marginTop: 16 }}>
+                  All attributes <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>({Object.keys(selectedSpan.attributes).length})</span>
+                </div>
+                <CopyableCode filename={`${selectedSpan.id}.full.attrs`} defaultWrap>
+{Object.entries(selectedSpan.attributes)
+  .sort(([a], [b]) => a.localeCompare(b))
+  .map(([k, v]) => `${k.padEnd(36)} = ${typeof v === "string" ? `"${v}"` : JSON.stringify(v)}`)
+  .join("\n")}
+                </CopyableCode>
+              </>
+            )}
           </div>
         )}
         {selectedSpan && sheetTab === "policy" && (
           <div>
             {selectedSpan.blockedBy ? (
               <div className="card dense" style={{ background: "var(--danger-bg)", borderColor: "var(--danger-border)" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}><Icons.AlertTriangle size={14} style={{ color: "var(--danger)" }} /><span style={{ fontWeight: 600 }}>Blocked by {selectedSpan.blockedBy}</span></div>
-                <div className="t-sm text-secondary">Output matched secret-leakage pattern. The tool call was prevented; no external request was made.</div>
-                <div style={{ marginTop: 12 }}><button className="btn sm" onClick={() => router.push("/policies/pol_secret_leakage")}><Icons.Shield size={12} /> Open policy</button></div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <Icons.AlertTriangle size={14} style={{ color: "var(--danger)" }} />
+                  <span style={{ fontWeight: 600 }}>Blocked by {selectedSpan.blockedBy}</span>
+                </div>
+                {/* Real halt_reason from the receiver, when present. No fake text. */}
+                {selectedSpan.halt_reason && <div className="t-sm text-secondary">{selectedSpan.halt_reason}</div>}
+                <div className="t-sm text-secondary" style={{ marginTop: 8 }}>
+                  The tool call was prevented at the in-process enforcement boundary; no external side effect occurred.
+                </div>
+                {/* Only link out to the policy page when we know the policy name (not
+                    a fallback like "policy" or a halt_reason). The policies page accepts
+                    a name query so we don't need a stable ID. */}
+                {selectedSpan.blockedBy && selectedSpan.blockedBy !== "policy" && (
+                  <div style={{ marginTop: 12 }}>
+                    <button className="btn sm" onClick={() => router.push(`/policies?q=${encodeURIComponent(selectedSpan.blockedBy!)}`)}>
+                      <Icons.Shield size={12} /> Open policy
+                    </button>
+                  </div>
+                )}
               </div>
-            ) : <div className="t-sm text-secondary">All policies passed for this span.</div>}
+            ) : selectedSpan.status === "error" ? (
+              <div className="card dense" style={{ background: "var(--danger-bg)", borderColor: "var(--danger-border)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <Icons.AlertTriangle size={14} style={{ color: "var(--danger)" }} />
+                  <span style={{ fontWeight: 600 }}>Span error</span>
+                </div>
+                {selectedSpan.status_message && <div className="t-sm text-secondary">{selectedSpan.status_message}</div>}
+                <div className="t-sm text-secondary" style={{ marginTop: 4 }}>This span errored, but no policy blocked it.</div>
+              </div>
+            ) : (
+              <div className="t-sm text-secondary">All policies passed for this span.</div>
+            )}
           </div>
         )}
-        {selectedSpan && sheetTab === "payload" && (
-          <div className="code">
-{`{
-  "tool": "${selectedSpan.name.replace("tool.call ", "")}",
-  "input": {
-    "endpoint": "https://api.example.com/v1/customers",
-    "method": "GET",
-    "headers": { "authorization": "Bearer ******" }
-  },
-  ${selectedSpan.status === "blocked" ? `"blocked": true,
-  "reason": "${selectedSpan.blockedBy}"` : `"output_preview": "(287 tokens, truncated)"`}
-}`}
-          </div>
-        )}
+        {selectedSpan && sheetTab === "payload" && (() => {
+          // Pull the real tool input/output from attributes if they're present.
+          // Strathon's instrumentation tags them under strathon.tool.args /
+          // strathon.tool.result (real keys, see CEL attribute namespacing).
+          // Falling back to a generic empty-state if not present beats showing
+          // a hardcoded mock that misleads the user.
+          const attrs = selectedSpan.attributes || {};
+          const toolArgs = attrs["strathon.tool.args"] ?? attrs["tool.args"] ?? attrs["gen_ai.tool.args"];
+          const toolResult = attrs["strathon.tool.result"] ?? attrs["tool.result"] ?? attrs["gen_ai.tool.result"];
+          const hasPayload = toolArgs != null || toolResult != null;
+          if (!hasPayload) {
+            return (
+              <Empty
+                icon={<Icons.MessageSquare size={24} />}
+                title={selectedSpan.kind === "tool" ? "No payload captured" : "Payload only applies to tool spans"}
+                subtitle={selectedSpan.kind === "tool"
+                  ? "Tool args and results aren't recorded by the SDK for this span. Enable payload capture in the SDK to see them here."
+                  : `This is a ${selectedSpan.kind || "non-tool"} span; payload is shown for tool calls only.`}
+              />
+            );
+          }
+          const stringify = (v: unknown) => typeof v === "string" ? v : JSON.stringify(v, null, 2);
+          return (
+            <div>
+              {toolArgs != null && (
+                <>
+                  <div className="t-caption text-muted" style={{ marginBottom: 8 }}>Input</div>
+                  <CopyableCode filename={`${selectedSpan.id}.input`} defaultWrap>{stringify(toolArgs)}</CopyableCode>
+                </>
+              )}
+              {toolResult != null && (
+                <>
+                  <div className="t-caption text-muted" style={{ marginBottom: 8, marginTop: 16 }}>
+                    {selectedSpan.status === "blocked" ? "Output (blocked before send)" : "Output"}
+                  </div>
+                  <CopyableCode filename={`${selectedSpan.id}.output`} defaultWrap>{stringify(toolResult)}</CopyableCode>
+                </>
+              )}
+            </div>
+          );
+        })()}
       </Sheet>
     </div>
   );

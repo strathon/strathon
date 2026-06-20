@@ -17,8 +17,8 @@ export function Badge({ kind = "muted", dot = false, mono = false, children }: {
   );
 }
 
-export function ServiceDot({ idx = 0, size = 8 }: { idx?: number; size?: number }) {
-  return <span className="wf-svc-dot" style={{ background: `var(--svc-${(idx % 8) + 1})`, width: size, height: size }} />;
+export function ServiceDot({ idx = 0, size = 8, color }: { idx?: number; size?: number; color?: string }) {
+  return <span className="wf-svc-dot" style={{ background: color ?? `var(--svc-${(idx % 8) + 1})`, width: size, height: size }} />;
 }
 
 export function Kbd({ children }: { children: React.ReactNode }) {

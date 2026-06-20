@@ -86,7 +86,22 @@ export default function AuditPage() {
                   </td>
                   <td className="mono text-secondary" style={{ fontSize: 12 }}><Time absolute ago={e.ts || e.timestamp} /></td>
                   <td><Badge kind={e.action.includes("delete") || e.action.includes("revoke") || e.action.includes("deny") ? "danger" : e.action.includes("create") ? "success" : "muted"} mono>{e.action}</Badge></td>
-                  <td className="text-secondary">{e.category}</td><td>{e.actor}</td><td className="mono" style={{ fontSize: 12.5 }}>{e.resource}</td><td className="mono text-muted" style={{ fontSize: 12 }}>{e.ip}</td>
+                  <td className="text-secondary">{e.category}</td>
+                  <td>
+                    {/* Visually distinguish API-key actors from human users and
+                        system services. The transform stamps actor_type from the
+                        receiver (user|api_key|system|service). */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      {e.actor_type === "user"
+                        ? <Icons.User size={12} style={{ color: "var(--text-muted)" }} />
+                        : e.actor_type === "api_key"
+                        ? <Icons.Key size={12} style={{ color: "var(--text-muted)" }} />
+                        : <Icons.Terminal size={12} style={{ color: "var(--text-muted)" }} />}
+                      <span>{e.actor || "—"}</span>
+                    </div>
+                  </td>
+                  <td className="mono" style={{ fontSize: 12.5 }}>{e.resource}</td>
+                  <td className="mono text-muted" style={{ fontSize: 12 }}>{e.ip || "—"}</td>
                 </tr>
               ))}
             </tbody>

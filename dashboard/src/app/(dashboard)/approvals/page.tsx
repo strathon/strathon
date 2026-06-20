@@ -41,7 +41,10 @@ export default function ApprovalsPage() {
                 </div>
                 {a.expiresIn > 0 && <Ring value={Math.min(100, (a.expiresIn / 420) * 100)} size={40} stroke={3} color="var(--warning)" label={`${Math.floor(a.expiresIn / 60)}m`} />}
               </div>
-              {a.params && <div className="code" style={{ fontSize: 11, marginBottom: 12, maxHeight: 80, overflow: "auto" }}>{JSON.stringify(a.params, null, 2)}</div>}
+              {a.params
+                ? <div className="code" style={{ fontSize: 11, marginBottom: 12, maxHeight: 80, overflow: "auto" }}>{JSON.stringify(a.params, null, 2)}</div>
+                : <div className="t-sm text-muted" style={{ marginBottom: 12, padding: "8px 10px", background: "var(--bg-input)", borderRadius: 6 }}>No parameters captured for this call.</div>
+              }
               {tab === "pending" && (
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                   <button className="btn ghost sm" onClick={() => setDenyModal({ id: a.id, agent: a.agent })}>Deny</button>

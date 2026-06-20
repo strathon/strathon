@@ -16,6 +16,49 @@ const num = (v: unknown, d = 0): number => {
   return Number.isFinite(n) ? n : d;
 };
 
+// Classify a span into a kind for colouring. A single-agent trace has one
+// "service", so colouring by service is monochrome; kind (llm/tool/agent/
+// retrieval) is meaningful per-span. Shared by mapTraceTree (tree nodes) and
+// mapSpans (flat rows) so the two never drift.
+//
+// Patterns from the real framework instrumentations (sdk/src/strathon/
+// instrumentation/*.py):
+//   LangGraph/LangChain : langgraph.chain.{name}, langgraph.llm,
+//                         langgraph.tool.{name}
+//   CrewAI     : crewai.crew.{name}, crewai.task.{name}, crewai.agent.{role},
+//                crewai.llm
+//   OpenAI     : openai.chat.{model}
+//   Anthropic  : anthropic.messages.{model}
+//   OAI Agents : agents.workflow.{name}, agents.agent, agents.generation,
+//                agents.response, agents.tool, agents.handoff, agents.turn
+//   AutoGen    : autogen.agent.{name}, autogen.team.{name}, autogen.tool.{name}
+//   Claude SDK : claude_agent.query, claude_agent.client.{name},
+//                claude_agent.tool.{name}
+//   Google ADK : google_adk.model.{model}, google_adk.tool.{name}
+//   Pydantic AI: pydantic_ai.tool.{name}, pydantic_ai chat spans
+//
+// Most spans also carry request_model/provider_name/agent_name/tool_name from
+// the receiver's gen_ai.* mapping, which the checks below use as the primary
+// signal; the name patterns are the fallback when those fields are absent.
+// Order matters: tool checks first (so "agent.tool.send_email" -> tool, not
+// agent), then retrieval, then llm, then agent/chain.
+function spanKind(o: Obj): "agent" | "llm" | "tool" | "retrieval" | "other" {
+  const name = String(o.name || o.operation_name || "").toLowerCase();
+  if (o.tool_name || /(^|\.)tool(\.|s\.)|\.tool$/.test(name)) return "tool";
+  if (/(retriev|\.vector|\.embed|knowledge)/.test(name)) return "retrieval";
+  if (
+    o.request_model ||
+    o.provider_name ||
+    /(^|\.)llm(\.|$)|\.chat(\.|$)|\.messages(\.|$)|\.completion|\.generation(\.|$)|\.response(s)?(\.|$)|\.model(\.|$)/.test(name)
+  ) return "llm";
+  if (
+    /\.chain(\.|$)|(^|\.)agent(\.|$)|\.crew(\.|$)|\.task(\.|$)|\.team(\.|$)|\.workflow(\.|$)|\.handoff(\.|$)|\.turn(\.|$)|\.query(\.|$)|\.client(\.|$)|\.session|\.respond|\.plan/.test(name) ||
+    (o.agent_name && !o.tool_name)
+  ) return "agent";
+  return "other";
+}
+
+
 /** Policies: { policies: [...] } -> { data: [...], total }. */
 export function mapPolicies(body: unknown): unknown {
   const b = (body || {}) as Obj;
@@ -156,6 +199,7 @@ export function mapAudit(body: unknown): unknown {
       outcome: e.outcome,
       reason: e.reason ?? null,
       resource: resource.type ? `${resource.type}${resource.id ? ":" + resource.id : ""}` : null,
+      ip: e.source_ip ?? null,
       sequence_no: e.sequence_no,
     };
   });
@@ -249,15 +293,24 @@ export function mapTraceTree(body: unknown): unknown {
     return "ok";
   };
 
+
   const spans = flat.map((n) => {
     const startMs = parseMs(n.start_time);
     const dur = typeof n.duration_ms === "number" ? n.duration_ms : (() => {
       const end = parseMs(n.end_time);
       return Number.isFinite(startMs) && Number.isFinite(end) ? Math.max(0, end - startMs) : 0;
     })();
-    // Service identity is the agent/app, not the tool. Prefer agent_name so
-    // the Service column shows e.g. "intervention-demo", not "send_email".
     const label = (n.agent_name as string) || (n.request_model as string) || (n.tool_name as string) || (n.operation_name as string) || "span";
+    // intervention_state of "blocked"/"halted"/"denied" means a policy stopped
+    // this span. The policy name is carried in attributes.policy_name (the
+    // instrumentation tags every decision with it). halt_reason is a free-text
+    // explanation. We prefer policy_name for the link/UI label, fall back to
+    // halt_reason.
+    const interv = String(n.intervention_state || "").toLowerCase();
+    const isBlocked = interv.includes("block") || interv.includes("denied") || interv.includes("halt");
+    const policyName = (n.attributes && typeof n.attributes === "object"
+      ? (n.attributes as Obj)["policy_name"] || (n.attributes as Obj)["strathon.policy.name"]
+      : undefined) as string | undefined;
     return {
       id: n.span_id,
       parent: n._parent ?? null,
@@ -265,9 +318,24 @@ export function mapTraceTree(body: unknown): unknown {
       name: (n.name as string) || (n.operation_name as string) || label,
       service: serviceFor(String(label)),
       service_name: String(label),
+      kind: spanKind(n),
       start: Number.isFinite(startMs) ? startMs - t0 : 0,
       dur: num(dur),
-      status: statusMap(n.status_code),
+      status: isBlocked ? ("blocked" as const) : statusMap(n.status_code),
+      // Pass through the real fields the detail sheet needs. Keeping these on
+      // the mapped span avoids a second fetch when the user opens a span.
+      tool_name: (n.tool_name as string) || undefined,
+      request_model: (n.request_model as string) || undefined,
+      provider_name: (n.provider_name as string) || undefined,
+      input_tokens: typeof n.input_tokens === "number" ? n.input_tokens : undefined,
+      output_tokens: typeof n.output_tokens === "number" ? n.output_tokens : undefined,
+      cost_usd: n.cost_usd != null ? String(n.cost_usd) : undefined,
+      blockedBy: isBlocked ? (policyName || (n.halt_reason as string) || "policy") : undefined,
+      halt_reason: (n.halt_reason as string) || undefined,
+      status_message: (n.status_message as string) || undefined,
+      attributes: (n.attributes && typeof n.attributes === "object")
+        ? (n.attributes as Obj)
+        : {},
     };
   });
 
@@ -293,25 +361,39 @@ export function mapTraceTree(body: unknown): unknown {
  */
 export function mapSpans(body: unknown): unknown {
   const rows = asArray((body as Obj)?.data ?? (body as Obj)?.spans);
+
+
   const data = rows.map((s) => {
     const start = s.start_time ? Date.parse(String(s.start_time)) : NaN;
     const end = s.end_time ? Date.parse(String(s.end_time)) : NaN;
     const dur = Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, end - start) : 0;
     const intervened = String(s.intervention_state || "").toLowerCase();
     const code = String(s.status_code || "").toLowerCase();
-    const status = intervened.includes("block") || intervened.includes("halt") ? "blocked"
+    const status = intervened.includes("block") || intervened.includes("halt") || intervened.includes("denied") ? "blocked"
       : code.includes("error") ? "error" : "ok";
+    // Service label: prefer agent_name (the app), then model, then tool. This
+    // matches mapTraceTree so the same span shows the same Service in both views.
+    const label = (s.agent_name as string) || (s.request_model as string) || (s.tool_name as string) || (s.operation_name as string) || "";
+    // Tokens + cost: SpanRead has them as nested objects {input, output, total}
+    // and a string-typed cost (decimal precision). Surface them flat for the
+    // list table to render without a second fetch.
+    const tokens = (s.tokens as Obj) || {};
+    const cost = (s.cost as Obj) || {};
     return {
       id: s.span_id,
       span_id: s.span_id,
       trace_id: s.trace_id,
       name: s.name || s.operation_name || "span",
-      service: s.tool_name || s.agent_name || s.request_model || "",
-      service_name: s.tool_name || s.agent_name || s.request_model || "",
+      service: label,
+      service_name: label,
+      kind: spanKind(s),
       dur: Math.round(dur),
       status,
       started: s.start_time ?? null,
       start_time: s.start_time ?? null,
+      input_tokens: typeof tokens.input_tokens === "number" ? tokens.input_tokens : undefined,
+      output_tokens: typeof tokens.output_tokens === "number" ? tokens.output_tokens : undefined,
+      cost_usd: cost.cost_usd != null ? String(cost.cost_usd) : undefined,
     };
   });
   return { data, next_cursor: (body as Obj)?.next_cursor ?? null };

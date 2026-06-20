@@ -106,7 +106,22 @@ export default function BudgetsPage() {
       <div className="kpi-grid">
         <div className="kpi"><span className="kpi-label">Spend &middot; month to date</span><span className="kpi-value">{loading ? <Skeleton width={60} height={28} /> : <>$<CountUp to={spendMtd} format={(n) => n.toFixed(2)} /></>}</span></div>
         <div className="kpi"><span className="kpi-label">Forecast &middot; end of month</span><span className="kpi-value">{loading ? <Skeleton width={50} height={28} /> : <>$<CountUp to={forecast} /></>}</span></div>
-        <div className="kpi"><span className="kpi-label">Headroom</span><span className="kpi-value" style={{ color: "var(--warning)" }}>{loading ? <Skeleton width={40} height={28} /> : <CountUp to={headroom} format={(n) => Math.round(n) + "%"} />}</span></div>
+        <div className="kpi">
+          <span className="kpi-label">Headroom</span>
+          <span className="kpi-value" style={{
+            // Headroom is the percentage of the budget not yet spent. With no
+            // active rules there's no budget to compare against, so the value
+            // is vacuous — show it muted rather than alarm-coloured. When rules
+            // exist, threshold-colour by how close to the limit we are.
+            color: activeRules === 0
+              ? "var(--text-muted)"
+              : headroom >= 50 ? "var(--success)"
+              : headroom >= 25 ? "var(--warning)"
+              : "var(--danger)"
+          }}>
+            {loading ? <Skeleton width={40} height={28} /> : <CountUp to={headroom} format={(n) => Math.round(n) + "%"} />}
+          </span>
+        </div>
         <div className="kpi"><span className="kpi-label">Active rules</span><span className="kpi-value">{loading ? <Skeleton width={24} height={28} /> : <CountUp to={activeRules} />}</span></div>
       </div>
       {stackedSeries[0]?.length > 0 && (
