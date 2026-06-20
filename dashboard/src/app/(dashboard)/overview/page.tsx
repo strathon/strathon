@@ -15,6 +15,8 @@ export default function OverviewPage() {
   const { data: approvalsData, loading: aLoading, error: aError } = useApi<{ data: Array<{ id: string; agent: string; tool: string; expiresIn: number }> }>("/api/approvals");
   const { data: budgetsData, loading: bLoading, error: bError } = useApi<{ data: { spend_mtd?: number; daily?: number[] } }>("/api/budgets");
   const { data: complianceData } = useApi<{ data: Array<{ id: string; name: string; coverage: number }> }>("/api/compliance");
+  const { data: agentsData, loading: agLoading } = useApi<{ data: Array<{ id: string; name: string; live: boolean; last_active: string | null; risk: number }> }>("/api/agents");
+  const { data: spendSeriesData } = useApi<{ data: { agents?: string[]; series?: Array<Record<string, number>> } }>("/api/budgets/spend-series");
 
   const policies = policiesData?.data || [];
   const traces = tracesData?.data || [];
@@ -22,12 +24,53 @@ export default function OverviewPage() {
   const budgets = budgetsData?.data;
   const frameworks = complianceData?.data || [];
 
+  // Agent health: aggregate from the same /api/agents data the Agents page uses.
+  // live = a span seen in the last 5 min (derived in mapAgents from last_active);
+  // idle = previously seen but quiet since. Kept as counts + a capped dot grid so
+  // the card stays one fixed size whether there are 2 agents or 500.
+  const agents = agentsData?.data || [];
+  const liveAgents = agents.filter((a) => a.live);
+  const idleAgents = agents.filter((a) => !a.live);
+  const liveCount = liveAgents.length;
+  const idleCount = idleAgents.length;
+  // Live share, shown as the at-a-glance health number. A percentage scans
+  // cleanly whether the fleet is 7 agents or 700 (a raw "412 / 500" does not).
+  const livePct = agents.length > 0 ? Math.round((liveCount / agents.length) * 100) : 0;
+  // Risk posture, using the exact same bands as the Agents page (>70 danger,
+  // >40 warning) so the two surfaces never disagree. risk is the real per-agent
+  // score from the receiver (policy coverage + sensitive-tool usage), mapped to
+  // a number in mapAgents. Surfaced only when agents are actually at risk, so a
+  // healthy fleet leaves the card calm.
+  const atRiskAgents = agents.filter((a) => (a.risk ?? 0) > 40);
+  const highRiskCount = agents.filter((a) => (a.risk ?? 0) > 70).length;
+  const atRiskCount = atRiskAgents.length;
+  // The most recently-active idle agent, surfaced by name so a quiet agent does
+  // not disappear into the count.
+  const mostRecentIdle = idleAgents
+    .filter((a) => a.last_active)
+    .sort((a, b) => Date.parse(b.last_active!) - Date.parse(a.last_active!))[0];
+  // Compact relative age for dot tooltips ("12m", "3h", "2d").
+  const ageLabel = (iso: string | null): string => {
+    if (!iso) return "no activity";
+    const sec = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+    if (sec < 60) return `${Math.round(sec)}s ago`;
+    if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
+    if (sec < 86400) return `${Math.round(sec / 3600)}h ago`;
+    return `${Math.round(sec / 86400)}d ago`;
+  };
+  // Live dots first, then idle, so the grid scans as a clean block.
+  const agentDots = [...liveAgents, ...idleAgents];
+
   const enabled = policies.filter((p) => p.status === "enabled").length;
   const shadow = policies.filter((p) => p.status === "shadow").length;
   const disabled = policies.filter((p) => p.status === "disabled").length;
   const blockedToday = policies.filter((p) => p.action === "block").reduce((a, p) => a + (p.hits7d?.[p.hits7d.length - 1] || 0), 0);
   const spendMtd = budgets?.spend_mtd || 0;
-  const spendDaily = budgets?.daily || [];
+  // Daily total spend = sum across agents per day, from the same per-agent cost
+  // series the budgets chart uses. Real span costs, not a placeholder.
+  const spendDaily = (spendSeriesData?.data?.series || []).map((bucket) =>
+    Object.values(bucket).reduce((a, v) => a + (typeof v === "number" ? v : 0), 0)
+  );
 
   // Derive throughput from real trace data
   const recentSpanCount = traces.reduce((a: number, t: any) => a + (t.spans || t.span_count || 0), 0);
@@ -103,6 +146,71 @@ export default function OverviewPage() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 16, marginTop: 16 }}>
         <div className="card">
           <div className="card-header">
+            <span className="card-title">Agent health</span>
+            <button className="btn ghost sm" onClick={() => router.push("/agents")}>View all <Icons.ArrowRight size={12} /></button>
+          </div>
+          {agLoading ? <Skeleton width="100%" height={96} /> : agents.length === 0 ? (
+            <div className="t-sm text-muted" style={{ padding: "16px 0" }}>No agents reporting yet. Connect the SDK and agents appear here automatically.</div>
+          ) : (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
+                <span className={`hb-beacon${liveCount > 0 ? " is-live" : " is-quiet"}`} aria-hidden="true" />
+                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
+                    <span style={{ fontSize: 26, fontWeight: 600, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", lineHeight: 1, color: livePct === 100 ? "var(--success)" : idleCount > 0 ? "var(--warning)" : "var(--text)" }}>
+                      <CountUp to={livePct} format={(n) => `${Math.round(n)}%`} />
+                    </span>
+                    <span className="text-muted" style={{ fontSize: 14 }}>{liveCount} of {agents.length} agents live</span>
+                  </div>
+                  <span className="t-sm text-muted">
+                    {liveCount === agents.length ? "all agents reporting" : liveCount > 0 ? `${idleCount} quiet` : "no agents reporting right now"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="hb-bar" title={`${liveCount} live · ${idleCount} idle`}>
+                <div className="hb-bar-fill" style={{ width: `${livePct}%` }} />
+              </div>
+
+              <div className="hb-dotgrid" style={{ marginTop: 14 }}>
+                {agentDots.slice(0, 24).map((a) => (
+                  <span
+                    key={a.id}
+                    className={`hb-dot${a.live ? " live" : ""}`}
+                    title={`${a.name} · ${a.live ? "live" : ageLabel(a.last_active)}`}
+                  />
+                ))}
+                {agentDots.length > 24 && <span className="hb-dot-more t-sm text-muted">+{agentDots.length - 24}</span>}
+              </div>
+
+              {atRiskCount > 0 && (
+                <button
+                  className="hb-risk"
+                  onClick={() => router.push("/agents")}
+                  style={{ color: highRiskCount > 0 ? "var(--danger)" : "var(--warning)" }}
+                >
+                  <Icons.AlertTriangle size={13} style={{ flexShrink: 0 }} />
+                  <span style={{ flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {atRiskCount} {atRiskCount === 1 ? "agent" : "agents"} at risk{highRiskCount > 0 ? ` · ${highRiskCount} high` : ""}
+                  </span>
+                  <Icons.ArrowRight size={12} style={{ flexShrink: 0, opacity: 0.7 }} />
+                </button>
+              )}
+
+              {mostRecentIdle && (
+                <div className="t-sm text-muted" style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span className="dot-status" style={{ background: "var(--text-muted)", flexShrink: 0 }} />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {mostRecentIdle.name} quiet · last seen <Time ago={mostRecentIdle.last_active!} />
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="card-header">
             <span className="card-title">Needs your attention</span>
             <button className="btn ghost sm" onClick={() => router.push("/approvals")}>View all <Icons.ArrowRight size={12} /></button>
           </div>
@@ -166,7 +274,7 @@ export default function OverviewPage() {
                   <div key={p.id} onClick={() => router.push(`/policies/${p.id}`)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 8px", borderRadius: 6, cursor: "pointer" }}>
                     <Badge kind={p.action === "block" ? "danger" : p.action === "steer" || p.action === "throttle" ? "warning" : p.action === "alert" || p.action === "require_approval" ? "info" : "muted"} mono>{p.action}</Badge>
                     <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13 }}>{p.name}</span>
-                    {p.hits7d && <Sparkline data={p.hits7d} width={56} height={18} color="var(--accent)" />}
+                    {p.hits7d && p.hits7d.length >= 2 && <Sparkline data={p.hits7d} width={56} height={18} color="var(--accent)" />}
                     <span className="t-sm text-muted" style={{ fontVariantNumeric: "tabular-nums", width: 32, textAlign: "right" }}>{p.hits7d?.reduce((a, b) => a + b, 0) || 0}</span>
                   </div>
                 ))}
@@ -179,7 +287,7 @@ export default function OverviewPage() {
           <div className="card-header"><span className="card-title">Spend trend</span></div>
           <div style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-0.02em", marginBottom: 4 }}>${spendMtd.toFixed(0)}</div>
           <div className="t-sm text-muted" style={{ marginBottom: 12 }}>30-day total</div>
-          {spendDaily.length > 0 && <Sparkline data={spendDaily} width={240} height={56} color="var(--accent)" valueFormat={(v) => `$${v.toFixed(0)}`} />}
+          {spendDaily.length >= 2 && <Sparkline data={spendDaily} width={240} height={56} color="var(--accent)" valueFormat={(v) => `$${v.toFixed(0)}`} />}
           <button className="btn ghost sm" style={{ marginTop: 12 }} onClick={() => router.push("/budgets")}>Budgets <Icons.ArrowRight size={12} /></button>
         </div>
 

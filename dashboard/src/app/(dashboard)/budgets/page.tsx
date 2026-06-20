@@ -6,6 +6,8 @@ import { useApi, api } from "@/lib/api-client";
 
 export default function BudgetsPage() {
   const { data, loading, error, refetch } = useApi<{ data: any }>("/api/budgets");
+  const { data: forecastData } = useApi<{ data: { forecast?: number; headroom?: number | null; burn_rate_usd_per_hour?: number } }>("/api/budgets/forecast");
+  const { data: spendSeriesData } = useApi<{ data: { agents?: string[]; series?: Array<Record<string, number>> } }>("/api/budgets/spend-series");
   const budgets = data?.data || data;
   const toast = useToast();
 
@@ -89,15 +91,16 @@ export default function BudgetsPage() {
 
   if (error) return <div className="page"><div className="card" style={{ padding: 24, textAlign: "center" }}><div style={{ color: "var(--danger)", marginBottom: 8 }}>{error}</div><button className="btn" onClick={refetch}>Retry</button></div></div>;
 
-  const series = budgets?.series || [];
+  const series = spendSeriesData?.data?.series || [];
   const rules = budgets?.rules || [];
-  const agents = budgets?.agents || [];
+  const agents = spendSeriesData?.data?.agents || [];
   const colors = ["var(--svc-2)", "var(--svc-1)", "var(--svc-3)", "var(--svc-5)", "var(--svc-4)", "var(--svc-6)"];
   const spendMtd = budgets?.spend_mtd || 0;
-  const forecast = budgets?.forecast || 0;
-  const headroom = budgets?.headroom || 0;
+  const forecast = forecastData?.data?.forecast ?? 0;
+  // Headroom is null when there are no budgets to compare against; keep it null
+  // (not 0) so the KPI shows a muted dash rather than an alarming red 0%.
+  const headroom = forecastData?.data?.headroom ?? null;
   const activeRules = budgets?.active_rules || rules.length;
-  const daily = budgets?.daily || [];
   const stackedSeries = agents.map((_: string, ai: number) => series.map((d: any) => d?.[agents[ai]] || 0));
 
   return (
@@ -109,17 +112,16 @@ export default function BudgetsPage() {
         <div className="kpi">
           <span className="kpi-label">Headroom</span>
           <span className="kpi-value" style={{
-            // Headroom is the percentage of the budget not yet spent. With no
-            // active rules there's no budget to compare against, so the value
-            // is vacuous — show it muted rather than alarm-coloured. When rules
-            // exist, threshold-colour by how close to the limit we are.
-            color: activeRules === 0
+            // Headroom is the share of budget not yet spent. It's null when no
+            // active rules exist (nothing to compare against) — show a muted
+            // dash, not an alarming 0%. When rules exist, threshold-colour it.
+            color: headroom === null
               ? "var(--text-muted)"
               : headroom >= 50 ? "var(--success)"
               : headroom >= 25 ? "var(--warning)"
               : "var(--danger)"
           }}>
-            {loading ? <Skeleton width={40} height={28} /> : <CountUp to={headroom} format={(n) => Math.round(n) + "%"} />}
+            {loading ? <Skeleton width={40} height={28} /> : headroom === null ? "—" : <CountUp to={headroom} format={(n) => Math.round(n) + "%"} />}
           </span>
         </div>
         <div className="kpi"><span className="kpi-label">Active rules</span><span className="kpi-value">{loading ? <Skeleton width={24} height={28} /> : <CountUp to={activeRules} />}</span></div>

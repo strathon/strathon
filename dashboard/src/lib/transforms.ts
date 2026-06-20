@@ -76,8 +76,10 @@ export function mapPolicies(body: unknown): unknown {
       priority: num(p.priority),
       status,
       cel: p.match_expression,
-      // The list endpoint exposes a lifetime match count, not a daily
-      // series, so the sparkline shows the real total as a single point.
+      // The list endpoint exposes a lifetime match count, not a daily series.
+      // It drives the numeric total shown beside the policy; the sparkline only
+      // draws once a real multi-point series is available (a single point can't
+      // form a line and is suppressed at the call site).
       hits7d: [hits],
       last_modified: p.updated_at ?? p.created_at ?? null,
     };
@@ -171,6 +173,75 @@ export function mapCompliance(): unknown {
   return { data: [], frameworks: [] };
 }
 
+/**
+ * Budget forecast: the receiver's /v1/costs/forecast returns a burn-rate
+ * projection plus per-budget exhaustion forecasts. The budgets page needs two
+ * headline numbers from it: the projected end-of-month spend, and overall
+ * headroom (the share of budget not yet spent across active rules). Both are
+ * derived from real figures here — no fabrication. Headroom is null when there
+ * are no budgets to compare against, so the page can show it muted rather than
+ * as an alarming 0%.
+ */
+export function mapBudgetForecast(body: unknown): unknown {
+  const b = (body || {}) as Obj;
+  const forecast = num(b.projected_monthly_cost);
+  const bf = asArray(b.budget_forecasts);
+  let headroom: number | null = null;
+  if (bf.length > 0) {
+    const totalMax = bf.reduce((a, f) => a + num(f.max_spend_usd), 0);
+    const totalRemaining = bf.reduce((a, f) => a + num(f.remaining_usd), 0);
+    headroom = totalMax > 0 ? Math.round((totalRemaining / totalMax) * 100) : null;
+  }
+  return {
+    data: {
+      forecast,
+      headroom,
+      burn_rate_usd_per_hour: num(b.burn_rate_usd_per_hour),
+      budget_alerts: asArray(b.budget_alerts),
+    },
+  };
+}
+
+/**
+ * Per-agent spend over time: the receiver's /v1/costs (group_by=agent,
+ * period=day) returns flat (agent, day, cost) rows. The budgets chart wants a
+ * stacked-area shape: an ordered list of agent names plus one bucket object per
+ * day keyed by agent. Pivot the flat rows here, oldest day first, so the chart
+ * reads left-to-right in time. All values are real span costs; agents with no
+ * spend in a bucket are absent and render as zero in that layer.
+ */
+export function mapCostSeries(body: unknown): unknown {
+  const rows = asArray((body as Obj)?.costs);
+  // Collect days (ascending) and agents (by total spend, descending).
+  const dayKeys: string[] = [];
+  const daySeen = new Set<string>();
+  const agentTotals = new Map<string, number>();
+  for (const r of rows) {
+    const day = String(r.period_start ?? "");
+    if (day && !daySeen.has(day)) { daySeen.add(day); dayKeys.push(day); }
+    const agent = String(r.agent ?? r.dimension ?? "");
+    if (agent) agentTotals.set(agent, (agentTotals.get(agent) ?? 0) + num(r.total_cost_usd));
+  }
+  dayKeys.sort(); // ISO timestamps sort chronologically
+  const agents = [...agentTotals.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name]) => name)
+    .slice(0, 6); // chart palette is six colours; cap to keep it readable
+  // Index cost by agent+day for O(1) lookup when building buckets.
+  const costAt = new Map<string, number>();
+  for (const r of rows) {
+    const agent = String(r.agent ?? r.dimension ?? "");
+    const day = String(r.period_start ?? "");
+    if (agent && day) costAt.set(`${agent}\u0000${day}`, num(r.total_cost_usd));
+  }
+  const series = dayKeys.map((day) => {
+    const bucket: Record<string, number> = {};
+    for (const a of agents) bucket[a] = costAt.get(`${a}\u0000${day}`) ?? 0;
+    return bucket;
+  });
+  return { data: { agents, series } };
+}
+
 /** API keys: { api_keys: [...] } -> { data: [...] }. Field names already
  *  match what the settings table reads (key_prefix, created_at, last_used_at). */
 export function mapApiKeys(body: unknown): unknown {
@@ -204,6 +275,47 @@ export function mapAudit(body: unknown): unknown {
     };
   });
   return { data, next_cursor: (body as Obj)?.next_cursor ?? null };
+}
+
+/**
+ * Audit anchors: the receiver periodically seals a Merkle root over all events
+ * since the last anchor (/v1/audit/anchors, newest first). This drives the
+ * chain-status line in the header. We deliberately report "anchored" — a real
+ * Merkle root committing N events exists — not "verified" (nothing recomputed
+ * the chain client-side) and not "signed" (the base worker seals roots without
+ * a signature). The most recent anchor is the one that matters.
+ */
+export function mapAuditAnchors(body: unknown): unknown {
+  const rows = asArray((body as Obj)?.data);
+  if (rows.length === 0) return { data: { anchored: false } };
+  const latest = rows[0] as Obj; // receiver orders anchors newest-first
+  return {
+    data: {
+      anchored: true,
+      anchored_at: latest.anchor_at ?? null,
+      event_count: typeof latest.event_count === "number" ? latest.event_count : null,
+      last_sequence: typeof latest.last_sequence === "number" ? latest.last_sequence : null,
+      signed: Boolean(latest.signature),
+    },
+  };
+}
+
+/**
+ * Audit verify: the receiver's /v1/audit/events/{id}/verify recomputes the
+ * entry's HMAC against the chain and returns a pass/fail verdict. It does not
+ * return the raw hash (server-side detail); the meaningful output is the
+ * verdict plus the entry's sequence position in the append-only chain.
+ */
+export function mapAuditVerify(body: unknown): unknown {
+  const b = (body || {}) as Obj;
+  return {
+    data: {
+      valid: b.valid === true,
+      sequence_no: typeof b.sequence_no === "number" ? b.sequence_no : null,
+      hmac_key_id: typeof b.hmac_key_id === "number" ? b.hmac_key_id : null,
+      error: b.error ?? null,
+    },
+  };
 }
 
 /**
