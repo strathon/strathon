@@ -1,12 +1,14 @@
 "use client";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icons } from "@/components/icons";
-import { Badge, Ring, Sparkline, Skeleton, Empty, useToast } from "@/components/ui";
+import { Badge, Ring, Sparkline, Skeleton, Empty, Dropdown, useToast } from "@/components/ui";
 import { useApi, api } from "@/lib/api-client";
 
 export default function CompliancePage() {
   const router = useRouter();
   const toast = useToast();
+  const [exporting, setExporting] = useState(false);
   const { data, loading, error, refetch } = useApi<{ data: { frameworks?: any[]; recommendations?: any[] } }>("/api/compliance");
   const frameworks = data?.data?.frameworks || data?.data || [];
   const recommendations = data?.data?.recommendations || [];
@@ -14,6 +16,7 @@ export default function CompliancePage() {
   if (error) return <div className="page"><div className="card" style={{ padding: 24, textAlign: "center" }}><div style={{ color: "var(--danger)", marginBottom: 8 }}>{error}</div><button className="btn" onClick={refetch}>Retry</button></div></div>;
 
   async function handleExport(format: string) {
+    setExporting(true);
     try {
       const res = await fetch("/api/compliance", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ format }) });
       if (!res.ok) { toast.push({ tone: "danger", title: "Export failed" }); return; }
@@ -22,13 +25,23 @@ export default function CompliancePage() {
       const ext = format === "sarif" ? "sarif" : "json";
       const a = document.createElement("a"); a.href = url; a.download = `strathon-compliance.${ext}`; a.click();
       URL.revokeObjectURL(url);
+      toast.push({ tone: "success", title: "Evidence exported" });
     } catch { toast.push({ tone: "danger", title: "Export failed" }); }
+    finally { setExporting(false); }
   }
 
   return (
     <div className="page">
       <div className="page-header"><div><h1 className="t-h1 page-title">Compliance</h1><div className="page-subtitle">Coverage against industry frameworks.</div></div>
-        <button className="btn ghost" onClick={() => router.push("/settings?section=export")}><Icons.Settings size={13} /> Manage exports</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Dropdown align="right" width={200}
+            trigger={({ toggle }) => <button className="btn primary" onClick={toggle} disabled={exporting}>{exporting ? <span className="spinner" /> : <Icons.FileCheck size={13} />} Export evidence <Icons.ChevronDown size={12} /></button>}
+            items={[
+              { icon: <Icons.ScrollText size={13} />, label: "EU AI Act pack (JSON)", onClick: () => handleExport("json") },
+              { icon: <Icons.Shield size={13} />, label: "OWASP findings (SARIF)", onClick: () => handleExport("sarif") },
+            ]} />
+          <button className="btn ghost" onClick={() => router.push("/settings?section=export")}><Icons.Settings size={13} /> Manage exports</button>
+        </div>
       </div>
       {loading ? <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 16 }}>{[1,2,3,4].map(i => <Skeleton key={i} width="100%" height={200} style={{ borderRadius: 12 }} />)}</div> : (Array.isArray(frameworks) && frameworks.length > 0) ? (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 16, marginBottom: 28 }}>
