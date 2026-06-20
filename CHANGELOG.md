@@ -14,30 +14,42 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Security
 - Hardened the audit anchor Merkle tree against forgeability. The previous
   construction could let two different event sequences produce the same root,
-  weakening tamper detection. The tree now follows RFC 6962 / RFC 9162 with
-  leaf/node domain separation and no node duplication, and regression tests
-  cover both issues. No production anchors used the old construction, so no
-  re-anchoring is required.
+  weakening tamper detection; the tree now follows the standard RFC 6962 /
+  RFC 9162 construction, which closes this. No production anchors used the old
+  construction, so no re-anchoring is required.
 
 ### Fixed
-- Budgets now show real end-of-month forecast and remaining headroom (from
-  `/v1/costs/forecast`) and a real per-agent spend chart (from `/v1/costs`);
-  the overview spend trend reads the same series. These previously rendered
-  empty or placeholder values.
-- The audit log verifies integrity against the receiver: the header shows the
-  real chain-anchor state from `/v1/audit/anchors`, and any entry can be
-  inspected to recompute and check its hash via `/v1/audit/events/{id}/verify`.
-- Compliance evidence export downloads real JSON or SARIF from the receiver.
-- Sparklines no longer attempt to draw from a single data point.
+- The budgets page showed empty forecast and headroom and an empty
+  spend-by-agent chart because it read fields the API did not return. It now
+  shows end-of-month forecast and remaining headroom (from
+  `/v1/costs/forecast`) and a per-agent spend chart (from `/v1/costs`), and the
+  overview spend trend reads the same series.
+- The audit log showed a static integrity label. It now verifies against the
+  receiver: the header reflects the anchor state from `/v1/audit/anchors`
+  (chain anchored with the latest anchor time, or not yet anchored), and each
+  row can be inspected to recompute its entry hash via
+  `/v1/audit/events/{id}/verify`, showing a pass or fail verdict.
+- The compliance evidence export was not wired to a request. It now downloads
+  evidence from the receiver as JSON or SARIF.
+- Sparklines drew from a single data point; they now render only when at least
+  two points exist.
 
 ### Added
-- An overview agent-health card (liveness and risk) sharing data with the
-  Agents page so the two stay consistent.
+- The overview gains an agent-health card showing liveness and risk; it shares
+  the Agents page data so the two surfaces always agree.
+- Span kinds are now colour-coded across the trace waterfall and the spans
+  list from a shared palette, with blocked spans highlighted, so each kind
+  looks the same in both views.
+- Trace and span views now surface token and cost detail where it exists: the
+  selected span in the waterfall shows input/output tokens and cost, and the
+  spans list shows those columns when present and links each row to its trace.
 
 ### Changed
-- Clarified the anchor model documentation: it now states that anchors are
-  unsigned Merkle roots and that single-event verification recomputes the keyed
-  row hash, with signed, independently-verifiable anchoring noted as planned.
+- The receiver's OpenTelemetry floor was raised from `1.29.0` to `1.42.0`.
+- The anchor model documentation now explains how single-event verification
+  works today (recomputing the keyed row hash) and states plainly that anchors
+  are unsigned Merkle roots, with signed, independently verifiable anchoring
+  noted as a planned enhancement.
 
 ## [1.2.1] - 2026-06-17
 
