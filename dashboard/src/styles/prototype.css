@@ -2119,6 +2119,102 @@ a { color: inherit; text-decoration: none; }
   80%  { opacity: 0;    transform: scale(2.2); }
   100% { opacity: 0;    transform: scale(2.2); }
 }
+
+/* Agent-health beacon: the heartbeat pulse, scaled up for the overview card.
+   Reuses the same breathing + halo motion as .dot-status.live so the liveness
+   language is consistent across the app. Pulses only when at least one agent is
+   live; a quiet fleet shows a still, muted dot (honest: no fake heartbeat). */
+.hb-beacon {
+  position: relative;
+  width: 12px; height: 12px;
+  border-radius: var(--r-full);
+  flex-shrink: 0;
+}
+.hb-beacon.is-live {
+  background: var(--success);
+  box-shadow: 0 0 0 4px var(--success-bg);
+  animation: live-pulse 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+.hb-beacon.is-live::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: var(--r-full);
+  background: var(--success);
+  opacity: 0;
+  animation: live-halo 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  pointer-events: none;
+}
+.hb-beacon.is-quiet {
+  background: var(--text-muted);
+  box-shadow: 0 0 0 4px var(--bg-input);
+}
+
+/* Live/idle proportion bar: the current split visualised (present state, not a
+   trend — there is no historical liveness series, so none is implied). Styled
+   like the compliance bars elsewhere on the overview for consistency. */
+.hb-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--text-muted) 30%, transparent);
+  overflow: hidden;
+}
+.hb-bar-fill {
+  height: 100%;
+  background: var(--success);
+  border-radius: 3px;
+  transition: width 0.4s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+/* Dot grid: one dot per agent, dense and wrapping, so the card is the same size
+   for 2 agents or 500. Live dots carry the success colour; idle dots are muted. */
+.hb-dotgrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.hb-dot {
+  width: 9px; height: 9px;
+  border-radius: var(--r-full);
+  background: color-mix(in oklab, var(--text-muted) 45%, transparent);
+  flex-shrink: 0;
+  transition: transform 0.12s ease;
+}
+.hb-dot.live {
+  background: var(--success);
+  box-shadow: 0 0 0 2px var(--success-bg);
+}
+.hb-dot:hover { transform: scale(1.35); }
+.hb-dot-more {
+  margin-left: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Risk callout: appears only when agents cross the warning band. Tinted by the
+   worst severity present, with a subtle hover-fill so it reads as actionable
+   (it links to the Agents page). The colour is reinforced by the warning icon
+   and the count text, never colour alone. */
+.hb-risk {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 7px;
+  background: color-mix(in oklab, currentColor 9%, transparent);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.hb-risk:hover { background: color-mix(in oklab, currentColor 16%, transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .hb-beacon.is-live, .hb-beacon.is-live::after { animation: none; }
+}
 .muted { color: var(--text-muted); }
 .mono { font-family: var(--font-mono); }
 .spinner {
@@ -3592,4 +3688,82 @@ button:disabled, .btn:disabled {
 /* masked-key bullet separators were --text-muted (too faint) */
 .apikeys-section .table tbody td .text-muted {
   color: var(--text-secondary) !important;
+}
+
+
+/* ── Audit integrity popover ──────────────────────────────────────────────
+   Portaled to body (escapes the table's overflow clip) and anchored to the
+   verify badge with a caret so the relationship is unambiguous. Grows from the
+   top so it reads as emerging from the badge. */
+.verify-pop {
+  position: fixed;
+  z-index: 1000;
+  width: 250px;
+  padding: 10px 12px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+  transform-origin: top center;
+  animation: verify-pop-in 140ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+:root[data-theme="dark"] .verify-pop,
+.dark .verify-pop {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+@keyframes verify-pop-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* Caret: a rotated square straddling the top border, recoloured so its two
+   visible edges match the popover border + fill. */
+.verify-pop-caret {
+  position: absolute;
+  top: -5px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  border-top-left-radius: 2px;
+  transform: rotate(45deg);
+}
+.verify-pop-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.verify-pop-head.ok  { color: var(--success); }
+.verify-pop-head.bad { color: var(--danger); }
+.verify-pop-body {
+  margin: 5px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.verify-pop-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.verify-pop-meta .mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.verify-pop-loading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
 }
