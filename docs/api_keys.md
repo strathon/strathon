@@ -19,7 +19,7 @@ SHA-256 comparison.
 
 ## Local development
 
-For local development you can opt into a seeded development key by setting
+For local development you can opt into a seeded dev key by setting
 `STRATHON_SEED_DEV_KEY=true` before the receiver runs its migrations. When
 enabled, this key is seeded for the default project:
 
@@ -27,8 +27,8 @@ enabled, this key is seeded for the default project:
 stra_dev_local_default_project_do_not_use_in_production
 ```
 
-This is **off by default** and is **never seeded in cloud mode**, because the
-key value is publicly known, so anyone with HTTP access to your receiver could
+This is **off by default** and is **never seeded in cloud mode**. The key
+value is publicly known, so anyone with HTTP access to your receiver could
 use it. Enable it only for local development and demos. On any shared or
 production deployment, leave it off and create a real key instead (see
 "Creating a real API key" below). If you did enable it and later move to
@@ -36,9 +36,11 @@ production, rotate it (see "Rotating the dev key").
 
 ## Creating a real API key
 
-Key management is scope-gated (`api_keys:read` / `api_keys:write`). The
-seeded dev key carries the wildcard scope, so on a fresh deployment you use
-it to mint your first real key, then revoke it:
+Key management is scope-gated (`api_keys:read` / `api_keys:write`). In the
+dashboard, register the first user and create a key under Settings → API Keys.
+Or, if you opted into the seeded dev key (`STRATHON_SEED_DEV_KEY=true`), which
+carries the wildcard scope, mint your first key over the API and revoke the dev
+key afterward:
 
 ```bash
 curl -X POST http://localhost:4318/v1/api_keys \
@@ -121,7 +123,7 @@ specific scope (`/v1/api_keys` requires `api_keys:read` for GET and
 `api_keys:write` for POST/DELETE). The seeded dev key has the wildcard `*`;
 production keys should be minted with only the scopes they need. The one
 operational consequence of the well-known dev key: until you rotate it,
-anyone with HTTP access to your receiver can act as the default project:
+anyone with HTTP access to your receiver can act as the default project,
 which is why rotation is step one of any shared or production deployment.
 
 ## What happens on auth failure

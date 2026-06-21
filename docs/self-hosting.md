@@ -26,7 +26,7 @@ On first start:
 2. The receiver builds and starts
 3. The receiver runs `alembic upgrade head` in its startup lifespan,
    creating the schema. Idempotent on every subsequent start.
-4. If you set `STRATHON_SEED_DEV_KEY=true`, a well-known development API
+4. If you set `STRATHON_SEED_DEV_KEY=true`, a well-known dev
    key is seeded and the receiver prints a quickstart banner with the key
    value, endpoint, and rotation hint. This is off by default (and never
    seeded in cloud mode) because the key value is publicly known; enable it
@@ -57,7 +57,7 @@ curl http://localhost:4318/health
 # Readiness probe (deep dependency check; "should traffic be routed here?")
 curl http://localhost:4318/ready
 
-# Authenticated request
+# Authenticated request (needs STRATHON_SEED_DEV_KEY=true; otherwise use a key you created)
 curl -H "Authorization: Bearer stra_dev_local_default_project_do_not_use_in_production" \
   http://localhost:4318/v1/policies
 
@@ -87,7 +87,8 @@ A failing check flips `status` to `"not_ready"`, the HTTP status to `503`,
 and adds a short `reason` field to the failed check. See the
 [health probes](#health-probes) section below for the Kubernetes wiring.
 
-Or run one of the framework demos:
+Or run one of the framework demos. They authenticate with the seeded dev key,
+so run them with `STRATHON_SEED_DEV_KEY=true`, or set your own key in the script:
 
 ```bash
 pip install strathon langchain cel-python
