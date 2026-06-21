@@ -145,7 +145,7 @@ Fail-open prioritizes uptime, fail-closed prioritizes containment. Choose delibe
 
 ### Policy Engine
 
-Write rules in [CEL](https://cel.dev) (Common Expression Language, the same language used by Kubernetes, Firebase, and Google Cloud IAM). Seven enforcement actions: **block**, **steer**, **throttle**, **log**, **alert**, **require_approval**, **allow**. Policies evaluate inside the agent process with sub-millisecond overhead, not at a network gateway. 12 OWASP-mapped templates for one-click setup. Shadow mode evaluates and records against live traffic but never enforces, so you can validate a policy's match rate before turning it on. [Learn more → getstrathon.com/docs/intervention](https://getstrathon.com/docs/intervention)
+Write rules in [CEL](https://cel.dev) (Common Expression Language, the same language used by Kubernetes, Firebase, and Google Cloud IAM). Seven enforcement actions: **block**, **steer**, **throttle**, **log**, **alert**, **require_approval**, **allow**. Policies evaluate inside the agent process with sub-millisecond overhead. 12 OWASP-mapped templates for one-click setup. Shadow mode evaluates and records against live traffic but never enforces, so you can validate a policy's match rate before turning it on. [Learn more → getstrathon.com/docs/intervention](https://getstrathon.com/docs/intervention)
 
 ### Human Approval Workflows
 
