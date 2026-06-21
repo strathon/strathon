@@ -33,7 +33,7 @@ class Config:
     # HTTP request timeout to Strathon receiver
     http_timeout_seconds: float = 10.0
 
-    # Retry behaviour on export failure
+    # Retry behavior on export failure
     max_retries: int = 3
     retry_backoff_seconds: float = 1.0
 

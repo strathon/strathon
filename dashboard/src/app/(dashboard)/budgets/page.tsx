@@ -114,7 +114,7 @@ export default function BudgetsPage() {
           <span className="kpi-value" style={{
             // Headroom is the share of budget not yet spent. It's null when no
             // active rules exist (nothing to compare against) — show a muted
-            // dash, not an alarming 0%. When rules exist, threshold-colour it.
+            // dash, not an alarming 0%. When rules exist, threshold-color it.
             color: headroom === null
               ? "var(--text-muted)"
               : headroom >= 50 ? "var(--success)"

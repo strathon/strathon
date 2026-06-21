@@ -25,7 +25,7 @@ export default function AuditPage() {
     // edge pointing up at the badge. Anchoring to the badge's left (rather than
     // centring on it) means the popover never extends left of the badge — so it
     // can never slide under the sidebar, which always sits left of the table.
-    // The badge centre is ~16px in from the popover's left; the caret tracks it.
+    // The badge center is ~16px in from the popover's left; the caret tracks it.
     const caretInset = 16;
     let left = r.left + r.width / 2 - caretInset;
     // Defensive bounds: never past the right viewport edge, and never left of the
@@ -123,7 +123,7 @@ export default function AuditPage() {
                       const v = verifyState[e.id];
                       const checked = v && v !== "loading";
                       const valid = checked && (v as { valid: boolean }).valid;
-                      // The badge keeps one shape and lets colour carry the
+                      // The badge keeps one shape and lets color carry the
                       // state: a neutral shield before a check, the same shield
                       // in green once the HMAC verifies, and a red alert only if
                       // it does not. This matches the popover head exactly, so

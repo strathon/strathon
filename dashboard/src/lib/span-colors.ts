@@ -1,7 +1,7 @@
 /**
- * Span-kind colour palette. Shared by the trace detail waterfall and the
- * spans list so a kind dot in one matches the bar colour in the other. Uses
- * the dashboard's semantic CSS variables so colours adapt across light and
+ * Span-kind color palette. Shared by the trace detail waterfall and the
+ * spans list so a kind dot in one matches the bar color in the other. Uses
+ * the dashboard's semantic CSS variables so colors adapt across light and
  * dark themes. Blocked overrides kind and is handled by spanColor().
  */
 export const KIND_COLOR: Record<string, string> = {
@@ -19,7 +19,7 @@ interface SpanLike {
   status?: "ok" | "blocked" | "error";
 }
 
-/** Resolve the colour for a span: blocked overrides; otherwise look up kind. */
+/** Resolve the color for a span: blocked overrides; otherwise look up kind. */
 export function spanColor(s: SpanLike): string {
   if (s.status === "blocked") return "var(--danger)";
   return KIND_COLOR[s.kind ?? "other"] ?? "var(--info)";

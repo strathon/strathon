@@ -7,7 +7,7 @@ import { useApi } from "@/lib/api-client";
 import { KIND_COLOR } from "@/lib/span-colors";
 
 // Kind palette shared with the trace detail waterfall so a kind dot here
-// matches the bar colour over there. Blocked is handled by the status badge,
+// matches the bar color over there. Blocked is handled by the status badge,
 // not the kind dot, since "blocked" overrides the kind for visual emphasis.
 
 interface SpanRow {
@@ -101,7 +101,7 @@ export default function SpansPage() {
                     <td className="mono text-secondary" style={{ fontSize: 12 }}>{(s.span_id || s.id).slice(0, 16)}</td>
                     <td>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        {/* Kind dot — matches the trace waterfall colour so a user
+                        {/* Kind dot — matches the trace waterfall color so a user
                             can scan the list and pick out LLM vs tool vs agent at a glance. */}
                         <span style={{ width: 8, height: 8, borderRadius: 2, background: kindColor, flexShrink: 0 }} title={s.kind ?? "other"} />
                         <span className="mono" style={{ fontSize: 12.5 }}>{s.name}</span>

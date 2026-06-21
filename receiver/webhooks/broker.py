@@ -1,10 +1,10 @@
 """Dramatiq broker setup for the webhook delivery queue.
 
-The broker is initialised lazily — importing this module does not
+The broker is initialized lazily — importing this module does not
 connect to Redis. We do this so:
 
   * Importing ``receiver.webhooks`` from a test fixture does not require
-    a running Redis. Tests that want real queue behaviour configure
+    a running Redis. Tests that want real queue behavior configure
     Dramatiq's StubBroker themselves; tests that exercise signing and
     persistence don't need any broker at all.
 
@@ -22,7 +22,7 @@ only the "send happens out of band" property is missing.
 Production setups must set STRATHON_WEBHOOK_REDIS_URL explicitly. The
 deploy docs spell out why: without a real broker, alert delivery
 becomes synchronous on the OTLP ingest hot path and bursts of alerts
-can serialise ingest latency.
+can serialize ingest latency.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ _broker_lock = threading.Lock()
 
 
 def get_broker() -> dramatiq.Broker:
-    """Return the configured Dramatiq broker, initialising it on first call.
+    """Return the configured Dramatiq broker, initializing it on first call.
 
     Subsequent calls return the same broker. Tests can call
     ``reset_broker_for_testing()`` between cases to install a fresh
@@ -87,7 +87,7 @@ def _build_broker() -> dramatiq.Broker:
     # the test runner's startup).
     from dramatiq.brokers.redis import RedisBroker
 
-    logger.info("Initialising Dramatiq RedisBroker at %s", url)
+    logger.info("Initializing Dramatiq RedisBroker at %s", url)
     return RedisBroker(url=url)
 
 

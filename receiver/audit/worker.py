@@ -122,7 +122,7 @@ async def partition_maintenance_loop(
 async def seal_anchor(session: AsyncSession) -> dict[str, int | bytes | None]:
     """Compute and insert one integrity anchor.
 
-    Behaviour:
+    Behavior:
 
     - Find the timestamp of the most recent anchor (``last_anchor_at``);
       use the epoch if there is none.

@@ -16,8 +16,8 @@ const num = (v: unknown, d = 0): number => {
   return Number.isFinite(n) ? n : d;
 };
 
-// Classify a span into a kind for colouring. A single-agent trace has one
-// "service", so colouring by service is monochrome; kind (llm/tool/agent/
+// Classify a span into a kind for coloring. A single-agent trace has one
+// "service", so coloring by service is monochrome; kind (llm/tool/agent/
 // retrieval) is meaningful per-span. Shared by mapTraceTree (tree nodes) and
 // mapSpans (flat rows) so the two never drift.
 //
@@ -226,7 +226,7 @@ export function mapCostSeries(body: unknown): unknown {
   const agents = [...agentTotals.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([name]) => name)
-    .slice(0, 6); // chart palette is six colours; cap to keep it readable
+    .slice(0, 6); // chart palette is six colors; cap to keep it readable
   // Index cost by agent+day for O(1) lookup when building buckets.
   const costAt = new Map<string, number>();
   for (const r of rows) {
@@ -366,7 +366,7 @@ export function mapPolicyDetail(body: unknown): unknown {
  *   { id, parent, depth, name, service, start(ms rel), dur(ms), status }
  * plus trace meta { id, agent, operation, status, started, spans }.
  * Flatten depth-first, normalize timing relative to the earliest span, and
- * assign a stable per-(agent|tool) "service" index for lane colouring.
+ * assign a stable per-(agent|tool) "service" index for lane coloring.
  */
 export function mapTraceTree(body: unknown): unknown {
   const b = (body || {}) as Obj;

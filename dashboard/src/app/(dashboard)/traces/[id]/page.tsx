@@ -26,7 +26,7 @@ interface WaterfallSpan {
 
 const SERVICES = ["orchestrator", "tool-shell", "tool-http", "vector-store", "llm-gateway", "policy-engine", "memory-store", "tool-sql"];
 
-// Colour spans by KIND (llm/tool/agent/retrieval), not by service: a single-agent
+// Color spans by KIND (llm/tool/agent/retrieval), not by service: a single-agent
 // trace has one service and would render monochrome. Blocked always overrides to
 // danger. Uses the dashboard's semantic palette so it holds in light and dark.
 

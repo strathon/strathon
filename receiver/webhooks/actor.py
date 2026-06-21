@@ -42,7 +42,7 @@ from webhooks.signing import compute_signature_headers
 logger = logging.getLogger("strathon.receiver.webhooks.actor")
 
 
-# Initialise the broker before declaring actors. Dramatiq actors register
+# Initialize the broker before declaring actors. Dramatiq actors register
 # themselves with the global broker at decoration time, so the broker has
 # to exist first.
 get_broker()

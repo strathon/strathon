@@ -37,7 +37,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - The overview gains an agent-health card showing liveness and risk; it shares
   the Agents page data so the two surfaces always agree.
-- Span kinds are now colour-coded across the trace waterfall and the spans
+- Span kinds are now color-coded across the trace waterfall and the spans
   list from a shared palette, with blocked spans highlighted, so each kind
   looks the same in both views.
 - Trace and span views now surface token and cost detail where it exists: the
