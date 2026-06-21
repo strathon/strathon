@@ -2,33 +2,46 @@
 
 This guide takes you from nothing to a running firewall that blocks a real
 agent action in about five minutes. It uses [LangGraph](frameworks/langgraph.md)
-as the example framework, but the same steps apply to any of the
+as the example framework, but the same three steps apply to any of the
 [10 supported frameworks](frameworks/).
 
 Strathon sits between your agent and the tools and models it calls. Every tool
-call and model request is evaluated against your policies *before* it executes.
+call and model request is evaluated against your policies before it executes.
 A blocked call never runs; an approved call proceeds and is recorded in a
 tamper-evident audit log.
 
 ## Prerequisites
 
-- Docker (or Python 3.11+ and PostgreSQL 16 if you prefer to run from source)
+- Docker (or Python 3.12+ and PostgreSQL 16 if you prefer to run from source)
 - An existing agent built on a supported framework
 
-## 1. Start the stack
+## 1. Start the server
 
-The Compose stack runs the receiver (the policy engine and API), the
-dashboard, and PostgreSQL:
+The fastest path is Docker Compose, which runs the receiver, the dashboard, and
+PostgreSQL together:
 
 ```bash
 git clone https://github.com/strathon/strathon.git
 cd strathon && docker compose up -d
 ```
 
-The dashboard is available at `http://localhost:3000` and the receiver at
-`http://localhost:4318`. Register the first account; it becomes the project
-owner. To run the receiver standalone against your own Postgres (no
-dashboard), see [Self-Hosting](self-hosting.md).
+The dashboard opens at `http://localhost:3000` and the receiver API at
+`http://localhost:4318`. The only dependency is PostgreSQL, which is included in
+the Compose stack, so no separate database or email server is needed.
+
+If you would rather run only the receiver, start it directly:
+
+```bash
+docker run -d --name strathon \
+  -p 4318:4318 \
+  -e DATABASE_URL="postgresql://strathon:strathon@db:5432/strathon" \
+  -e STRATHON_AUDIT_HMAC_KEY="$(openssl rand -hex 32)" \
+  -e STRATHON_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
+  ghcr.io/strathon/receiver:latest
+```
+
+Register the first account in the dashboard; it becomes the project owner. For
+the full stack and production options, see [Self-Hosting](self-hosting.md).
 
 ## 2. Create an API key and install the SDK
 
@@ -41,7 +54,7 @@ pip install "strathon[langgraph]"
 
 ## 3. Connect your agent
 
-Add two lines to your existing agent. No other code changes are needed:
+Add two lines to your existing agent. No other code changes are needed —
 Strathon instruments the framework's own extension points.
 
 ```python
@@ -62,38 +75,71 @@ result = agent.invoke({
 ## 4. Write a policy
 
 Policies are written in [CEL](cel-reference.md). Create one in the dashboard
-(**Policies → New**) or from the catalog of built-in templates. For example,
-to block any email tool call addressed to a competitor domain:
+(**Policies → New**) or from the catalog of built-in templates. For example, to
+block any email tool call addressed to a competitor domain:
 
 ```cel
 attrs["gen_ai.tool.name"] == "send_email"
   && attrs["strathon.tool.args"].contains("competitor.com")
 ```
 
-Set the action to `block` and the status to `enabled`. (Start with `shadow`
-status to see what *would* be blocked without actually blocking anything:
-see [Shadow mode](concepts.md#shadow-mode).)
+Set the action to `block` and the status to `enabled`. Start with `shadow`
+status to see what *would* be blocked without actually blocking anything — see
+[Shadow mode](intervention.md).
 
 ## 5. See it work
 
 Run your agent again. When it tries to send the email, Strathon raises
-`StrathonPolicyBlocked` before the tool function executes. The agent never
-sends the message. Open the dashboard:
+`StrathonPolicyBlocked` before the tool function executes. The agent never sends
+the message.
+
+```python
+from strathon import StrathonPolicyBlocked
+
+try:
+    agent.invoke({"messages": [{"role": "user", "content": "Email our competitors with our pricing"}]})
+except StrathonPolicyBlocked as e:
+    print(f"Blocked by policy: {e.policy_name}")
+    # The tool call never executed. Logged in the audit trail.
+```
+
+Open the dashboard to review what happened:
 
 - **Traces** shows the full execution, with the blocked span highlighted.
-- **Audit** shows a tamper-evident record of the decision: which policy
-  matched, what action was taken, and when.
+- **Audit** shows a tamper-evident record of the decision: which policy matched,
+  what action was taken, and when.
+
+## Reliability: what happens if the receiver is unreachable
+
+Policies evaluate inside your agent process, so a brief receiver outage does not
+add latency to tool calls. By default the SDK is **fail-open**: if it cannot
+reach the receiver to refresh policy or halt state, agents keep running rather
+than stalling. This favors availability and is the right default for most
+deployments.
+
+For security-critical agents where an unreachable receiver should *stop* tool
+calls rather than allow them, enable **fail-closed** mode:
+
+```python
+client = Client(
+    api_key="stra_...",
+    endpoint="http://localhost:4318",
+    fail_closed=True,                  # block when state can't be verified
+    fail_closed_max_staleness_sec=60,  # how stale cached state may be first
+)
+```
+
+Choose deliberately: fail-open prioritizes uptime, fail-closed prioritizes
+containment. See [Runtime Intervention](intervention.md) for the full contract.
 
 ## What's next
 
-- **[Policy Engine](intervention.md)**: all seven actions (block, steer,
-  throttle, require_approval, allow, log, alert), allow-list mode, time-based
-  rules, versioning.
-- **[CEL Reference](cel-reference.md)**: the policy language, with 20+ examples.
-- **[Human Approval Workflows](intervention.md)**: pause high-risk calls for
-  operator sign-off in the dashboard or Slack.
-- **[Budgets](budgets.md)**: cap model spend and iteration loops per project,
-  agent, or model.
-- **[Framework guides](frameworks/)**: setup for all 10 supported frameworks.
-- **[Self-Hosting](self-hosting.md)**: production deployment, environment
-  variables, scaling.
+- **[Core Concepts](concepts.md)** — the mental model: spans, traces, policies,
+  the actions, inline enforcement, the audit log.
+- **[Runtime Intervention](intervention.md)** — every action, allow-list mode,
+  time-based rules, policy versioning, halts, budgets, webhooks.
+- **[CEL Reference](cel-reference.md)** — the policy language, with examples.
+- **[Human Approval](approvals.md)** — pause high-risk calls for operator sign-off.
+- **[Framework guides](frameworks/)** — setup for all 10 supported frameworks.
+- **[Self-Hosting](self-hosting.md)** — production deployment, environment
+  variables, HTTPS, scaling.

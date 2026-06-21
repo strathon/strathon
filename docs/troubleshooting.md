@@ -102,7 +102,7 @@ there is no manual timezone selector to misconfigure.
 No. Manual, on-demand export of your own data (policies, traces, spans,
 approvals, agents, audit, budgets, compliance) is free in the open-source
 build. Automated or scheduled streaming to a SIEM is planned for the
-commercial enterprise edition (see [LICENSING.md](../LICENSING.md)).
+commercial enterprise edition (see [LICENSING.md](https://github.com/strathon/strathon/blob/main/LICENSING.md)).
 
 ## `zsh: no matches found: strathon[langgraph]`
 

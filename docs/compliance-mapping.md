@@ -1,10 +1,10 @@
-# Compliance Mapping: NIST AI RMF & EU AI Act
+# Compliance Mapping: EU AI Act & NIST AI RMF
 
 How Strathon helps organizations meet AI governance and regulatory requirements.
 
-This document maps Strathon's capabilities to specific controls in the
-NIST AI Risk Management Framework (AI 100-1, AI 600-1) and obligations
-in the EU AI Act (Regulation (EU) 2024/1689) for high-risk AI systems.
+This document maps Strathon's capabilities to obligations in the EU AI Act
+(Regulation (EU) 2024/1689) for high-risk AI systems and to specific controls
+in the NIST AI Risk Management Framework (AI 100-1, AI 600-1).
 
 **Deadline context**: EU AI Act Article 6(2) high-risk obligations take
 effect December 2, 2027 for standalone Annex III systems under the Digital
@@ -158,26 +158,6 @@ for the risk level of the AI system.
 | Harmful Bias | Per-agent, per-model cost attribution and span aggregation surface usage distribution patterns. |
 | Intellectual Property | Audit log provides tamper-evident records of all agent actions for IP dispute resolution. |
 
-## OWASP Agentic Top 10 Coverage
-
-Strathon ships policy templates mapped to the [OWASP Top 10 for Agentic
-Applications 2026](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/).
-These are available via `GET /v1/policy-templates` and can be applied
-with a single API call.
-
-| OWASP Threat | Template | Strathon mechanism |
-|---|---|---|
-| ASI01 Agent Goal Hijack | prompt-injection-detection | CEL policy on span attributes |
-| ASI02 Tool Misuse and Exploitation | tool-access-allowlist | Deny-by-default (allow-list mode) |
-| ASI03 Identity and Privilege Abuse | (built-in) | Scoped API keys, RBAC, MFA, per-key rate limits |
-| ASI04 Agentic Supply Chain Vulnerabilities | (built-in) | MCP gateway with policy evaluation, egress proxy, credential scanning |
-| ASI05 Unexpected Code Execution | tool-access-allowlist | Block/allow-list on shell, code, and SQL tools; approval before code execution |
-| ASI06 Memory and Context Poisoning | (built-in) | Behavioral drift detection (Vigil), halt propagation, content redaction |
-| ASI07 Insecure Inter-Agent Communication | (built-in) | MCP gateway policy evaluation, fail-closed enforcement |
-| ASI08 Cascading Failures | iteration-budget-guard, cost-budget-guard | Budgets with auto-halt, circuit breakers, kill switches, halt propagation |
-| ASI09 Human-Agent Trust Exploitation | (built-in) | Human approval workflows, tamper-evident audit log, SARIF export |
-| ASI10 Rogue Agents | (built-in) | Vigil drift detection, heartbeat monitoring, kill switches |
-
 ## ISO/IEC 42001:2023 Alignment
 
 NIST published an official crosswalk mapping AI RMF subcategories to
@@ -220,3 +200,4 @@ capabilities that are the most scrutinized during conformity assessment.
 - [Audit log](audit.md): the tamper-evident trail behind the evidence
 - [Scope and limitations](scope.md): what Strathon does and does not cover
 - [Runtime intervention](intervention.md): the enforcement these controls map to
+- [OWASP Agentic Top 10](owasp.md): threat-model coverage and policy templates
