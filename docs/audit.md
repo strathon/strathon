@@ -19,7 +19,7 @@ mutation itself. If the audit insert fails, the mutation rolls back.
 This is the fail-closed contract: there is no path where the
 control plane changes and the audit log doesn't notice.
 
-Endpoints currently audited:
+Audited endpoints:
 
 | Action                       | Category               |
 |------------------------------|------------------------|

@@ -6,6 +6,11 @@ This document maps Strathon's capabilities to obligations in the EU AI Act
 (Regulation (EU) 2024/1689) for high-risk AI systems and to specific controls
 in the NIST AI Risk Management Framework (AI 100-1, AI 600-1).
 
+> This mapping is provided for informational purposes to show how Strathon's
+> controls relate to common regulatory obligations. It is not legal advice and
+> is not a certification of compliance. Confirm your obligations with qualified
+> counsel.
+
 **Deadline context**: EU AI Act Article 6(2) high-risk obligations take
 effect December 2, 2027 for standalone Annex III systems under the Digital
 Omnibus agreement (May 2026, pending formal adoption); transparency obligations

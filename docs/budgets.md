@@ -145,8 +145,7 @@ need a different scope or window.
 The receiver ships a vendored model price catalog at
 `receiver/data/model_prices.json`, sourced from LiteLLM's upstream
 `model_prices_and_context_window.json` (MIT-licensed). The most-used
-models (currently 21) are bundled; the file gets refreshed
-periodically.
+models are bundled, and the file is refreshed periodically.
 
 Operators who've negotiated a discount with their provider, or who
 run self-hosted/fine-tuned models the catalog doesn't know, set

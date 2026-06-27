@@ -64,16 +64,17 @@ pip install "strathon[langgraph]"
 ```
 
 ```python
-from strathon import Client, instrument
+from strathon import Client
+from strathon.instrumentation.langgraph import instrument
 
 client = Client(
     api_key="stra_...",              # from dashboard → Settings → API Keys
     endpoint="http://localhost:4318",
 )
-instrument(client, frameworks=["langgraph"])
+handler = instrument(client)
 ```
 
-Your existing LangGraph agent needs no changes. Strathon instruments the framework and evaluates policies on every tool call and model request.
+For LangGraph, `instrument()` returns a callback handler; pass it on each invocation via `config={"callbacks": [handler]}` and Strathon evaluates policies on every tool call and model request. Other frameworks connect differently (a plugin, hooks, or a capability) — see the [integration guides](docs/frameworks/README.md).
 
 ### 4. Watch a call get blocked
 
@@ -81,8 +82,11 @@ Your existing LangGraph agent needs no changes. Strathon instruments the framewo
 from strathon import StrathonPolicyBlocked
 
 try:
-    agent.invoke({"messages": [{"role": "user",
-        "content": "Email the Q3 numbers to sales@competitor.com"}]})
+    agent.invoke(
+        {"messages": [{"role": "user",
+            "content": "Email the Q3 numbers to sales@competitor.com"}]},
+        config={"callbacks": [handler]},
+    )
 except StrathonPolicyBlocked as e:
     print(f"Blocked by policy: {e.policy_name}")
 ```
@@ -149,7 +153,7 @@ Write rules in [CEL](https://cel.dev) (Common Expression Language, the same lang
 
 ### Human Approval Workflows
 
-Pause an agent until an operator approves or denies in the dashboard, Slack, or Discord. Multi-party approval (N-of-M) for high-risk actions like financial transactions or data deletion. Undecided requests expire automatically, so an unanswered approval fails closed instead of leaving the agent hung. On surfaces that can pause (async pre-execution hooks, tool-invoke wrapping, CrewAI) the SDK holds the call until a decision arrives; on synchronous callback surfaces that cannot pause (LangGraph, LangChain, Pydantic AI) a matched approval fails closed, blocked and recorded. The per-surface matrix is in the docs. [Learn more → getstrathon.com/docs/intervention](https://getstrathon.com/docs/intervention)
+Pause an agent until an operator approves or denies in the dashboard, Slack, or the CLI. Multi-party approval (N-of-M) for high-risk actions like financial transactions or data deletion. Undecided requests expire automatically, so an unanswered approval fails closed instead of leaving the agent hung. On surfaces that can pause (async pre-execution hooks, tool-invoke wrapping, CrewAI) the SDK holds the call until a decision arrives; on synchronous callback surfaces that cannot pause (LangGraph, LangChain, Pydantic AI) a matched approval fails closed, blocked and recorded. The per-surface matrix is in the docs. [Learn more → getstrathon.com/docs/intervention](https://getstrathon.com/docs/intervention)
 
 ### MCP Security Gateway
 
@@ -199,7 +203,7 @@ pip install "strathon[all]"                # all 10 frameworks
 | **OpenAI** | Drop-in wrapper | Wraps `chat.completions.create`. Zero code changes beyond `instrument()`. | [Guide](https://getstrathon.com/docs/frameworks/openai) |
 | **Anthropic** | Drop-in wrapper | Wraps `messages.create`. Same pattern as the OpenAI integration. | [Guide](https://getstrathon.com/docs/frameworks/anthropic) |
 | **LangChain** | BaseCallbackHandler | Same handler as LangGraph. Works with chains, agents, and tools. | [Guide](https://getstrathon.com/docs/frameworks/langchain) |
-| **AutoGen** | Agent wrapper | Wraps `BaseChatAgent.on_messages`. Captures multi-agent conversations. | [Guide](https://getstrathon.com/docs/frameworks/autogen) |
+| **AutoGen** | Tool wrap + conversation tracing | Enforces at `BaseTool.run_json`; wraps `on_messages` for multi-agent conversation traces. | [Guide](https://getstrathon.com/docs/frameworks/autogen) |
 | **Claude Agent SDK** | PreToolUse hooks | First-class hook interception on `ClaudeSDKClient`; query wrapper for observability. | [Guide](https://getstrathon.com/docs/frameworks/claude-agent-sdk) |
 | **Pydantic AI** | AbstractCapability | First-class plugin via Pydantic AI's capability system. Steer substitutes the tool result directly. | [Guide](https://getstrathon.com/docs/frameworks/pydantic-ai) |
 | **Google ADK** | BasePlugin | First-class plugin via Google ADK's plugin system. No monkey-patching. | [Guide](https://getstrathon.com/docs/frameworks/google-adk) |
