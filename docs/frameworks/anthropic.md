@@ -65,7 +65,7 @@ attrs["gen_ai.request.model"].contains("opus")
 Log all Claude API calls for audit purposes:
 
 ```cel
-attrs["gen_ai.system"] == "anthropic"
+attrs["gen_ai.provider.name"] == "anthropic"
 ```
 
 ## Notes

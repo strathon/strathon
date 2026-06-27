@@ -26,10 +26,13 @@ plain English description into a CEL expression for the Strathon AI agent firewa
 
 Available attributes in every span:
 - attrs["gen_ai.tool.name"] — tool being called (string)
+- attrs["strathon.tool.args"] — tool input arguments, as a JSON string
 - attrs["gen_ai.agent.name"] — agent name (string)
-- attrs["gen_ai.content"] — prompt or response text (string)
+- attrs["gen_ai.prompt"] — prompt text, on LLM spans (string)
+- attrs["gen_ai.completion"] — response text, on LLM spans (string)
 - attrs["gen_ai.request.model"] — model name (string)
-- attrs["gen_ai.usage.cost"] — cost in USD (float)
+- attrs["gen_ai.usage.cost"] — dollar cost of the call, on LLM spans (float)
+- attrs["gen_ai.usage.total_tokens"] — total token count (int)
 - attrs["gen_ai.workflow.name"] — workflow name (string)
 - now — current UTC timestamp
 

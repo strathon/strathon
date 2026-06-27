@@ -27,10 +27,10 @@ attrs["gen_ai.tool.name"] == "rm" || attrs["gen_ai.tool.name"] == "drop"
 ### String matching
 ```cel
 // Regex match
-attrs["gen_ai.content"].matches("(?i)ignore previous instructions")
+attrs["gen_ai.prompt"].matches("(?i)ignore previous instructions")
 
 // Contains substring
-attrs["gen_ai.content"].contains("password")
+attrs["gen_ai.prompt"].contains("password")
 
 // Starts with
 attrs["gen_ai.tool.name"].startsWith("db.")
@@ -68,15 +68,15 @@ These are available as one-click templates in the dashboard.
 
 ### Block prompt injection
 ```cel
-attrs["gen_ai.content"].matches("(?i)(ignore previous|disregard|forget your|you are now|act as|pretend to be|system prompt)")
+attrs["gen_ai.prompt"].matches("(?i)(ignore previous|disregard|forget your|you are now|act as|pretend to be|system prompt)")
 ```
 Action: **block**
 
 ### Block PII outbound
 ```cel
-attrs["gen_ai.content"].matches("\\b\\d{3}-\\d{2}-\\d{4}\\b") || attrs["gen_ai.content"].matches("\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b")
+attrs["gen_ai.completion"].matches("\\b\\d{3}-\\d{2}-\\d{4}\\b") || attrs["gen_ai.completion"].matches("\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b")
 ```
-Action: **block**: stops the call when the content carries an SSN or email
+Action: **block**: stops the call when the response carries an SSN or email
 address. (Redaction itself is not a policy action: Strathon redacts PII from
 stored spans automatically at ingest: see [redaction](https://getstrathon.com/docs/redaction).)
 
@@ -100,7 +100,7 @@ Action: **throttle**
 
 ### Block secret leakage
 ```cel
-attrs["gen_ai.content"].matches("(?i)(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|-----BEGIN.*PRIVATE KEY-----)")
+attrs["gen_ai.prompt"].matches("(?i)(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|-----BEGIN.*PRIVATE KEY-----)")
 ```
 Action: **block**
 
@@ -116,14 +116,23 @@ Any policy can be set to **shadow mode** in the dashboard. Shadow policies evalu
 | `attrs["gen_ai.tool.name"]` | string | Tool being called |
 | `attrs["gen_ai.agent.name"]` | string | Agent name |
 | `attrs["gen_ai.agent.id"]` | string | Agent unique ID |
-| `attrs["gen_ai.content"]` | string | Prompt or response text |
+| `attrs["gen_ai.prompt"]` | string | Prompt text (on LLM spans) |
+| `attrs["gen_ai.completion"]` | string | Response text (on LLM spans) |
 | `attrs["gen_ai.request.model"]` | string | Model name |
-| `attrs["gen_ai.usage.cost"]` | float | Cost in USD |
+| `attrs["gen_ai.usage.cost"]` | float | Dollar cost of the call (on LLM spans) |
+| `attrs["gen_ai.usage.total_tokens"]` | int | Total token count |
 | `attrs["gen_ai.usage.input_tokens"]` | int | Input token count |
 | `attrs["gen_ai.usage.output_tokens"]` | int | Output token count |
 | `attrs["gen_ai.workflow.name"]` | string | Workflow name |
 | `attrs["gen_ai.conversation.id"]` | string | Conversation ID |
 | `now` | timestamp | Current UTC time |
+
+> **Usage fields (`gen_ai.usage.cost`, `gen_ai.usage.total_tokens`, token
+> counts) are filled in once a call completes**, so use them with `log` and
+> `alert` policies rather than to block a call before it runs. For hard
+> dollar spend caps across many calls, use
+> [Budgets](https://getstrathon.com/docs/budgets), which track cost per
+> project, agent, or model.
 
 ---
 
@@ -139,9 +148,11 @@ Available attributes in every span:
 - attrs["gen_ai.tool.name"]     — tool being called (string)
 - attrs["strathon.tool.args"]   — tool input arguments, as a JSON string
 - attrs["gen_ai.agent.name"]    — agent name (string)
-- attrs["gen_ai.content"]       — prompt or response text (string)
+- attrs["gen_ai.prompt"]        — prompt text, on LLM spans (string)
+- attrs["gen_ai.completion"]    — response text, on LLM spans (string)
 - attrs["gen_ai.request.model"] — model name (string)
-- attrs["gen_ai.usage.cost"]    — cost in USD (float)
+- attrs["gen_ai.usage.cost"]    — dollar cost, on LLM spans (float)
+- attrs["gen_ai.usage.total_tokens"] — total token count (int)
 - attrs["gen_ai.workflow.name"] — workflow name (string)
 - now                           — current UTC timestamp
 
@@ -183,8 +194,8 @@ Attribute names use one of two prefixes, and the prefix matters; a policy that
 references an attribute the engine doesn't emit silently never matches:
 
 - **`gen_ai.*`**: OpenTelemetry's standard GenAI attributes (tool name, agent
-  name, content, model, cost, workflow). Use these for the common fields; they
-  are the convention and what most examples use.
+  name, prompt and completion text, model, token counts, workflow). Use these
+  for the common fields; they are the convention and what most examples use.
 - **`strathon.*`**: Strathon's own additions that aren't in the OTel standard,
   most importantly **`strathon.tool.args`** (the tool's input arguments, as a
   JSON string).

@@ -153,8 +153,10 @@ TEMPLATES: list[PolicyTemplate] = [
         name="Alert when a single call costs over $1",
         description=(
             "Fires a webhook alert when any single LLM call costs more "
-            "than $1.00. Does not block the call. Covers ASI-06 "
-            "(Excessive Agency)."
+            "than $1.00. Cost is computed at ingest from the model price "
+            "catalog, so this alerts after the call completes. Does not "
+            "block. Covers ASI-06 (Excessive Agency). For hard dollar "
+            "spend caps across many calls, use Budgets."
         ),
         owasp_risks=["ASI-06"],
         action="alert",

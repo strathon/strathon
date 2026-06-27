@@ -314,6 +314,30 @@ async def ingest_traces(
                 span_matches: list[dict[str, Any]] = []
                 span_webhooks: list[tuple[str, dict[str, Any], str]] = []
 
+                # Enrich the span with its computed dollar cost so cost
+                # policies (e.g. "alert when a call costs over $1") can match.
+                # Cost is only known once the call completes, so these are
+                # log/alert policies, not preventive blocks. compute_cost_usd
+                # returns None for non-LLM spans and unknown models, in which
+                # case no cost attr is added (the policy simply won't match).
+                _cost_usd = span_attrs.get("strathon.agent.cost.usd")
+                if _cost_usd is None:
+                    _cost_usd = pricing_mod.compute_cost_usd(
+                        model_name=span_attrs.get("gen_ai.request.model"),
+                        input_tokens=span_attrs.get("gen_ai.usage.input_tokens"),
+                        output_tokens=span_attrs.get("gen_ai.usage.output_tokens"),
+                        catalog=pricing_catalog,
+                        overrides=pricing_overrides,
+                    )
+                if _cost_usd is not None:
+                    try:
+                        merged_attrs["gen_ai.usage.cost"] = float(_cost_usd)
+                    except (TypeError, ValueError):
+                        # A non-numeric caller-supplied cost must not break
+                        # ingest; skip the enrichment and the policy simply
+                        # won't match on cost for this span.
+                        pass
+
                 matched_policies = policy_mod.evaluate_for_span(
                     active_policies, span.name, merged_attrs
                 )
