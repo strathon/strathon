@@ -149,7 +149,7 @@ def generate_otlp_payload(num_spans: int) -> bytes:
 
     # InstrumentationScope
     scope = _string_field(1, "strathon-loadtest")  # name
-    scope += _string_field(2, "1.2.2")              # version
+    scope += _string_field(2, "1.2.3")              # version
     scope_spans = _field_bytes(1, 2, scope) + spans_data
 
     # Resource

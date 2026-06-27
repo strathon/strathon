@@ -9,6 +9,30 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-06-27
+
+### Added
+- Approvals can now require multiple approvers (N-of-M). A policy may demand a
+  quorum of distinct approvers before an action proceeds, rather than a single
+  approval.
+- Pending approvals that time out now send an expiry notification to the
+  configured Slack and Discord channels when they are auto-denied, so a lapsed
+  approval is no longer silent.
+
+### Fixed
+- Corrected CEL attribute keys in the policy templates, the plain-English
+  policy generator, and the reference docs. They referenced attribute names
+  the engine does not emit, so the affected policies could never match; they
+  now use the emitted keys and match as documented.
+- Per-call token cost is now recorded on spans, so cost-based log and alert
+  policies can read it.
+
+### Changed
+- Clarified the per-framework enforcement guidance: instrumenting a client
+  alone does not enforce on every surface, and the docs now state which
+  surfaces each framework supports.
+- Raised the floor for the optional `claude-agent-sdk` integration to `0.1.81`.
+
 ## [1.2.2] - 2026-06-20
 
 ### Security
@@ -64,15 +88,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Dashboard search placeholders rendered a literal escape sequence instead of
   an ellipsis character.
 
-### Changed
-- Bumped `lucide-react` to 1.20 in the dashboard.
-
 ## [1.2.0] - 2026-06-16
 
 ### Changed
 - The dashboard now targets Node 24 (current LTS). Updated dependencies
   across the SDK and dashboard to current releases.
-
 - Relicensed the receiver and CLI from MIT to Apache 2.0. The project is now
   uniformly Apache 2.0 with NOTICE files and the canonical license text.
 - The seeded development API key is now opt-in (`STRATHON_SEED_DEV_KEY=true`)
@@ -197,7 +217,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Enterprise scaling guide (horizontal scaling, PgBouncer, read replicas)
 - Published to PyPI: `pip install strathon`
 
-[Unreleased]: https://github.com/strathon/strathon/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/strathon/strathon/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/strathon/strathon/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/strathon/strathon/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/strathon/strathon/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/strathon/strathon/compare/v1.1.0...v1.2.0

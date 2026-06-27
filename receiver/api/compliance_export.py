@@ -29,7 +29,7 @@ from ._deps import require_scope
 router = APIRouter(prefix="/v1/compliance", tags=["compliance"])
 
 # Strathon version reported in the SARIF tool driver.
-STRATHON_VERSION = "1.2.2"
+STRATHON_VERSION = "1.2.3"
 
 # Minimum retention required by EU AI Act Article 19(1).
 MIN_RETENTION_DAYS = 180

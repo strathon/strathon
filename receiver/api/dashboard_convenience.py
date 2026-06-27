@@ -30,7 +30,7 @@ from ._deps import require_scope
 
 router = APIRouter(tags=["dashboard"])
 
-VERSION = "1.2.2"
+VERSION = "1.2.3"
 API_VERSION = "v1"
 
 

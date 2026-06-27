@@ -24,7 +24,7 @@ def make_client(**kwargs):
 
 
 def test_version():
-    assert __version__ == "1.2.2"
+    assert __version__ == "1.2.3"
 
 
 def test_client_requires_api_key():
