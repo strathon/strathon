@@ -191,7 +191,15 @@ async def test_expire_pending_approvals(session, isolated_project):
     expired = await expire_pending_approvals(session)
     assert len(expired) >= 1
 
-    stmt = select(Approval).where(Approval.id == approval.id)
+    # expire_pending_approvals runs a bulk UPDATE with
+    # synchronize_session=False, which does not refresh the in-session ORM
+    # object; populate_existing forces a reload so the assertion sees the
+    # updated row rather than the stale identity-map copy.
+    stmt = (
+        select(Approval)
+        .where(Approval.id == approval.id)
+        .execution_options(populate_existing=True)
+    )
     row = (await session.execute(stmt)).scalar_one()
     assert row.status == "expired"
     assert row.resolved_by == "timeout"
