@@ -840,8 +840,7 @@ def _build_strathon_guardrail_function(client):
             # The guardrail is async, so we do REAL interactive approval:
             # wait for the operator off the event loop. Approved -> allow the
             # tool to run; denied/expired/timed out -> raise_exception so the
-            # tool body never runs. Previously require_approval fell through to
-            # allow() here (a silent-allow gap).
+            # tool body never runs.
             from strathon.policy import await_for_approval
             try:
                 await await_for_approval(

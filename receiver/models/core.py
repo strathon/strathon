@@ -241,9 +241,9 @@ class Session(Base):
         TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
     )
     # INET maps to ipaddress.IPv4Address / IPv6Address; we keep it loose
-    # as a string-ish via SQLAlchemy's INET dialect type. asyncpg used to
-    # return strings; psycopg3 returns ipaddress objects. Annotate as Any
-    # so the type matches whatever the driver returns.
+    # as a string-ish via SQLAlchemy's INET dialect type. Drivers differ on
+    # the returned type (string vs ipaddress object), so annotate as Any to
+    # match whatever the driver returns.
     ip_address: Mapped[Optional[Any]] = mapped_column(INET)
     user_agent: Mapped[Optional[str]] = mapped_column(Text)
 

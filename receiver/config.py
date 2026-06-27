@@ -304,25 +304,16 @@ class Settings(BaseSettings):
         return self.mode == "cloud"
 
 
-# Lazy singleton via FastAPI's recommended @lru_cache(get_settings) pattern.
+# Lazy singleton via FastAPI's recommended @lru_cache(get_settings) pattern
+# (https://fastapi.tiangolo.com/advanced/settings/): Settings() runs on first
+# call, not at module import, so importing the app graph (config -> database
+# -> main) is side-effect-free and does not require DATABASE_URL. That keeps
+# CI's Docker smoke check, IDE indexing, and docs generation working without a
+# live runtime, while the fail-fast contract is preserved — anything that
+# actually needs settings triggers validation on first real access.
 #
-# We previously did `settings = Settings()` at module load. That made every
-# `import config` (transitively, `import database`, `import main`) fail when
-# DATABASE_URL wasn't set — including in CI's Docker smoke check, IDE
-# indexing, docs generation, anything that imports the app graph without
-# wanting to actually run it. The failure was technically correct (URL is
-# required at runtime) but applied at the wrong layer of the lifecycle.
-#
-# The fix per FastAPI's official guidance
-# (https://fastapi.tiangolo.com/advanced/settings/) is a cached factory:
-# Settings() runs on first call, not on module import. The fail-fast
-# contract is preserved — anything that actually needs settings will
-# trigger validation on the first real access — but module loading
-# becomes side-effect-free.
-#
-# We additionally expose `settings` as a module-level attribute via PEP 562
-# __getattr__ so existing `from config import settings` callsites keep
-# working unchanged.
+# `settings` is also exposed as a module-level attribute via PEP 562
+# __getattr__ so `from config import settings` callsites keep working.
 
 from functools import lru_cache  # noqa: E402  -- placed near use site for clarity
 

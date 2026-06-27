@@ -709,8 +709,6 @@ def _install_class_patch(cls: Type[Any]) -> None:
             # Route through the async dispatcher so this surface enforces the
             # full action set — halt check, block, throttle, steer, AND real
             # interactive require_approval — identically to the sync path.
-            # Previously this hand-rolled only block/throttle/steer and ran the
-            # body for approval/halt (a silent-allow gap).
             return await dispatch_policy_decision_async(
                 client,
                 span_name=span_name,

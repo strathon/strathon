@@ -97,9 +97,7 @@ async def mcp_proxy(
         # Fail-closed posture: if we cannot load the policy set or the project's
         # allow-list setting, hand the gateway an empty policy list AND a
         # default_action of "block" so an unmatched tools/call is denied rather
-        # than admitted. Previously the empty-list + no-error path took the
-        # gateway's no-match branch and returned allow (a silent admit on a
-        # control-plane failure).
+        # than admitted on a control-plane failure.
         active_policies = []
         default_action = "block"
 

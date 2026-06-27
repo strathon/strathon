@@ -522,8 +522,7 @@ async def lifespan(app: FastAPI):
 
     # Retention cleanup: daily deletion of expired sessions/keys/approvals.
     # Separate handle from the partition-based span retention task above, so
-    # both are awaited/cancelled correctly on shutdown (previously this
-    # overwrote app.state.retention_task, orphaning the span-retention loop).
+    # both are awaited and cancelled correctly on shutdown.
     from retention_cleanup import retention_cleanup_loop
     app.state.retention_cleanup_task = asyncio.create_task(
         retention_cleanup_loop(async_session_maker),

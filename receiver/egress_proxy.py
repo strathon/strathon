@@ -196,10 +196,9 @@ try:
                 # No policies loaded. Honor the project's allow-list posture
                 # exactly as the no-match branch below does: in default-deny
                 # (allow-list) mode an ungoverned request falls closed, matching
-                # the SDK enforcer and MCP gateway. Returning allow here
-                # unconditionally was a silent-allow gap — the egress surface
-                # admitting traffic that the other two surfaces deny for the
-                # same project state.
+                # the SDK enforcer and MCP gateway so the egress surface never
+                # admits traffic the other two surfaces deny for the same
+                # project state.
                 if getattr(self, "_default_action", "allow") == "block":
                     return {"action": "block", "policy_name": "_default_deny"}
                 return {"action": "allow"}
