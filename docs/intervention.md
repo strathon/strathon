@@ -712,30 +712,47 @@ curl -X POST http://localhost:4318/v1/policies \
 
 ## Framework support
 
-Strathon enforces policies at the tool-call boundary on every supported
-framework. Block enforcement is zero-code-change: `instrument(client)` is
-all the user does. Steer enforcement requires one extra line per tool
-(or per agent): replacing a tool's return value is a bigger contract
-change than refusing to call, so we ask the user to opt in explicitly.
+Strathon enforces at the tool-call boundary on every agent framework below.
+How you connect it depends on the extension point the framework exposes:
 
-| Framework            | Block (auto)        | Steer            | Steer opt-in call (callback frameworks only)            |
-|----------------------|---------------------|------------------|---------------------------------------------------------|
-| LangGraph (LangChain)| `instrument(client)`| Per-tool opt-in  | `from strathon.policy import enforce_steer; enforce_steer(tool, client)` |
-| CrewAI               | `instrument(client)`| Auto (per-tool optional) | `enforce_steer(tool, client)` (optional; class patch already covers steer) |
-| OpenAI Agents SDK    | `instrument(client)`| Per-agent opt-in | `from strathon.instrumentation.openai_agents import attach_strathon_guardrails; attach_strathon_guardrails(agent, client)` |
-| Pydantic AI          | `instrument(client)`| Auto             | not needed: plugin substitutes the tool result directly |
-| Google ADK           | `instrument(client)`| Auto             | not needed: plugin short-circuits with the replacement |
-| AutoGen              | `instrument(client)`| Auto             | not needed: plugin substitutes the tool result directly |
-| Claude Agent SDK     | `instrument(client)`| Auto             | not needed: plugin substitutes the tool result directly |
+- **Patch-at-instrument frameworks** — `instrument(client)` installs the
+  enforcement boundary directly, so connecting is a single call and every
+  action enforces with no further wiring: **CrewAI**, **OpenAI Agents SDK**,
+  **AutoGen**.
+- **Wire-in frameworks** — `instrument()` (or a companion factory) returns a
+  handler, plugin, hooks, or capability that you pass into the framework
+  yourself. These frameworks expose no global registration point, so this step
+  is required for any enforcement at all: **LangGraph** and **LangChain**
+  (callback handler), **Google ADK** (Runner plugin), **Claude Agent SDK**
+  (`PreToolUse`/`PostToolUse` hooks), **Pydantic AI** (agent capability).
+- **Observe-only** — the raw model SDKs (**OpenAI**, **Anthropic**) emit spans
+  but do not enforce; there is no tool call to intercept at the model layer.
 
-Why the difference: the plugin-based frameworks (Pydantic AI, Google ADK,
-AutoGen, Claude Agent SDK) expose a hook that can replace a tool's return
-value, so block, throttle, and steer all work with just `instrument(client)`.
-The callback-based frameworks (LangGraph/LangChain) can hard-*block* from the
-callback but cannot substitute a return value there, so full steer (returning a
-replacement in place of the tool body) needs the one-line per-tool
-`enforce_steer` opt-in. CrewAI's class patch sits at a boundary that covers
-both, so its per-tool call is optional.
+| Framework | How to connect | block / throttle | steer | require_approval |
+|-----------|----------------|------------------|-------|------------------|
+| CrewAI | `instrument(client)` | auto | auto | interactive |
+| OpenAI Agents SDK | `instrument(client)` | auto | `attach_strathon_guardrails(agent, client)` | interactive |
+| AutoGen | `instrument(client)` | auto | auto | interactive |
+| LangGraph / LangChain | `handler = instrument(client)`, then `config={"callbacks": [handler]}` | auto | `enforce_steer(tool, client)` | fails closed |
+| Google ADK | `create_firewall_plugin(client)`, then `Runner(plugins=[...])` | auto | auto | interactive |
+| Claude Agent SDK | `create_strathon_hooks(client)`, then `ClaudeAgentOptions(hooks=...)` | auto | auto | interactive |
+| Pydantic AI | `create_firewall(client)`, then `Agent(capabilities=[...])` | auto | auto | fails closed |
+| OpenAI / Anthropic | `instrument(client, frameworks=[...])` | observe-only | observe-only | observe-only |
+
+"Auto" means the action enforces once the framework is connected as shown, with
+no extra per-tool call. Where a cell names a function, that action needs that
+opt-in. "Interactive" means a matched `require_approval` policy pauses the call
+until an operator approves or denies; "fails closed" means it blocks (and
+records) the call because the surface is synchronous and cannot pause. See the
+[approval matrix](#approval-support).
+
+Why steer differs by surface: a hook that can replace a tool's return value —
+CrewAI, AutoGen, Google ADK, Claude Agent SDK, and Pydantic AI — enforces steer
+with no extra wiring. The LangChain callback surface (LangGraph/LangChain) and
+the OpenAI Agents run-hook can hard-*block* but cannot substitute a return value
+there, so steer needs a per-tool surface that can: `enforce_steer(tool, client)`
+for LangGraph/LangChain, and `attach_strathon_guardrails(agent, client)` (the
+Tool Guardrails API) for the OpenAI Agents SDK.
 
 **Approval** follows the same async/sync split. Surfaces with an async
 pre-execution hook or a tool-invoke boundary (OpenAI Agents SDK, AutoGen,

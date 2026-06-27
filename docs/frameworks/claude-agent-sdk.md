@@ -21,14 +21,32 @@ pip install "strathon[claude-agent]"
 ## Setup
 
 ```python
-from strathon import Client, instrument
+from strathon import Client
+from strathon.instrumentation.claude_agent import create_strathon_hooks
+from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
 
 client = Client(
     api_key="stra_...",
     endpoint="http://localhost:4318",
 )
-instrument(client, frameworks=["claude_agent"])
+
+# create_strathon_hooks() returns PreToolUse/PostToolUse hooks. Pass them to
+# ClaudeAgentOptions; the PreToolUse hook is what evaluates policies and denies
+# blocked tool calls. Hooks require ClaudeSDKClient (the module-level query()
+# function does not support hooks).
+hooks = create_strathon_hooks(client)
+options = ClaudeAgentOptions(hooks=hooks)
+
+async with ClaudeSDKClient(options=options) as agent:
+    await agent.query("...")
+    async for message in agent.receive_response():
+        ...
 ```
+
+For session-level tracing of code that uses the module-level `query()`
+function, also call `instrument(client, frameworks=["claude_agent"])`; that
+path is observability-only (no enforcement), since `query()` does not run
+hooks.
 
 ## What Gets Captured
 
@@ -55,9 +73,13 @@ attrs["gen_ai.tool.name"] in ["deploy", "rollback", "scale"]
 
 ## Notes
 
-- Wraps `query()` for tracing and policy enforcement.
+- Tool-level enforcement runs through the `PreToolUse` hook on
+  `ClaudeSDKClient`; `query()` and `ClaudeSDKClient.query()` are wrapped for
+  session-level tracing only.
 - Captures extended thinking content as span attributes.
-- Requires `claude-agent-sdk>=0.1.0` (installed by the `claude-agent` extra).
+- Requires `claude-agent-sdk>=0.1.81` (installed by the `claude-agent`
+  extra) — the minimum version with the `PreToolUse`/`PostToolUse` hooks used
+  for enforcement.
 
 ## Learn More
 

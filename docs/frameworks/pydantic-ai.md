@@ -2,8 +2,8 @@
 
 Strathon enforces policies on Pydantic AI tool calls before they execute:
 `block` and `throttle` raise, and `steer` returns the replacement in place of
-the real result. Integration is a first-class `AbstractCapability` plugin,
-registered at instrument time, no monkey-patching.
+the real result. Integration is a first-class `AbstractCapability`
+you pass in the agent's `capabilities` list, no monkey-patching.
 
 > **Enforcement scope:** Pydantic AI is instrumented through a synchronous
 > pre-execution hook that can short-circuit the tool call. It enforces
@@ -24,17 +24,25 @@ pip install "strathon[pydantic-ai]"
 ## Setup
 
 ```python
-from strathon import Client, instrument
+from strathon import Client
+from strathon.instrumentation.pydantic_ai import create_firewall
+from pydantic_ai import Agent
 
 client = Client(
     api_key="stra_...",
     endpoint="http://localhost:4318",
 )
-instrument(client, frameworks=["pydantic_ai"])
+
+# create_firewall() returns a Pydantic AI capability. Pass it in the agent's
+# capabilities list; the capability is what evaluates policies on every tool
+# call and LLM interaction.
+firewall = create_firewall(client)
+
+agent = Agent("openai:gpt-4o", capabilities=[firewall])
 ```
 
-The integration registers a `StrathonFirewall` capability that evaluates
-policies on every tool call and LLM interaction.
+The `StrathonFirewall` capability you pass to the agent evaluates policies on
+every tool call and LLM interaction.
 
 ## What Gets Captured
 
@@ -61,7 +69,7 @@ attrs["gen_ai.tool.name"] == "fetch_record"
 ## Notes
 
 - Uses `AbstractCapability`: Pydantic AI's official plugin interface.
-- Zero monkey-patching. The capability is registered at instrument time.
+- Zero monkey-patching. You pass the capability in `Agent(capabilities=[...])`.
 - Requires `pydantic-ai-slim>=1.80.0` (installed by the `pydantic-ai` extra).
 - 36 tests cover the integration.
 

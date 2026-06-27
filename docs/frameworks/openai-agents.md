@@ -30,6 +30,18 @@ client = Client(
 instrument(client, frameworks=["openai_agents"])
 ```
 
+`instrument()` enforces `block`, `throttle`, and `require_approval`
+automatically by injecting run hooks into `Runner.run` / `run_sync` /
+`run_streamed`. To also enforce `steer` (substitute a tool's output), attach
+the tool guardrail to your agent's tools:
+
+```python
+from strathon.instrumentation.openai_agents import attach_strathon_guardrails
+
+# Returns the number of tools updated; idempotent.
+attach_strathon_guardrails(agent, client)
+```
+
 ## What Gets Captured
 
 - **Agent runs**: start, handoffs, completion
@@ -59,7 +71,10 @@ attrs["gen_ai.agent.name"] == "research_agent"
   `Runner.run` / `run_sync` / `run_streamed` to inject Strathon `RunHooks`:
   a wrap of the framework's documented entry point, since the SDK exposes no
   pre-execution policy hook of its own.
-- Requires `openai-agents>=0.6.0` (installed by the `openai-agents` extra).
+- `block`, `throttle`, and `require_approval` enforce automatically after
+  `instrument()`. `steer` needs the tool guardrail
+  (`attach_strathon_guardrails`), which uses the Tool Guardrails API.
+- Requires `openai-agents>=0.17.5` (installed by the `openai-agents` extra).
 - Guardrail results are captured as span events.
 
 ## Learn More

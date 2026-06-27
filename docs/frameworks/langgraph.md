@@ -2,8 +2,8 @@
 
 Strathon evaluates every LangGraph tool call against your policies before
 it executes: a matched `block` or `throttle` stops the call at the callback
-boundary, before the tool body runs. Integration is two lines via LangChain's
-`BaseCallbackHandler`.
+boundary, before the tool body runs. Integration uses LangChain's
+`BaseCallbackHandler`, which you attach to each graph invocation.
 
 > **Enforcement scope:** the LangChain callback surface is synchronous.
 > `block` and `throttle` enforce (the tool never runs); `steer` is recorded
@@ -23,17 +23,27 @@ pip install "strathon[langgraph]"
 ## Setup
 
 ```python
-from strathon import Client, instrument
+from strathon import Client
+from strathon.instrumentation.langgraph import instrument
 
 client = Client(
     api_key="stra_...",
     endpoint="http://localhost:4318",
 )
-instrument(client, frameworks=["langgraph"])
+
+# instrument() returns a LangChain callback handler. Strathon enforces and
+# traces through it, so attach it to every graph invocation.
+handler = instrument(client)
+
+result = agent.invoke(
+    {"messages": [{"role": "user", "content": "..."}]},
+    config={"callbacks": [handler]},
+)
 ```
 
-Once instrumented, every `StateGraph` invocation is traced automatically.
-Tool calls pass through the policy engine before executing.
+The handler intercepts every `StateGraph` tool call: matched `block` and
+`throttle` policies raise before the tool body runs, and each call is traced.
+Pass the same handler on every invocation, including `ainvoke` and `stream`.
 
 ## What Gets Captured
 
@@ -103,8 +113,10 @@ attrs["gen_ai.tool.name"] == "web_search"
 
 - LangGraph and LangChain share the same callback handler. If you
   instrument `langgraph`, LangChain chains also get traced.
-- The handler attaches via `config={"callbacks": [strathon_handler]}`.
-  `instrument()` patches this automatically.
+- The handler must be passed on every invocation via
+  `config={"callbacks": [handler]}`. LangChain has no global callback
+  registry, so a handler that is built but never attached does nothing: no
+  spans, no enforcement.
 - Requires `langchain-core>=0.3.0` (installed by the `langgraph` extra); works with current LangGraph and LangChain 0.3+ releases.
 
 ## Learn More

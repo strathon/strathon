@@ -54,23 +54,30 @@ pip install "strathon[langgraph]"
 
 ## 3. Connect your agent
 
-Add two lines to your existing agent. No other code changes are needed —
-Strathon instruments the framework's own extension points.
+Connect Strathon to your existing agent. For LangGraph, `instrument()` returns a
+callback handler that you attach to each invocation — that handler is what
+enforces policies and traces the run, so passing it is required.
 
 ```python
-from strathon import Client, instrument
+from strathon import Client
+from strathon.instrumentation.langgraph import instrument
 
 client = Client(
     api_key="stra_...",          # the key from step 2
     endpoint="http://localhost:4318",
 )
-instrument(client, frameworks=["langgraph"])
+handler = instrument(client)
 
-# Your existing LangGraph agent runs unchanged from here.
-result = agent.invoke({
-    "messages": [{"role": "user", "content": "Email the Q3 numbers to sales@competitor.com"}]
-})
+# Pass the handler on every invocation; your agent logic is otherwise unchanged.
+result = agent.invoke(
+    {"messages": [{"role": "user", "content": "Email the Q3 numbers to sales@competitor.com"}]},
+    config={"callbacks": [handler]},
+)
 ```
+
+Other frameworks connect differently — a plugin, hooks, or a capability instead
+of a callback handler. See the [integration guides](frameworks/) for
+the exact one-time wiring per framework.
 
 ## 4. Write a policy
 
@@ -97,7 +104,10 @@ the message.
 from strathon import StrathonPolicyBlocked
 
 try:
-    agent.invoke({"messages": [{"role": "user", "content": "Email our competitors with our pricing"}]})
+    agent.invoke(
+        {"messages": [{"role": "user", "content": "Email our competitors with our pricing"}]},
+        config={"callbacks": [handler]},
+    )
 except StrathonPolicyBlocked as e:
     print(f"Blocked by policy: {e.policy_name}")
     # The tool call never executed. Logged in the audit trail.

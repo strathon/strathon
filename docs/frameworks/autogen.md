@@ -54,7 +54,9 @@ attrs["gen_ai.tool.name"] == "execute_code"
 
 ## Notes
 
-- Wraps `BaseChatAgent.on_messages` for message interception.
+- Wraps `BaseChatAgent.on_messages` and `BaseGroupChat.run` for conversation
+  and team tracing, and `BaseTool.run_json` to enforce policies on each tool
+  call (the enforcement boundary). All installed at instrument time.
 - Requires `autogen-agentchat>=0.7.0` (installed by the `autogen` extra).
 - Multi-agent conversations create a single trace with per-agent spans.
 

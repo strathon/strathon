@@ -12,8 +12,13 @@ error is treated as "no match" (the call is allowed), so a typo'd attribute
 name silently never matches. Check:
 
 - The attribute name is exact: `gen_ai.tool.name`, not `tool.name`.
-- The framework is instrumented (`instrument(client, frameworks=[...])`) and
-  the call actually goes through it.
+- The framework is connected the way its [guide](frameworks/) shows,
+  and the call actually goes through it. CrewAI, the OpenAI Agents SDK, and
+  AutoGen enforce after `instrument(client)` alone; LangGraph/LangChain need the
+  handler passed via `config={"callbacks": [handler]}`, Google ADK needs the
+  plugin on your `Runner`, the Claude Agent SDK needs the hooks in
+  `ClaudeAgentOptions`, and Pydantic AI needs the capability on the `Agent`.
+  Without that wiring, no spans are emitted and nothing matches.
 - The policy status is `enabled`, not `shadow` (shadow records the decision but
   does not enforce) and not `disabled`.
 

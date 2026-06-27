@@ -74,7 +74,7 @@ The crew pauses until an operator approves in the dashboard or Slack.
   `ToolUsageStartedEvent`). Enforcement wraps the tool-invoke boundary
   (a class-level patch installed at instrument time), which is what lets
   CrewAI support the full action set including interactive approval.
-- Works with CrewAI 0.80+.
+- Requires `crewai>=1.14.7` (installed by the `crewai` extra).
 - Multi-agent crews create a single trace with per-agent spans.
 
 ## Learn More

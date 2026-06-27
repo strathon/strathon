@@ -2,7 +2,8 @@
 
 Strathon enforces policies on Google ADK tool calls before they execute,
 with the full action set including interactive approval. Integration is a
-first-class `BasePlugin`, registered at instrument time, no monkey-patching.
+first-class `BasePlugin` that you register on your ADK `Runner`, no
+monkey-patching.
 
 > **Enforcement scope:** full. The pre-execution hook is async, so all seven
 > actions enforce: `block` and `throttle` stop the call, `steer` substitutes
@@ -19,17 +20,31 @@ pip install "strathon[google-adk]"
 ## Setup
 
 ```python
-from strathon import Client, instrument
+from strathon import Client
+from strathon.instrumentation.google_adk import create_firewall_plugin
+from google.adk.runners import Runner
 
 client = Client(
     api_key="stra_...",
     endpoint="http://localhost:4318",
 )
-instrument(client, frameworks=["google_adk"])
+
+# create_firewall_plugin() returns an ADK BasePlugin. Register it on your
+# Runner; the plugin is what evaluates policies on every tool call and LLM
+# interaction across all agents the runner manages.
+plugin = create_firewall_plugin(client)
+
+runner = Runner(
+    agent=agent,
+    app_name="my-app",
+    plugins=[plugin],
+    # ...plus your existing Runner configuration (session_service, etc.)
+)
 ```
 
-The integration registers a `StrathonFirewallPlugin` that evaluates
-policies on every tool call and LLM interaction within ADK agents.
+The `StrathonFirewallPlugin` you register evaluates policies on every tool
+call and LLM interaction within the runner's agents. A sub-agent invoked
+through `AgentTool` runs its own runner, so register the plugin there too.
 
 ## What Gets Captured
 
@@ -58,7 +73,7 @@ attrs["gen_ai.tool.name"] == "bigquery_query"
 ## Notes
 
 - Uses `BasePlugin`: Google ADK's official plugin interface.
-- Zero monkey-patching. The plugin is registered at instrument time.
+- Zero monkey-patching. You register the plugin on your `Runner`.
 - Requires `google-adk>=1.7.0` (installed by the `google-adk` extra).
 - 25 tests cover the integration.
 

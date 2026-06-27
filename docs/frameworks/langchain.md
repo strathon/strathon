@@ -2,8 +2,8 @@
 
 Strathon evaluates every LangChain tool call against your policies before
 it executes: a matched `block` or `throttle` stops the call at the callback
-boundary. Chains, agents, tools, and LLM calls are traced automatically with
-the same `BaseCallbackHandler` used for LangGraph.
+boundary. Chains, agents, tools, and LLM calls run through the same
+`BaseCallbackHandler` used for LangGraph, which you attach to each invocation.
 
 > **Enforcement scope:** the LangChain callback surface is synchronous.
 > `block` and `throttle` enforce (the tool never runs); `steer` is recorded
@@ -23,13 +23,22 @@ pip install "strathon[langchain]"
 ## Setup
 
 ```python
-from strathon import Client, instrument
+from strathon import Client
+from strathon.instrumentation.langchain import instrument
 
 client = Client(
     api_key="stra_...",
     endpoint="http://localhost:4318",
 )
-instrument(client, frameworks=["langchain"])
+
+# instrument() returns a LangChain callback handler. Strathon enforces and
+# traces through it, so attach it to every chain or agent invocation.
+handler = instrument(client)
+
+result = chain.invoke(
+    {"input": "..."},
+    config={"callbacks": [handler]},
+)
 ```
 
 ## What Gets Captured
@@ -60,9 +69,12 @@ With action `throttle` and a rate limit, Strathon caps the call frequency.
 
 ## Notes
 
-- Shares the handler with LangGraph. Instrumenting one covers both.
-- Works with LangChain 0.3+ and LangChain Community packages.
-- Callback handlers are attached automatically via `instrument()`.
+- Shares the handler with LangGraph; one handler covers both.
+- The handler must be passed on every invocation via
+  `config={"callbacks": [handler]}`. LangChain has no global callback
+  registry, so an unattached handler does nothing: no spans, no enforcement.
+- Requires `langchain-core>=0.3.0` (installed by the `langchain` extra); works
+  with LangChain 0.3+ and LangChain Community packages.
 
 ## Learn More
 
