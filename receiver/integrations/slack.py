@@ -241,8 +241,32 @@ def format_agent_health(event: dict[str, Any], event_type: str) -> dict:
     return {"blocks": blocks, "text": f"{title}: {agent} ({severity})"}
 
 
+def format_approval_expired(event: dict[str, Any]) -> dict:
+    """Format an auto-denied (expired) approval as a Slack message."""
+    agent = event.get("agent_name", "unknown")
+    tool = event.get("tool_name", "unknown")
+    policy = event.get("policy_name", "unknown")
+    return {
+        "blocks": [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        ":hourglass_flowing_sand: *Approval auto-denied (expired)*\n"
+                        "No operator responded in time, so the call was refused.\n"
+                        f"*Agent:* {agent}   *Tool:* {tool}   *Policy:* {policy}"
+                    ),
+                },
+            },
+        ],
+        "text": f"Approval expired (auto-denied): {tool} by {agent}",
+    }
+
+
 EVENT_FORMATTERS: dict[str, Callable[..., dict[str, Any]]] = {
     "approval_request": format_approval_request,
+    "approval_expired": format_approval_expired,
     "incident": format_incident,
     "policy_blocked": format_policy_event,
     "policy_steered": format_policy_event,

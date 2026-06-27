@@ -34,9 +34,10 @@ router = APIRouter(tags=["notifications"])
 
 VALID_CHANNEL_TYPES = {"slack", "discord", "github", "webhook"}
 VALID_EVENTS = {
-    "approval_request", "incident", "policy_blocked", "policy_steered",
-    "policy_throttled", "policy_alert", "budget_alert", "budget_halt",
-    "heartbeat_missed", "behavioral_drift", "sdk_integrity_violation",
+    "approval_request", "approval_expired", "incident", "policy_blocked",
+    "policy_steered", "policy_throttled", "policy_alert", "budget_alert",
+    "budget_halt", "heartbeat_missed", "behavioral_drift",
+    "sdk_integrity_violation",
 }
 
 

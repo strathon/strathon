@@ -37,6 +37,19 @@ def validate_action_config(action: str, action_config: dict[str, Any]) -> None:
     Validating server-side gives operators an immediate 400 on a malformed
     rule rather than silent failure at SDK enforcement time.
     """
+    if action == "require_approval":
+        approvers = action_config.get("approvers_required")
+        if approvers is not None and (
+            not isinstance(approvers, int)
+            or isinstance(approvers, bool)
+            or approvers < 1
+        ):
+            raise ValueError(
+                "require_approval action_config.approvers_required must be a "
+                f"positive integer, got {approvers!r}"
+            )
+        return
+
     if action != "throttle":
         return
 

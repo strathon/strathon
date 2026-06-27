@@ -281,6 +281,20 @@ class PolicyEnforcer:
                     timeout = int(raw_timeout)
                     if timeout <= 0:
                         timeout = 300
+                # approvers_required (the N in N-of-M). Same fail-safe posture:
+                # an invalid value must never raise out of check_policy, so it
+                # falls back to 1 (single sign-off) rather than disabling the
+                # policy. The receiver enforces the threshold and dedupes
+                # distinct approvers.
+                raw_approvers = (policy.action_config or {}).get(
+                    "approvers_required", 1
+                )
+                if isinstance(raw_approvers, bool) or not isinstance(
+                    raw_approvers, int
+                ):
+                    approvers_required = 1
+                else:
+                    approvers_required = raw_approvers if raw_approvers >= 1 else 1
                 return PolicyDecision(
                     action="require_approval",
                     policy_id=policy.id,
@@ -290,6 +304,7 @@ class PolicyEnforcer:
                         or f"Tool call requires approval per policy '{policy.name}'"
                     ),
                     timeout_seconds=timeout,
+                    approvers_required=approvers_required,
                 )
             # steer
             replacement = (

@@ -14,7 +14,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
@@ -39,7 +39,8 @@ class CreateApprovalRequest(BaseModel):
     agent_name: Optional[str] = None
     tool_name: Optional[str] = None
     tool_args: Optional[str] = None
-    timeout_seconds: int = 300
+    timeout_seconds: int = Field(300, ge=1)
+    approvers_required: int = Field(1, ge=1)
 
 
 @router.post("", status_code=201)
@@ -82,6 +83,7 @@ async def create_approval(
         tool_args=body.tool_args,
         policy_name=body.policy_name,
         timeout_seconds=body.timeout_seconds,
+        approvers_required=body.approvers_required,
     )
     # create_approval flushes and refreshes, so approval.id is populated here.
     # The request boundary (get_db_session) commits on success; we do not

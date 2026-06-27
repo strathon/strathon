@@ -17,13 +17,38 @@ async def _tick(session_maker) -> None:
 
     async with session_maker() as session:
         try:
-            count = await approvals_repo.expire_pending_approvals(session)
+            expired = await approvals_repo.expire_pending_approvals(session)
             await session.commit()
-            if count:
-                logger.info("Expired %d pending approval(s)", count)
         except Exception:
             logger.exception("approval reaper: expire failed")
             await session.rollback()
+            return
+
+        # Best-effort auto-denied notification to each project's configured
+        # channels. The approvals already failed closed above; a notification
+        # failure must never affect that, so it is fully isolated.
+        if not expired:
+            return
+        try:
+            from config import get_settings
+            from integrations.dispatcher import dispatch_event
+
+            base_url = get_settings().public_url
+            for appr in expired:
+                await dispatch_event(
+                    session,
+                    appr["project_id"],
+                    "approval_expired",
+                    {
+                        "approval_id": appr["id"],
+                        "agent_name": appr["agent_name"] or "agent",
+                        "tool_name": appr["tool_name"] or "unknown",
+                        "policy_name": appr["policy_name"] or "unknown",
+                    },
+                    base_url=base_url,
+                )
+        except Exception:
+            logger.exception("approval reaper: expiry notification failed")
 
 
 async def approval_reaper_loop(

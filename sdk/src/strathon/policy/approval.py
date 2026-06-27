@@ -57,6 +57,7 @@ def request_approval(
         "tool_name": attrs.get("gen_ai.tool.name") or attrs.get("strathon.tool.name"),
         "tool_args": attrs.get("strathon.tool.args"),
         "timeout_seconds": decision.timeout_seconds or 300,
+        "approvers_required": decision.approvers_required or 1,
     }).encode("utf-8")
 
     api_key = getattr(client, "_api_key", None)

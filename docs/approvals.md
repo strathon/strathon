@@ -28,8 +28,10 @@ Pending requests surface in the places a team already watches:
 
 - **Dashboard** — an approval card shows the agent, the tool, the arguments, and
   the matched policy, with approve and deny actions.
-- **Slack** — an interactive Block Kit message with approve and deny buttons.
-- **Discord** — a rich embed with interactive components.
+- **Slack** — an interactive Block Kit message with approve and deny buttons; a
+  click resolves the request in place.
+- **Discord** — the request is delivered as a rich embed notification; approve
+  or deny it from the dashboard, Slack, or the CLI.
 
 From the command line, operators can list and act on requests directly:
 
@@ -41,11 +43,21 @@ strathon approvals deny <approval-id>
 
 ## Multi-party approval (N-of-M)
 
-For the highest-risk actions, a single sign-off may not be enough. Strathon
-supports **N-of-M** approval: a request can require, say, two of three named
-approvers before the call is admitted. This mirrors the dual-control pattern used
-for financial transactions and production changes, where no one person can
-unilaterally authorize a sensitive operation.
+For the highest-risk actions, a single sign-off may not be enough. Set
+`approvers_required` in a `require_approval` policy's `action_config`, and the
+call is admitted only after that many *distinct* operators approve it:
+
+```json
+{ "action": "require_approval", "action_config": { "approvers_required": 2 } }
+```
+
+A single deny vetoes the request immediately, and the same operator cannot
+approve twice, so no one person can unilaterally authorize a sensitive
+operation — the dual-control pattern used for financial transactions and
+production changes. Any operator with approve permission can sign off: Strathon
+requires N *distinct* approvers rather than pinning approval to a fixed roster of
+named individuals. Every decision — who approved or denied, and when — is
+recorded on the request and in the audit log.
 
 ## Preventing stuck agents
 

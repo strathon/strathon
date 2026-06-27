@@ -27,9 +27,9 @@ class Policy:
     priority: int = 0
     description: Optional[str] = None
     # Shadow policies are evaluated and recorded server-side but must never
-    # enforce. The SDK previously dropped this field on parse, which made a
-    # shadow block policy block for real in-process — the inverse of the
-    # documented "test without enforcing" contract.
+    # enforce in-process. This field is carried through parse so a shadow
+    # block policy stays observe-only instead of blocking for real, honoring
+    # the "test without enforcing" contract.
     shadow: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
@@ -92,6 +92,7 @@ class PolicyDecision:
     retry_after_seconds: Optional[float] = None
     approval_id: Optional[str] = None
     timeout_seconds: Optional[int] = None
+    approvers_required: Optional[int] = None
 
     @property
     def is_allow(self) -> bool:

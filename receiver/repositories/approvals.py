@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from sqlalchemy import select, update
@@ -176,8 +176,14 @@ async def resolve_approval(
     return approval
 
 
-async def expire_pending_approvals(session: AsyncSession) -> int:
-    """Expire all pending approvals past their expires_at. Returns count."""
+async def expire_pending_approvals(session: AsyncSession) -> list[dict[str, Any]]:
+    """Expire all pending approvals past their expires_at.
+
+    Uses UPDATE ... RETURNING so the set of newly-expired approvals is
+    captured atomically in one statement, with no separate snapshot that
+    could race a concurrent resolve. Returns lightweight dicts so the caller
+    can send an auto-denied notification for each.
+    """
     now = datetime.now(timezone.utc)
     stmt = (
         update(Approval)
@@ -190,9 +196,25 @@ async def expire_pending_approvals(session: AsyncSession) -> int:
             resolved_at=sa_func.now(),
             resolved_by="timeout",
         )
+        .returning(
+            Approval.id,
+            Approval.project_id,
+            Approval.agent_name,
+            Approval.tool_name,
+            Approval.policy_name,
+        )
+        .execution_options(synchronize_session=False)
     )
-    result = await session.execute(stmt)
-    count = result.rowcount
-    if count:
-        logger.info("Expired %d pending approval(s)", count)
-    return count
+    rows = (await session.execute(stmt)).all()
+    if rows:
+        logger.info("Expired %d pending approval(s)", len(rows))
+    return [
+        {
+            "id": str(r.id),
+            "project_id": r.project_id,
+            "agent_name": r.agent_name,
+            "tool_name": r.tool_name,
+            "policy_name": r.policy_name,
+        }
+        for r in rows
+    ]

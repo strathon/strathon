@@ -188,8 +188,8 @@ async def test_expire_pending_approvals(session, isolated_project):
     approval.expires_at = past
     await session.flush()
 
-    count = await expire_pending_approvals(session)
-    assert count >= 1
+    expired = await expire_pending_approvals(session)
+    assert len(expired) >= 1
 
     stmt = select(Approval).where(Approval.id == approval.id)
     row = (await session.execute(stmt)).scalar_one()

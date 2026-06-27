@@ -208,8 +208,34 @@ def format_agent_health(event: dict[str, Any], event_type: str) -> dict:
     return {"embeds": [embed]}
 
 
+def format_approval_expired(event: dict[str, Any]) -> dict:
+    """Format an auto-denied (expired) approval as a Discord embed."""
+    agent = event.get("agent_name", "unknown")
+    tool = event.get("tool_name", "unknown")
+    policy = event.get("policy_name", "unknown")
+    approval_id = event.get("approval_id", "unknown")
+    return {
+        "embeds": [
+            {
+                "title": ":hourglass_flowing_sand: Approval Auto-Denied (Expired)",
+                "description": (
+                    "No operator responded in time, so the call was refused."
+                ),
+                "color": COLOR_ORANGE,
+                "fields": [
+                    {"name": "Agent", "value": agent, "inline": True},
+                    {"name": "Tool", "value": tool, "inline": True},
+                    {"name": "Policy", "value": policy, "inline": True},
+                ],
+                "footer": {"text": f"Approval ID: {approval_id}"},
+            },
+        ],
+    }
+
+
 EVENT_FORMATTERS: dict[str, Callable[..., dict[str, Any]]] = {
     "approval_request": format_approval_request,
+    "approval_expired": format_approval_expired,
     "incident": format_incident,
     "policy_blocked": format_policy_event,
     "policy_steered": format_policy_event,
