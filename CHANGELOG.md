@@ -19,6 +19,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   configured Slack and Discord channels when they are auto-denied, so a lapsed
   approval is no longer silent.
 
+### Changed
+- Clarified the per-framework enforcement guidance: instrumenting a client
+  alone does not enforce on every surface, and the docs now state which
+  surfaces each framework supports.
+- Raised the floor for the optional `claude-agent-sdk` integration to `0.1.81`.
+
 ### Fixed
 - Corrected CEL attribute keys in the policy templates, the plain-English
   policy generator, and the reference docs. They referenced attribute names
@@ -27,36 +33,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Per-call token cost is now recorded on spans, so cost-based log and alert
   policies can read it.
 
-### Changed
-- Clarified the per-framework enforcement guidance: instrumenting a client
-  alone does not enforce on every surface, and the docs now state which
-  surfaces each framework supports.
-- Raised the floor for the optional `claude-agent-sdk` integration to `0.1.81`.
-
 ## [1.2.2] - 2026-06-20
-
-### Security
-- Hardened the audit anchor Merkle tree against forgeability. The previous
-  construction could let two different event sequences produce the same root,
-  weakening tamper detection; the tree now follows the standard RFC 6962 /
-  RFC 9162 construction, which closes this. No production anchors used the old
-  construction, so no re-anchoring is required.
-
-### Fixed
-- The budgets page showed empty forecast and headroom and an empty
-  spend-by-agent chart because it read fields the API did not return. It now
-  shows end-of-month forecast and remaining headroom (from
-  `/v1/costs/forecast`) and a per-agent spend chart (from `/v1/costs`), and the
-  overview spend trend reads the same series.
-- The audit log showed a static integrity label. It now verifies against the
-  receiver: the header reflects the anchor state from `/v1/audit/anchors`
-  (chain anchored with the latest anchor time, or not yet anchored), and each
-  row can be inspected to recompute its entry hash via
-  `/v1/audit/events/{id}/verify`, showing a pass or fail verdict.
-- The compliance evidence export was not wired to a request. It now downloads
-  evidence from the receiver as JSON or SARIF.
-- Sparklines drew from a single data point; they now render only when at least
-  two points exist.
 
 ### Added
 - The overview gains an agent-health card showing liveness and risk; it shares
@@ -75,6 +52,29 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   are unsigned Merkle roots, with signed, independently verifiable anchoring
   noted as a planned enhancement.
 
+### Fixed
+- The budgets page showed empty forecast and headroom and an empty
+  spend-by-agent chart because it read fields the API did not return. It now
+  shows end-of-month forecast and remaining headroom (from
+  `/v1/costs/forecast`) and a per-agent spend chart (from `/v1/costs`), and the
+  overview spend trend reads the same series.
+- The audit log showed a static integrity label. It now verifies against the
+  receiver: the header reflects the anchor state from `/v1/audit/anchors`
+  (chain anchored with the latest anchor time, or not yet anchored), and each
+  row can be inspected to recompute its entry hash via
+  `/v1/audit/events/{id}/verify`, showing a pass or fail verdict.
+- The compliance evidence export was not wired to a request. It now downloads
+  evidence from the receiver as JSON or SARIF.
+- Sparklines drew from a single data point; they now render only when at least
+  two points exist.
+
+### Security
+- Hardened the audit anchor Merkle tree against forgeability. The previous
+  construction could let two different event sequences produce the same root,
+  weakening tamper detection; the tree now follows the standard RFC 6962 /
+  RFC 9162 construction, which closes this. No production anchors used the old
+  construction, so no re-anchoring is required.
+
 ## [1.2.1] - 2026-06-17
 
 ### Fixed
@@ -90,30 +90,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [1.2.0] - 2026-06-16
 
-### Changed
-- The dashboard now targets Node 24 (current LTS). Updated dependencies
-  across the SDK and dashboard to current releases.
-- Relicensed the receiver and CLI from MIT to Apache 2.0. The project is now
-  uniformly Apache 2.0 with NOTICE files and the canonical license text.
-- The seeded development API key is now opt-in (`STRATHON_SEED_DEV_KEY=true`)
-  and is never seeded in cloud mode. The local `docker compose` setup opts in
-  so the quickstart works out of the box; production does not.
-- Documentation overhauled end to end: framework guides now state
-  per-surface enforcement scope, reference pages are cross-linked, and the
-  README, PyPI pages, and CLI examples are verified against the shipped
-  code.
-- Ownership transfer is now a two-step, consent-based flow: the owner sends a
-  request to an existing admin, who accepts or declines it from a card under
-  Members before any roles change. Previously the swap was immediate.
-- Changing your password now requires a current MFA code when the account has
-  MFA enabled, matching the verification required for other sensitive actions.
-- Sensitive member actions (reset password, disable MFA, change role, remove)
-  now require the caller to outrank the target: an admin can manage operators
-  and viewers but not a peer admin or the owner. Enforced server-side and
-  reflected in the dashboard.
-
 ### Added
-
 - Broader PII detection: crypto wallet addresses, IBAN (mod-97 validated),
   IPv6, US ITIN, and Indian Aadhaar (Verhoeff validated) join the existing
   email, phone, SSN, credit-card, and IP recognizers.
@@ -138,13 +115,34 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Users can change their own password and display name from the dashboard
   (`POST /v1/auth/change-password`, `PATCH /v1/auth/me`).
 
+### Changed
+- The dashboard now targets Node 24 (current LTS). Updated dependencies
+  across the SDK and dashboard to current releases.
+- Relicensed the receiver and CLI from MIT to Apache 2.0. The project is now
+  uniformly Apache 2.0 with NOTICE files and the canonical license text.
+- The seeded development API key is now opt-in (`STRATHON_SEED_DEV_KEY=true`)
+  and is never seeded in cloud mode. The local `docker compose` setup opts in
+  so the quickstart works out of the box; production does not.
+- Documentation overhauled end to end: framework guides now state
+  per-surface enforcement scope, reference pages are cross-linked, and the
+  README, PyPI pages, and CLI examples are verified against the shipped
+  code.
+- Ownership transfer is now a two-step, consent-based flow: the owner sends a
+  request to an existing admin, who accepts or declines it from a card under
+  Members before any roles change. Previously the swap was immediate.
+- Changing your password now requires a current MFA code when the account has
+  MFA enabled, matching the verification required for other sensitive actions.
+- Sensitive member actions (reset password, disable MFA, change role, remove)
+  now require the caller to outrank the target: an admin can manage operators
+  and viewers but not a peer admin or the owner. Enforced server-side and
+  reflected in the dashboard.
+
 ### Fixed
 - Human-in-the-loop approvals now work end to end. The SDK posts to a new
   POST /v1/approvals endpoint to open a pending approval when a require_approval
   policy matches; the held call resumes or is denied on the human decision.
   Approval requests can be routed to a notification channel with approve/deny
   links.
-
 - **Shadow policies no longer enforce.** The SDK dropped the `shadow` field
   when parsing `/v1/policies`, so a shadow `block` policy blocked live
   traffic in-process; the MCP gateway and egress proxy had the same gap.
