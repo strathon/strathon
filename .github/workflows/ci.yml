@@ -29,6 +29,7 @@ jobs:
   secret-scan:
     name: Security scan
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - name: Scan tracked files for secrets and forbidden terms
@@ -50,6 +51,7 @@ jobs:
   sdk-tests:
     name: SDK tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -83,6 +85,7 @@ jobs:
   receiver-tests:
     name: Receiver tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     services:
       postgres:
@@ -139,6 +142,7 @@ jobs:
   integration-tests:
     name: Cross-framework parity
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     services:
       postgres:
@@ -198,6 +202,7 @@ jobs:
   docker-build:
     name: Docker build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -233,6 +238,7 @@ jobs:
   dashboard-build:
     name: Dashboard build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -256,6 +262,7 @@ jobs:
   lint:
     name: Lint (ruff)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -279,6 +286,7 @@ jobs:
   cel-attributes:
     name: CEL attribute drift
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - name: Set up Python 3.12
@@ -299,6 +307,7 @@ jobs:
   typecheck-sdk:
     name: Type check — SDK (blocking)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - name: Set up Python 3.12
@@ -329,6 +338,7 @@ jobs:
   typecheck-receiver:
     name: Type check — receiver
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - name: Set up Python 3.12
@@ -348,8 +358,9 @@ jobs:
   # ============================================================
   docker:
     name: Docker image
-    needs: [receiver-tests, lint]
+    needs: [secret-scan, sdk-tests, receiver-tests, integration-tests, docker-build, dashboard-build, lint, cel-attributes, typecheck-sdk, typecheck-receiver]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       packages: write
