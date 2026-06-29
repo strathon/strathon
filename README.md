@@ -177,11 +177,11 @@ Per-agent and per-tool failure tracking, modeled on the standard CLOSED → OPEN
 
 ### Tamper-Evident Audit Log
 
-Prove the trail was not rewritten. Every operator action is chained with HMAC-SHA256, Merkle roots are anchored at configurable intervals, and the table is append-only at the database level (PostgreSQL row-level security). Built for environments where the audit log is evidence, not just history. [Learn more → getstrathon.com/docs/audit](https://getstrathon.com/docs/audit)
+Prove the trail was not rewritten. Every operator action is chained with HMAC-SHA256, Merkle roots are anchored at configurable intervals, and the table is append-only at the database level (triggers reject UPDATE, DELETE, and TRUNCATE). Built for environments where the audit log is evidence, not just history. [Learn more → getstrathon.com/docs/audit](https://getstrathon.com/docs/audit)
 
-### EU AI Act Compliance
+### EU AI Act & NIST AI RMF
 
-Evidence export for Articles 9–15 and 19, covering risk management, data governance, transparency, human oversight, accuracy, and serious incident reporting. Agent inventory with NIST AI RMF risk scoring. Incident detection generates Article 73 reporting metadata automatically. Built for teams that need to demonstrate compliance to auditors without building bespoke tooling. [Learn more → getstrathon.com/docs/compliance-mapping](https://getstrathon.com/docs/compliance-mapping)
+Maps Strathon's runtime controls to obligations in the EU AI Act (Regulation (EU) 2024/1689) and the NIST AI RMF, so deployers can produce the evidence auditors ask for: a tamper-evident audit trail for record-keeping, policy simulation and export for testing documentation, agent inventory with risk scoring, and Article 73 serious-incident reporting metadata. This is a mapping of controls to requirements, not a certification of compliance. Confirm your obligations with qualified counsel. [Learn more → getstrathon.com/docs/compliance-mapping](https://getstrathon.com/docs/compliance-mapping)
 
 ### Dashboard
 
