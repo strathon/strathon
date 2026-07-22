@@ -26,7 +26,8 @@ import logging
 from typing import Any, Optional
 from uuid import UUID
 
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Policy, PolicyMatch, PolicyVersion
@@ -200,13 +201,14 @@ async def delete_policy(
 ) -> bool:
     """Hard-delete a policy. Returns True iff a row was actually deleted.
 
-    Captures a final 'delete' version snapshot before removal.
+    No version snapshot is written here. policy_versions has an ON DELETE
+    CASCADE foreign key to policies, so any row captured for the deletion
+    would be removed by the very statement that triggered it -- the write,
+    and the SELECT that fed it, were pure overhead. Deletions are recorded
+    in the tamper-evident audit log, which is the durable trail;
+    policy_versions is a working history that lives and dies with its
+    policy.
     """
-    # Capture the policy state before deletion for the version log.
-    before = await get_policy(session, project_id, policy_id)
-    if before is not None:
-        await _capture_version(session, before, "delete")
-
     stmt = delete(Policy).where(
         Policy.project_id == project_id,
         Policy.id == policy_id,
@@ -238,28 +240,48 @@ async def record_match(
     Never raises — failure to record a match must not break ingest.
     """
     try:
-        stmt = insert(PolicyMatch).values(
-            policy_id=policy_id,
-            project_id=project_id,
-            trace_id=trace_id,
-            span_id=span_id,
-            action=action,
-            action_outcome=action_outcome,
-            match_metadata=metadata or {},
-        )
-        await session.execute(stmt)
-
-        # Update match_count + last_matched_at on the policy row.
-        # Single atomic UPDATE, no SELECT needed.
-        from sqlalchemy import func as sa_func, update
-        await session.execute(
-            update(Policy)
-            .where(Policy.id == policy_id)
+        # ON CONFLICT DO NOTHING against the (policy_id, trace_id, span_id)
+        # unique index (migration 029) makes duplicate submissions of the
+        # same span no-op instead of inserting a second policy_matches row.
+        # OTLP exporters retry batches on transport failures; without this,
+        # a retried batch bumped match_count for every retry and dashboard
+        # "hits" over-counted true policy fires.
+        stmt = (
+            pg_insert(PolicyMatch)
             .values(
-                match_count=Policy.match_count + 1,
-                last_matched_at=sa_func.now(),
+                policy_id=policy_id,
+                project_id=project_id,
+                trace_id=trace_id,
+                span_id=span_id,
+                action=action,
+                action_outcome=action_outcome,
+                match_metadata=metadata or {},
             )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    PolicyMatch.policy_id,
+                    PolicyMatch.trace_id,
+                    PolicyMatch.span_id,
+                ]
+            )
+            .returning(PolicyMatch.id)
         )
+        result = await session.execute(stmt)
+        inserted = result.scalar() is not None
+
+        # Only bump the aggregate counter when a real new row was written,
+        # so dashboard "hits" is the count of DISTINCT span+policy fires,
+        # not the count of ingest attempts.
+        if inserted:
+            from sqlalchemy import func as sa_func, update
+            await session.execute(
+                update(Policy)
+                .where(Policy.id == policy_id)
+                .values(
+                    match_count=Policy.match_count + 1,
+                    last_matched_at=sa_func.now(),
+                )
+            )
     except Exception:
         logger.exception("failed to record policy match for policy %s", policy_id)
 

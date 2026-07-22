@@ -94,6 +94,29 @@ async def _authenticated(
             )
 
     metrics.auth_successes.inc()
+
+    # Make ctx.project_id visible to Postgres RLS for the rest of this
+    # request. is_local=true scopes it to the current transaction so it
+    # can never leak to a different request that reuses this pooled
+    # connection. This is a no-op in today's default self-hosted
+    # deployment (DATABASE_URL connects as the table owner, which
+    # bypasses RLS regardless of this setting -- see migration 021's own
+    # comment). It becomes load-bearing only if DATABASE_URL is later
+    # pointed at a non-owner role (e.g. strathon_app from migration 030),
+    # which is what turns RLS from documented-but-inert into an active
+    # second enforcement layer alongside the WHERE project_id = ... that
+    # every repository query already applies. Failure here must never
+    # break a request that's already been correctly authenticated and
+    # scoped by the application layer, so it's best-effort.
+    try:
+        from sqlalchemy import text as _sql_text
+        await session.execute(
+            _sql_text("SELECT set_config('app.current_tenant', :pid, true)"),
+            {"pid": str(ctx.project_id)},
+        )
+    except Exception:
+        logger.debug("Strathon: could not set app.current_tenant RLS context", exc_info=True)
+
     return ctx
 
 

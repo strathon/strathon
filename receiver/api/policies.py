@@ -498,13 +498,25 @@ async def batch_policies(
             )
 
     affected = 0
+    # For deletes, capture each policy's full state before it is removed, so
+    # the audit event records WHAT was deleted, not just its id. The
+    # single-delete path already does this; a bulk delete is exactly the case
+    # where "which twelve policies did someone just remove?" needs an answer,
+    # and the rows are gone by the time the event is written. enable/disable
+    # do not need it: the policy still exists and can be looked up by id.
+    deleted_states: list[dict[str, Any]] = []
     for policy_uuid in uuids:
         if body.action == "delete":
+            before = await policies_repo.get_policy(
+                session, ctx.project_id, policy_uuid
+            )
             deleted = await policies_repo.delete_policy(
                 session, ctx.project_id, policy_uuid
             )
             if deleted:
                 affected += 1
+                if before is not None:
+                    deleted_states.append(before.model_dump(mode="json"))
         else:
             new_enabled = body.action == "enable"
             result = await policies_repo.update_policy(
@@ -521,6 +533,7 @@ async def batch_policies(
         CATEGORY_POLICY,
         resource_type="policy_batch",
         resource_id=",".join(str(u) for u in uuids),
+        before_state={"policies": deleted_states} if deleted_states else None,
         after_state={"action": body.action, "affected": affected, "total": len(uuids)},
     )
 

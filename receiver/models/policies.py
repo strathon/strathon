@@ -134,6 +134,16 @@ class PolicyMatch(Base):
         Index("idx_policy_matches_policy", "policy_id", text("matched_at DESC")),
         Index("idx_policy_matches_project", "project_id", text("matched_at DESC")),
         Index("idx_policy_matches_trace", "trace_id"),
+        # Dedup key for OTLP exporter retries: the same (policy, trace, span)
+        # coming in twice must be a no-op via ON CONFLICT DO NOTHING, so
+        # match_count reflects distinct policy fires rather than ingest
+        # attempts. Enforced by migration 029; declared here so
+        # `alembic check` sees the ORM and DB agree.
+        Index(
+            "ux_policy_matches_policy_trace_span",
+            "policy_id", "trace_id", "span_id",
+            unique=True,
+        ),
     )
 
 

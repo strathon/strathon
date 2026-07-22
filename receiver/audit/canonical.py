@@ -31,6 +31,7 @@ Tests live in ``tests/test_audit_canonical.py``.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import uuid
 from datetime import datetime, timezone
@@ -82,6 +83,24 @@ def _normalize(value: Any) -> Any:
         as_utc = value.astimezone(timezone.utc)
         return as_utc.isoformat(timespec="microseconds")
     if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(
+        value,
+        (
+            ipaddress.IPv4Address,
+            ipaddress.IPv6Address,
+            ipaddress.IPv4Network,
+            ipaddress.IPv6Network,
+        ),
+    ):
+        # psycopg3 auto-decodes Postgres INET/CIDR columns into ipaddress
+        # objects on read, but the value written at insert time was a plain
+        # str (request.client.host). str() round-trips byte-for-byte for the
+        # canonical dotted-quad/colon-hex forms every real socket peer
+        # address from an ASGI server is already in, which is the only form
+        # this ever sees in practice. Without this, verify_event crashed
+        # with an unhandled TypeError on any event with a recorded
+        # source_ip -- i.e. nearly every real audit event.
         return str(value)
     if isinstance(value, (bytes, bytearray, memoryview)):
         return "0x" + bytes(value).hex()

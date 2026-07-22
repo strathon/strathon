@@ -439,14 +439,20 @@ CREATE TRIGGER trg_project_settings_updated_at
     BEFORE UPDATE ON project_settings 
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
--- ============================================================
--- SEED DATA (default project for fresh installs)
--- ============================================================
+"""
 
-INSERT INTO projects (id, name, slug) 
+# Default project for fresh installs. Kept out of _UPGRADE_SQL because it is
+# a self-host convenience, not schema: cloud is multi-tenant with projects
+# created through signup/provisioning, so seeding a shared "Default" project
+# there would hand the first registrant ownership of a project that bypasses
+# provisioning entirely (the register flow auto-assigns the first user as
+# owner of the project with slug 'default' when it exists). Same mode gate
+# as the dev-key seed in migration 003.
+_SEED_DEFAULT_PROJECT_SQL = r"""
+INSERT INTO projects (id, name, slug)
 VALUES ('00000000-0000-0000-0000-000000000001', 'Default', 'default');
 
-INSERT INTO project_settings (project_id) 
+INSERT INTO project_settings (project_id)
 VALUES ('00000000-0000-0000-0000-000000000001');
 """
 
@@ -477,6 +483,12 @@ DROP EXTENSION IF EXISTS "pgcrypto";
 
 def upgrade() -> None:
     op.execute(_UPGRADE_SQL)
+
+    import os
+
+    mode = os.environ.get("STRATHON_MODE", "self-hosted").strip().lower()
+    if mode != "cloud":
+        op.execute(_SEED_DEFAULT_PROJECT_SQL)
 
 
 def downgrade() -> None:
