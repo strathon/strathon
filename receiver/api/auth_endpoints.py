@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ipaddress as _ipaddress
 import logging
+import math
 import re
 from typing import Optional
 from uuid import UUID
@@ -104,6 +105,28 @@ def _validate_password(password: str) -> None:
         )
 
 
+async def _rate_limit(request: Request, bucket: str, detail: str) -> None:
+    """Consume one token from ``bucket``; raise 429 when the bucket is empty.
+
+    All the unauthenticated auth endpoints share one token-bucket store
+    (app.state.login_rate_limiter) and differ only by bucket key, so the
+    check lives in one place: a new endpoint gets a limiter by naming a
+    bucket, and none of them can drift apart in how they answer a refusal.
+    The store is absent only if the app was built without it, in which case
+    there is nothing to enforce.
+    """
+    limiter = getattr(request.app.state, "login_rate_limiter", None)
+    if limiter is None:
+        return
+    allowed, _remaining, retry_after = await limiter.consume(bucket)
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=detail,
+            headers={"Retry-After": str(math.ceil(retry_after))},
+        )
+
+
 def _client_ip(request: Request) -> str | None:
     client = request.client
     if client is None or not client.host:
@@ -130,6 +153,29 @@ async def register(
     Subsequent users are created without project membership — an existing
     owner or admin must invite them.
     """
+    # Account creation is at least as abusable as password guessing, so it
+    # must not be the one unauthenticated endpoint without a limiter. Two
+    # layers: a global cap, because a distributed flood arrives from
+    # addresses a per-IP bucket never sees, and the per-IP bucket for the
+    # ordinary single-source case.
+    global_limiter = getattr(request.app.state, "register_global_limiter", None)
+    if global_limiter is not None:
+        allowed, _remaining, retry_after = await global_limiter.consume(
+            "register:__global__"
+        )
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Registration is temporarily rate limited. Try again later.",
+                headers={"Retry-After": str(math.ceil(retry_after))},
+            )
+
+    await _rate_limit(
+        request,
+        f"register:{_client_ip(request) or 'unknown'}",
+        "Too many registration attempts. Try again later.",
+    )
+
     # Check if registration is enabled
     from config import get_settings
     _settings = get_settings()
@@ -250,18 +296,12 @@ async def login(
     a dummy Argon2 verification even when the email doesn't exist, to
     prevent timing-based user enumeration.
     """
-    # Per-IP login rate limiting
     client_ip = _client_ip(request) or "unknown"
-    login_limiter = getattr(request.app.state, "login_rate_limiter", None)
-    if login_limiter is not None:
-        allowed, remaining, retry_after = await login_limiter.consume(client_ip)
-        if not allowed:
-            import math
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Too many login attempts. Try again later.",
-                headers={"Retry-After": str(math.ceil(retry_after))},
-            )
+    await _rate_limit(
+        request,
+        f"login:{client_ip}",
+        "Too many login attempts. Try again later.",
+    )
 
     email = body.email.strip().lower()
 
@@ -758,6 +798,25 @@ async def mfa_verify_login(
     import repositories.mfa as mfa_repo
     valid = await mfa_repo.verify_mfa_code(session, sess.user_id, body.code)
     if not valid:
+        # Hard cap on guesses per MFA token. TOTP is a 6-digit space with
+        # a +-1 validity window (~3 live codes per million), so unlimited
+        # attempts against a 5-minute token -- renewable by re-login --
+        # would make MFA brute-forceable for anyone holding the password.
+        # After 5 failures the token is destroyed; getting a fresh one
+        # requires another login, which is itself per-IP rate limited and
+        # account-lockout protected.
+        _mfa_limiter = getattr(request.app.state, "login_rate_limiter", None)
+        _exhausted = False
+        if _mfa_limiter is not None:
+            _allowed, _, _ = await _mfa_limiter.consume(f"mfa:{sess.id}")
+            _exhausted = not _allowed
+        if _exhausted:
+            await sessions_repo.delete_session(session, sess.id)
+            await session.commit()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Too many incorrect MFA codes. Log in again.",
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid MFA code",
@@ -805,6 +864,14 @@ async def request_password_reset(
     Always returns 200 regardless of whether the email exists, to
     prevent user enumeration.
     """
+    # Without a limiter this endpoint can email-bomb a known address -- every
+    # call sends a reset mail -- and churn reset tokens.
+    await _rate_limit(
+        request,
+        f"reset:{_client_ip(request) or 'unknown'}",
+        "Too many password reset requests. Try again later.",
+    )
+
     import os
     smtp_host = os.environ.get("STRATHON_SMTP_HOST")
 

@@ -12,10 +12,22 @@ Naming follows the receiver's existing env-var convention:
 
 from __future__ import annotations
 
+import os
+
 from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# The env vars a hardened deployment must have. Each is separately enforced at
+# its point of use; this is the list the boot gate checks so a missing key is
+# one clear startup error rather than a 500 on first use.
+SECURITY_KEY_VARS: tuple[str, ...] = (
+    "STRATHON_AUDIT_HMAC_KEY",
+    "STRATHON_ENCRYPTION_KEY",
+    "STRATHON_PASSWORD_PEPPER",
+)
 
 
 class Settings(BaseSettings):
@@ -58,6 +70,15 @@ class Settings(BaseSettings):
     # the switch entitlement checks consult.
     mode: Literal["self-hosted", "cloud"] = Field(
         default="self-hosted", alias="STRATHON_MODE"
+    )
+
+    # Hard-fail on missing security keys. When true, the receiver REFUSES
+    # to start without STRATHON_AUDIT_HMAC_KEY, STRATHON_ENCRYPTION_KEY,
+    # and STRATHON_PASSWORD_PEPPER instead of falling back to dev defaults
+    # with a warning. Always enforced in cloud mode regardless of this
+    # flag. Set true for any internet-facing self-host deployment.
+    require_security_keys: bool = Field(
+        default=False, alias="STRATHON_REQUIRE_SECURITY_KEYS"
     )
 
     # Public base URL of this receiver, used to build links in outbound
@@ -178,6 +199,22 @@ class Settings(BaseSettings):
             "succession."
         ),
     )
+    rate_limit_trust_forwarded_for: bool = Field(
+        default=False, alias="STRATHON_RATE_LIMIT_TRUST_FORWARDED_FOR",
+        description=(
+            "Whether to trust the X-Forwarded-For header when deriving "
+            "the per-IP rate-limit bucket for unauthenticated requests. "
+            "Default false: use the real socket peer address. Trusting "
+            "X-Forwarded-For when NOTHING sanitizes it lets an attacker "
+            "send a unique forged value per request and get a fresh "
+            "bucket each time, defeating the limiter entirely (e.g. login "
+            "brute-force protection). Set true ONLY when Strathon runs "
+            "behind a trusted reverse proxy that overwrites the header "
+            "with the real client IP (nginx real_ip, an ALB, Cloudflare, "
+            "etc.). Authenticated requests key off the API key and are "
+            "unaffected by this setting."
+        ),
+    )
 
     # ---- RBAC / Authentication ----
 
@@ -203,6 +240,17 @@ class Settings(BaseSettings):
             "Maximum login attempts per IP address within the rate limit "
             "window. After this many attempts, further logins from the "
             "same IP are rejected with 429 until the bucket refills."
+        ),
+    )
+    register_global_rate_limit_per_minute: int = Field(
+        default=30, alias="STRATHON_REGISTER_GLOBAL_LIMIT_PER_MINUTE", ge=0,
+        description=(
+            "Global cap on registrations per minute across ALL source "
+            "IPs. Per-IP limiting stops single-source abuse; this is the "
+            "backstop against distributed registration floods, where "
+            "every request arrives from a different address. For a "
+            "self-host instance, sustained registration above this rate "
+            "is essentially always an attack. 0 disables the global cap."
         ),
     )
     login_rate_limit_window_seconds: int = Field(
@@ -302,6 +350,31 @@ class Settings(BaseSettings):
     def is_cloud(self) -> bool:
         """True on the multi-tenant hosted deployment. Self-host is False."""
         return self.mode == "cloud"
+
+    @property
+    def missing_security_keys(self) -> list[str]:
+        """The security keys this deployment requires but does not have.
+
+        Single source of truth for *which* keys are security-critical. The
+        boot gate in main.py reports these, and the lazy gates in
+        repositories/audit.py, encryption.py, and password.py each enforce
+        their own. Keeping the list here means adding a fourth key updates
+        the boot check for free, instead of silently passing it.
+        """
+        return [
+            name for name in SECURITY_KEY_VARS if not os.environ.get(name)
+        ]
+
+    @property
+    def requires_security_keys(self) -> bool:
+        """True when missing security keys must be a hard failure.
+
+        Cloud always hard-fails (tenant data must never silently fall back
+        to dev keys or plaintext). Self-host opts into the same posture
+        with STRATHON_REQUIRE_SECURITY_KEYS=true; otherwise it keeps the
+        graceful warn-and-degrade behavior for local trials.
+        """
+        return self.is_cloud or self.require_security_keys
 
 
 # Lazy singleton via FastAPI's recommended @lru_cache(get_settings) pattern

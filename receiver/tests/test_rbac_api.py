@@ -41,6 +41,23 @@ def client():
         yield c
 
 
+@pytest.fixture(autouse=True)
+def _fresh_rate_limit_buckets(client):
+    """Clear rate-limiter buckets before each test.
+
+    Registration and login share one per-IP token-bucket store, and every
+    test in this module talks from the same TestClient IP -- without a
+    reset, earlier tests' registrations exhaust the bucket and unrelated
+    tests start seeing 429s. Clearing buckets (not replacing the store)
+    keeps production wiring intact; the two rate-limit tests still prove
+    the limit by exhausting it within a single test.
+    """
+    limiter = getattr(client.app.state, "login_rate_limiter", None)
+    if limiter is not None:
+        limiter._buckets.clear()
+    yield
+
+
 def _unique_email() -> str:
     """Generate a unique test email to avoid collisions across test runs."""
     return f"test_{uuid.uuid4().hex[:12]}@example.com"
@@ -592,3 +609,112 @@ def test_budgets_are_isolated_per_project(client):
         assert bname in new_names, f"budget missing from its own project: {new_names}"
     finally:
         _cleanup_user(email)
+
+
+def test_session_access_denied_for_deleted_project(client):
+    """Session auth must fail closed for a soft-deleted project.
+
+    Membership rows survive a project soft-delete, so without a liveness
+    check at the auth boundary a session holder could keep browsing and
+    writing to a deleted project by pinning X-Project-Id to it. This is
+    the session-auth twin of delete_project revoking the project's API
+    keys.
+    """
+    email = _unique_email()
+    reg = client.post(
+        "/v1/auth/register",
+        json={"email": email, "password": "Test1234!pass", "display_name": "Del"},
+    )
+    assert reg.status_code == 201, reg.text
+    token = reg.json()["token"]
+    default_pid = _get_default_project_id(client)
+    _ensure_project_owner(email, default_pid)
+    try:
+        slug = f"delsess-{uuid.uuid4().hex[:8]}"
+        cr = client.post(
+            "/v1/projects",
+            headers=_session_headers(token, default_pid),
+            json={"name": "Delete Session Target", "slug": slug},
+        )
+        assert cr.status_code == 201, cr.text
+        new_pid = cr.json()["id"]
+
+        # Session access to the live project works.
+        r = client.get("/v1/policies", headers=_session_headers(token, new_pid))
+        assert r.status_code == 200, r.text
+
+        # Soft-delete the project.
+        d = client.delete(
+            f"/v1/projects/{slug}",
+            headers={"Authorization": f"Bearer {DEV_KEY}"},
+        )
+        assert d.status_code == 204, d.text
+
+        # The membership row still exists, but auth must now refuse.
+        r = client.get("/v1/policies", headers=_session_headers(token, new_pid))
+        assert r.status_code == 403, (
+            f"expected 403 for deleted project, got {r.status_code}: {r.text}"
+        )
+    finally:
+        _cleanup_user(email)
+
+
+def test_register_rate_limiting(client):
+    """After exhausting the per-IP limit, further registrations get 429.
+
+    Registration shares the login limiter store (separate bucket keyed
+    register:<ip>) -- account creation must not be the one
+    unauthenticated endpoint without a limiter.
+    """
+    responses = []
+    emails = []
+    for _ in range(10):
+        email = _unique_email()
+        emails.append(email)
+        r = client.post(
+            "/v1/auth/register",
+            json={"email": email, "password": "Test1234!pass", "display_name": "R"},
+        )
+        responses.append(r.status_code)
+
+    assert 429 in responses, f"Expected 429 in responses but got: {set(responses)}"
+    for e in emails:
+        _cleanup_user(e)
+
+
+def test_register_global_rate_limit(client):
+    """The global cap trips even when per-IP buckets never exhaust.
+
+    Simulates a distributed flood: per-IP limiting can't see requests
+    that each arrive from a different address, so a separate global
+    bucket caps total registration throughput.
+    """
+    from rate_limit import RateLimiterStore
+
+    old_global = getattr(client.app.state, "register_global_limiter", None)
+    old_per_ip = getattr(client.app.state, "login_rate_limiter", None)
+    client.app.state.register_global_limiter = RateLimiterStore(
+        capacity=2, refill_per_second=0.001,
+    )
+    # Huge per-IP store so only the global bucket can trip.
+    client.app.state.login_rate_limiter = RateLimiterStore(
+        capacity=1000, refill_per_second=1000,
+    )
+    emails = []
+    try:
+        codes = []
+        for _ in range(3):
+            email = _unique_email()
+            emails.append(email)
+            r = client.post(
+                "/v1/auth/register",
+                json={"email": email, "password": "Test1234!pass", "display_name": "G"},
+            )
+            codes.append(r.status_code)
+        assert codes[0] == 201 and codes[1] == 201, codes
+        assert codes[2] == 429, codes
+    finally:
+        client.app.state.register_global_limiter = old_global
+        client.app.state.login_rate_limiter = old_per_ip
+        for e in emails:
+            _cleanup_user(e)

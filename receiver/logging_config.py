@@ -90,6 +90,13 @@ def configure_logging() -> str:
     for h in list(root.handlers):
         root.removeHandler(h)
 
+    # Alembic registers its autogenerate plugins on import and logs each one
+    # at INFO ("setup plugin alembic.autogenerate..."). With auto-migrate on
+    # (the default) that is six lines of noise at the top of every boot.
+    # Keep migration progress (alembic.runtime.migration) at INFO; quiet
+    # only the plugin chatter.
+    logging.getLogger("alembic.runtime.plugins").setLevel(logging.WARNING)
+
     handler = logging.StreamHandler(sys.stderr)
     if fmt_env == "json":
         handler.setFormatter(JsonFormatter())

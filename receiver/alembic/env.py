@@ -20,6 +20,7 @@ tables, and the generated ``search_vector`` column) are excluded via
 
 from __future__ import annotations
 
+import logging
 import os
 from logging.config import fileConfig
 
@@ -30,9 +31,16 @@ from sqlalchemy import engine_from_config, pool
 # Alembic Config object, gives access to alembic.ini
 config = context.config
 
-# Set up logging from alembic.ini
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# Set up logging from alembic.ini -- but only when running under the
+# alembic CLI. When the receiver runs migrations inside its own process
+# at startup (STRATHON_AUTO_MIGRATE), its logging is already configured;
+# applying alembic.ini's fileConfig there would (a) disable existing
+# loggers by default, silently swallowing every receiver log line after
+# the migration step (including the security-key startup warnings), and
+# (b) install alembic.ini's root handler, switching the log format
+# mid-boot. Root having handlers is the "already configured" signal.
+if config.config_file_name is not None and not logging.getLogger().hasHandlers():
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 
 def _resolve_database_url() -> str:
@@ -149,6 +157,21 @@ def _include_object(object_, name, type_, reflected, compare_to):
         return False
     if type_ == "index" and name == "idx_spans_search_vector":
         return False
+
+    # Raw-SQL-only tables that intentionally have no ORM model counterpart.
+    # `pending_ownership_transfers` is a small consent-flow table for owner
+    # transfers, accessed exclusively via raw SQL from
+    # `api/dashboard_convenience.py`. Without this exclusion, `alembic check`
+    # flags it as a "removed table" and `alembic revision --autogenerate`
+    # generates a migration that DROPS the live table -- a data-loss footgun
+    # if applied without careful review. Excluding it here matches how the
+    # audit schema (also raw-SQL-managed) is handled above.
+    if type_ == "table" and name == "pending_ownership_transfers":
+        return False
+    if hasattr(object_, "table"):
+        _parent = getattr(object_.table, "name", None)
+        if _parent == "pending_ownership_transfers":
+            return False
 
     return True
 

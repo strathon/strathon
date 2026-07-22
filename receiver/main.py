@@ -271,24 +271,55 @@ async def _restore_webhook_keystore() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start up the receiver: migrations, default project, retention task."""
+    # When security keys are enforced (cloud mode, or
+    # STRATHON_REQUIRE_SECURITY_KEYS=true), missing keys are a hard boot
+    # failure: refuse to serve rather than warn. This runs before anything
+    # else (even migrations) so the operator sees one clear error
+    # immediately, not a degraded server that 500s later.
+    from config import get_settings as _get_settings
+
+    boot_settings = _get_settings()
+    if boot_settings.requires_security_keys:
+        missing = boot_settings.missing_security_keys
+        if missing:
+            raise RuntimeError(
+                f"{', '.join(missing)} must be set: this deployment "
+                "enforces security keys (cloud mode, or "
+                "STRATHON_REQUIRE_SECURITY_KEYS=true). Generation commands "
+                "are in receiver/.env.example and "
+                "docs/self-hosting.md#security-keys."
+            )
+
     # Run migrations FIRST. Background ingest paths assume the schema is
     # current; nothing in this lifespan should run before the DB is ready.
     await _run_migrations()
 
     logger.info("Strathon receiver starting")
 
-    # Security warnings for missing env vars.
+    # Security warnings for missing env vars. Each includes the exact
+    # generation command so an operator seeing this in logs can fix it
+    # in place without hunting through docs.
     if not os.environ.get("STRATHON_ENCRYPTION_KEY"):
         logger.warning(
-            "STRATHON_ENCRYPTION_KEY not set. TOTP secrets stored unencrypted."
+            "STRATHON_ENCRYPTION_KEY not set. TOTP secrets are stored "
+            "unencrypted at rest. Generate a Fernet key: "
+            "python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
         )
     if not os.environ.get("STRATHON_AUDIT_HMAC_KEY"):
         logger.warning(
-            "STRATHON_AUDIT_HMAC_KEY not set. Audit hash chain disabled."
+            "STRATHON_AUDIT_HMAC_KEY not set. Audit hash chain will use a "
+            "well-known DEV key -- suitable for local development only; the "
+            "audit tamper-evidence guarantee is defeated for anyone who "
+            "knows the key. Generate a real 32-byte key before production: "
+            "python -c 'import secrets; print(secrets.token_hex(32))'"
         )
     if not os.environ.get("STRATHON_PASSWORD_PEPPER"):
         logger.warning(
-            "STRATHON_PASSWORD_PEPPER not set. Consider adding for defense-in-depth."
+            "STRATHON_PASSWORD_PEPPER not set. Passwords will still be "
+            "Argon2id-hashed with per-password random salts, but adding a "
+            "pepper makes hash cracking materially harder if the DB is "
+            "leaked. Generate one: "
+            "python -c 'import secrets; print(secrets.token_hex(32))'"
         )
     from config import get_settings
     _settings = get_settings()
@@ -337,6 +368,11 @@ async def lifespan(app: FastAPI):
     # When disabled the attribute is set to None and the middleware
     # short-circuits.
     from config import settings as receiver_settings_for_rl
+    # Surface the XFF-trust decision on app.state so both the general and
+    # login rate-limit paths derive client identity consistently.
+    app.state.rate_limit_trust_forwarded_for = (
+        receiver_settings_for_rl.rate_limit_trust_forwarded_for
+    )
     if receiver_settings_for_rl.rate_limit_enabled:
         from rate_limit import RateLimiterStore
         app.state.rate_limiter = RateLimiterStore(
@@ -371,6 +407,20 @@ async def lifespan(app: FastAPI):
         receiver_settings_for_rl.login_rate_limit_attempts,
         receiver_settings_for_rl.login_rate_limit_window_seconds,
     )
+
+    # Global registration cap: a separate store because RateLimiterStore
+    # applies one capacity to every bucket, and the global cap needs a
+    # different capacity than the per-IP one. Backstop for distributed
+    # floods that per-IP limiting cannot see.
+    _reg_global = receiver_settings_for_rl.register_global_rate_limit_per_minute
+    if _reg_global > 0:
+        app.state.register_global_limiter = _RLS(
+            capacity=_reg_global,
+            refill_per_second=_reg_global / 60.0,
+        )
+        logger.info("Registration global cap: %d per minute", _reg_global)
+    else:
+        app.state.register_global_limiter = None
 
     # Retention background task
     app.state.retention_config = retention.RetentionConfig.from_env()

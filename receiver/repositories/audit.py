@@ -62,10 +62,11 @@ _DEV_KEY: bytes = b"strathon_dev_audit_key_DO_NOT_USE_IN_PRODUCTION_xx"
 def _get_hmac_key() -> bytes:
     """Return the configured audit HMAC key or a dev fallback.
 
-    In cloud mode an empty key raises ``RuntimeError`` — fail loudly
-    rather than silently use a known dev key. In self-hosted mode we
-    substitute a deterministic key with a one-time warning logged, so
-    the receiver is usable out of the box.
+    When security keys are enforced (cloud mode, or
+    STRATHON_REQUIRE_SECURITY_KEYS=true) an empty key raises
+    ``RuntimeError`` — fail loudly rather than silently use a known dev
+    key. Otherwise self-host substitutes a deterministic key with a
+    one-time warning logged, so the receiver is usable out of the box.
     """
     settings = get_settings()
     raw = settings.audit_hmac_key
@@ -78,7 +79,7 @@ def _get_hmac_key() -> bytes:
                 "`python -c 'import secrets; print(secrets.token_hex(32))'`."
             )
         return key
-    if not settings.is_cloud:
+    if not settings.requires_security_keys:
         if not getattr(_get_hmac_key, "_warned", False):
             logger.warning(
                 "STRATHON_AUDIT_HMAC_KEY is empty; using dev fallback. "
@@ -87,7 +88,8 @@ def _get_hmac_key() -> bytes:
             _get_hmac_key._warned = True  # type: ignore[attr-defined]
         return _DEV_KEY
     raise RuntimeError(
-        "STRATHON_AUDIT_HMAC_KEY is required in cloud mode. "
+        "STRATHON_AUDIT_HMAC_KEY is required here (cloud mode, or "
+        "STRATHON_REQUIRE_SECURITY_KEYS=true). "
         "Generate with `python -c 'import secrets; print(secrets.token_hex(32))'`."
     )
 

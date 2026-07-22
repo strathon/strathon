@@ -1,8 +1,14 @@
 """Column-level encryption for sensitive data at rest.
 
-Encrypts TOTP secrets, webhook signing secrets, and notification
-channel credentials before storing in Postgres. Uses Fernet
+Encrypts TOTP secrets before storing in Postgres. Uses Fernet
 (AES-256-CBC + HMAC-SHA256) from the cryptography library.
+
+Scope note: this module currently protects TOTP secrets only (see
+repositories/mfa.py, the sole caller). Webhook signing secrets are
+never stored in recoverable form at all -- only a SHA-256 hash plus a
+display prefix (models/webhooks.py). Notification channel config
+(e.g. Slack webhook URLs) is stored as plaintext JSONB; encrypting it
+is part of the cloud-mode envelope-encryption work.
 
 Key management:
   STRATHON_ENCRYPTION_KEY env var (Fernet key, base64).
@@ -37,9 +43,20 @@ def _get_fernet():
     _initialized = True
     key = os.environ.get("STRATHON_ENCRYPTION_KEY")
     if not key:
+        # Mirror the audit HMAC key's cloud gate (repositories/audit.py):
+        # in multi-tenant cloud mode a missing key means tenant TOTP
+        # secrets would land in plaintext -- fail loudly, never degrade.
+        from config import get_settings
+        _settings = get_settings()
+        if _settings.requires_security_keys:
+            raise RuntimeError(
+                "STRATHON_ENCRYPTION_KEY is required here (cloud mode, or "
+                "STRATHON_REQUIRE_SECURITY_KEYS=true). Refusing to store "
+                "TOTP secrets in plaintext."
+            )
         logger.warning(
             "STRATHON_ENCRYPTION_KEY not set. Sensitive columns "
-            "(TOTP secrets, webhook secrets) stored in plaintext. "
+            "(TOTP secrets) stored in plaintext. "
             "Generate a key: python -c "
             '"from cryptography.fernet import Fernet; '
             'print(Fernet.generate_key().decode())"'

@@ -389,26 +389,46 @@ def test_ip_keyed_request_uses_ip_bucket(client):
         main.app.state.rate_limiter = previous
 
 
-def test_x_forwarded_for_overrides_direct_ip(client):
-    """When X-Forwarded-For is present, its leftmost value is used as
-    the IP. Two different XFFs should produce independent buckets."""
+def test_x_forwarded_for_ignored_by_default(client):
+    """By default X-Forwarded-For is NOT trusted (an attacker could forge a
+    fresh value per request to escape the limit). Two different forged XFFs
+    from the same socket peer must land in the SAME bucket."""
     previous = _install_tiny_limiter(client, capacity=1, rps=0.01)
     try:
-        # Drain bucket for the first claimed IP.
+        # Drain the bucket with one forged XFF.
         client.get("/v1/policies", headers={"X-Forwarded-For": "10.0.0.1"})
-        # Second request from same XFF should be throttled regardless
-        # of auth state.
-        r2 = client.get("/v1/policies", headers={"X-Forwarded-For": "10.0.0.1"})
-        assert r2.status_code == 429, r2.text
-
-        # A different XFF gets a fresh bucket.
-        r3 = client.get("/v1/policies", headers={"X-Forwarded-For": "10.0.0.2"})
-        assert r3.status_code != 429, (
-            f"different XFF should have its own bucket; got {r3.status_code}"
+        # A DIFFERENT forged XFF must still be throttled, because we key off
+        # the real socket peer, not the attacker-controlled header.
+        r2 = client.get("/v1/policies", headers={"X-Forwarded-For": "10.0.0.2"})
+        assert r2.status_code == 429, (
+            f"forged XFF must not grant a fresh bucket by default; got {r2.status_code}"
         )
     finally:
         import main
         main.app.state.rate_limiter = previous
+
+
+def test_x_forwarded_for_honored_when_trusted(client):
+    """When the operator asserts a trusted proxy is in front
+    (STRATHON_RATE_LIMIT_TRUST_FORWARDED_FOR=true), the leftmost XFF value is
+    used, so distinct real clients get independent buckets."""
+    import main
+    previous = _install_tiny_limiter(client, capacity=1, rps=0.01)
+    prev_trust = getattr(main.app.state, "rate_limit_trust_forwarded_for", False)
+    main.app.state.rate_limit_trust_forwarded_for = True
+    try:
+        client.get("/v1/policies", headers={"X-Forwarded-For": "10.0.0.1"})
+        r2 = client.get("/v1/policies", headers={"X-Forwarded-For": "10.0.0.1"})
+        assert r2.status_code == 429, r2.text
+        # A different real client (as reported by the trusted proxy) gets a
+        # fresh bucket.
+        r3 = client.get("/v1/policies", headers={"X-Forwarded-For": "10.0.0.2"})
+        assert r3.status_code != 429, (
+            f"different trusted XFF should have its own bucket; got {r3.status_code}"
+        )
+    finally:
+        main.app.state.rate_limiter = previous
+        main.app.state.rate_limit_trust_forwarded_for = prev_trust
 
 
 def test_disabled_rate_limiter_passes_through(client):

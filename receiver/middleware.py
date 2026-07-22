@@ -84,7 +84,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             # or we're in a test that didn't initialize the store.
             return await call_next(request)
 
-        identifier, key_type = _identifier_for(request)
+        identifier, key_type = _identifier_for(
+            request,
+            trust_forwarded_for=bool(
+                getattr(request.app.state, "rate_limit_trust_forwarded_for", False)
+            ),
+        )
         now = time.monotonic()
         allowed, remaining, retry_after = await store.consume(identifier, now=now)
 
@@ -119,7 +124,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def _identifier_for(request: Request) -> tuple[str, str]:
+def _identifier_for(
+    request: Request, *, trust_forwarded_for: bool = False
+) -> tuple[str, str]:
     """Return ``(identifier, key_type)`` for the rate-limit bucket.
 
     ``key_type`` is one of ``"api_key"`` or ``"ip"`` and is recorded on
@@ -135,14 +142,19 @@ def _identifier_for(request: Request) -> tuple[str, str]:
         digest = hashlib.sha256(auth.encode("utf-8", errors="replace")).hexdigest()
         return f"key:{digest}", "api_key"
 
-    # X-Forwarded-For: leftmost is conventionally the original client.
-    # We trust whatever the proxy in front of us claims; operators
-    # without a proxy in front will see direct-connection IPs anyway.
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        ip = xff.split(",", 1)[0].strip()
-        if ip:
-            return f"ip:{ip}", "ip"
+    # X-Forwarded-For is attacker-controllable unless a trusted proxy in
+    # front overwrites it. Only honor it when the operator has explicitly
+    # asserted (via STRATHON_RATE_LIMIT_TRUST_FORWARDED_FOR) that such a
+    # proxy exists. Otherwise an attacker sends a unique forged XFF per
+    # request, lands in a fresh bucket every time, and the limiter -- the
+    # thing protecting the login endpoint from brute force -- does nothing.
+    if trust_forwarded_for:
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            # Leftmost is conventionally the original client.
+            ip = xff.split(",", 1)[0].strip()
+            if ip:
+                return f"ip:{ip}", "ip"
 
     client = request.client
     if client is not None:

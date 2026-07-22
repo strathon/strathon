@@ -67,6 +67,18 @@ def _apply_pepper(password: str) -> str:
     """
     import os
     pepper = os.environ.get("STRATHON_PASSWORD_PEPPER", "")
+    if not pepper:
+        # Mirror the audit HMAC key's cloud gate (repositories/audit.py):
+        # in multi-tenant cloud mode, silently hashing without the pepper
+        # would quietly weaken every tenant credential -- fail loudly.
+        from config import get_settings
+        _settings = get_settings()
+        if _settings.requires_security_keys:
+            raise RuntimeError(
+                "STRATHON_PASSWORD_PEPPER is required here (cloud mode, or "
+                "STRATHON_REQUIRE_SECURITY_KEYS=true). Refusing to hash "
+                "passwords without it."
+            )
     return pepper + password if pepper else password
 
 
