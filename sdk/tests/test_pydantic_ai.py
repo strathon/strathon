@@ -164,6 +164,17 @@ def _try_import_firewall():
 class TestStrathonFirewallBeforeToolExecute:
     """Test policy enforcement in before_tool_execute."""
 
+    @pytest.fixture(autouse=True)
+    def _require_pydantic_ai(self):
+        """Skip this class when the optional extra is absent.
+
+        Each test imports SkipToolExecution from pydantic_ai at the top of
+        its body -- before _make_firewall() can reach its pytest.skip() --
+        so without this guard they fail with ModuleNotFoundError instead of
+        skipping. Guarding the class also covers any test added later.
+        """
+        pytest.importorskip("pydantic_ai")
+
     def _make_firewall(self, *, block=False, steer=False, throttle=False,
                        message=None, replacement=None, policy_name=None):
         cls = _try_import_firewall()

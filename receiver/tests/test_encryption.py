@@ -7,6 +7,29 @@ import os
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolate_encryption_state(monkeypatch):
+    """Contain this file's env and singleton writes to one test.
+
+    Each test here assigns STRATHON_ENCRYPTION_KEY directly and resets the
+    encryption module's memoized Fernet (``_initialized`` /
+    ``_fernet_instance``). Direct assignment is not rolled back, so without
+    this fixture the key outlives the file and every later test in the
+    process runs with encryption switched on and a half-reset singleton --
+    behaviour that then depends on test order. That is precisely the
+    shared-state mutation behind the long-standing CI flake.
+
+    Registering the env var and both globals with monkeypatch makes pytest
+    restore whatever the test bodies overwrite, at teardown.
+    """
+    import encryption
+
+    monkeypatch.delenv("STRATHON_ENCRYPTION_KEY", raising=False)
+    monkeypatch.setattr(encryption, "_initialized", False, raising=False)
+    monkeypatch.setattr(encryption, "_fernet_instance", None, raising=False)
+    yield
+
+
 def test_encrypt_decrypt_roundtrip():
     """Encrypted value decrypts to original."""
     from cryptography.fernet import Fernet

@@ -16,6 +16,8 @@ import secrets
 import uuid
 
 import pytest
+
+from conftest import purge_audit_events
 from sqlalchemy import text
 
 import repositories.audit as audit_repo
@@ -130,14 +132,14 @@ async def test_seal_anchor_writes_for_nonempty_interval(async_engine):
     # subsequent test runs see a clean slate. Disable the trigger,
     # delete, re-enable.
     async with AsyncSession(async_engine, expire_on_commit=False) as s:
-        for stmt in (
-            "ALTER TABLE audit.events DISABLE TRIGGER events_no_delete",
-            f"DELETE FROM audit.events WHERE project_id = '{pid}'",
-            "ALTER TABLE audit.events ENABLE TRIGGER events_no_delete",
-            f"DELETE FROM audit.anchors WHERE last_sequence >= 0 "
-            f"AND event_count = {summary['event_count']}",
-        ):
-            await s.execute(text(stmt))
+        await purge_audit_events(s, pid)
+        await s.execute(
+            text(
+                "DELETE FROM audit.anchors WHERE last_sequence >= 0 "
+                "AND event_count = :n"
+            ),
+            {"n": summary["event_count"]},
+        )
         await s.commit()
 
 
@@ -185,14 +187,5 @@ async def test_seal_anchor_only_covers_new_events(async_engine):
 
     # Cleanup test data.
     async with AsyncSession(async_engine, expire_on_commit=False) as s:
-        await s.execute(text(
-            "ALTER TABLE audit.events DISABLE TRIGGER events_no_delete"
-        ))
-        await s.execute(
-            text("DELETE FROM audit.events WHERE project_id = :pid"),
-            {"pid": pid},
-        )
-        await s.execute(text(
-            "ALTER TABLE audit.events ENABLE TRIGGER events_no_delete"
-        ))
+        await purge_audit_events(s, pid)
         await s.commit()

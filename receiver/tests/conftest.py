@@ -163,9 +163,22 @@ async def async_engine():
     async with engine.begin() as conn:
         # Disable audit immutability triggers in the test DB so test cleanup
         # (DELETE FROM audit.events) works. Production triggers prevent
-        # UPDATE/DELETE on audit tables.
+        # UPDATE/DELETE on audit tables. audit.events' protection is
+        # events_no_update/events_no_delete/events_no_truncate (migration
+        # 010's audit.deny_mutation()) -- migration 031 removed a redundant
+        # duplicate (trg_events_immutable, migration 021's
+        # audit.prevent_mutation(), a strict subset of 010's coverage) that
+        # used to also need disabling here. audit.anchors was never covered
+        # by 010, so trg_anchors_immutable (still from 021) remains its only
+        # guard and still needs disabling for cleanup.
         await conn.execute(text(
-            "ALTER TABLE audit.events DISABLE TRIGGER trg_events_immutable"
+            "ALTER TABLE audit.events DISABLE TRIGGER events_no_update"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE audit.events DISABLE TRIGGER events_no_delete"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE audit.events DISABLE TRIGGER events_no_truncate"
         ))
         await conn.execute(text(
             "ALTER TABLE audit.anchors DISABLE TRIGGER trg_anchors_immutable"
@@ -271,3 +284,86 @@ async def isolated_project(session) -> AsyncGenerator:
     await session.flush()
 
     yield project_id
+
+
+async def purge_audit_events(session, project_id) -> None:
+    """Delete a project's audit events inside a test.
+
+    audit.events is append-only by design and guards itself TWICE (migration
+    010): BEFORE triggers that fire even for superusers, and an explicit
+    REVOKE of UPDATE/DELETE/TRUNCATE from the app role. A cleanup that only
+    disables the trigger still hits "permission denied for table events" --
+    it silently depends on the suite running as a Postgres superuser, which
+    bypasses privilege checks. Anyone running the tests against the
+    least-privilege role the docs recommend for production then sees three
+    mysterious failures.
+
+    Lift both guards, delete, and restore the append-only posture. The table
+    owner can always re-grant to itself, so this needs no superuser; under a
+    superuser the grant/revoke is a harmless no-op.
+    """
+    from sqlalchemy import text as _text
+
+    await session.execute(_text("GRANT DELETE ON audit.events TO CURRENT_USER"))
+    await session.execute(
+        _text("ALTER TABLE audit.events DISABLE TRIGGER events_no_delete")
+    )
+    try:
+        await session.execute(
+            _text("DELETE FROM audit.events WHERE project_id = :pid"),
+            {"pid": str(project_id)},
+        )
+    finally:
+        await session.execute(
+            _text("ALTER TABLE audit.events ENABLE TRIGGER events_no_delete")
+        )
+        await session.execute(
+            _text("REVOKE DELETE ON audit.events FROM CURRENT_USER")
+        )
+
+
+@pytest.fixture(autouse=True)
+def _reset_settings_cache():
+    """Drop the memoized Settings after every test.
+
+    ``config.get_settings`` is an ``lru_cache``. A test that changes
+    STRATHON_MODE or STRATHON_REQUIRE_SECURITY_KEYS -- even through
+    monkeypatch, which faithfully restores the environment -- leaves behind a
+    Settings object *built from the mutated environment*, cached for the rest
+    of the process. Restoring the env does not evict it. The next module to
+    boot the app then reads that stale object, sees mode=cloud, and the
+    receiver refuses to start on missing security keys.
+
+    Clearing the cache after each test makes settings follow the environment
+    rather than the test order. This is the same shared-state-mutation class
+    as the CI flake: state that outlives the test that created it.
+    """
+    yield
+
+    # Every process-global memo that a test can perturb gets dropped here.
+    # These are the same shared-state-mutation class as the CI flake: state
+    # created inside one test that silently outlives it and changes how a
+    # later test behaves, making results depend on collection order.
+    import config
+
+    config.get_settings.cache_clear()
+
+    # Model-price catalog: cached in a module global, and a test can point it
+    # at a fixture catalog via STRATHON_MODEL_PRICES_PATH.
+    try:
+        import pricing
+
+        pricing._CATALOG = None
+    except Exception:  # pragma: no cover - pricing always imports in-tree
+        pass
+
+    # One-shot "dev HMAC key in use" warning flag, stored on the function
+    # object. Leaving it set suppresses the warning for every later test that
+    # asserts on it.
+    try:
+        import repositories.audit as _audit_repo
+
+        if hasattr(_audit_repo._get_hmac_key, "_warned"):
+            delattr(_audit_repo._get_hmac_key, "_warned")
+    except Exception:  # pragma: no cover
+        pass

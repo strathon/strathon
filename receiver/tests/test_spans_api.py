@@ -52,8 +52,15 @@ def default_project_id(db_url):
     """The seeded default project's UUID."""
     conn = psycopg.connect(db_url, autocommit=True)
     try:
+        # Fixed UUID of the seeded default project (migration 001) -- the
+        # project DEV_KEY belongs to. A slug lookup was nondeterministic once
+        # test_projects_api soft-deleted 'default' and the app lifespan
+        # recreated it: several rows then share the slug, and picking the
+        # wrong one puts this module's inserts in a project its API key
+        # cannot see.
         row = conn.execute(
-            "SELECT id FROM projects WHERE slug = 'default'"
+            "SELECT id FROM projects "
+            "WHERE id = '00000000-0000-0000-0000-000000000001'"
         ).fetchone()
         assert row is not None, "default project not found"
         return row[0]

@@ -18,6 +18,8 @@ import uuid
 
 import pytest
 
+from conftest import purge_audit_events
+
 import repositories.audit as audit_repo
 from audit.actions import (
     CATEGORY_POLICY,
@@ -303,17 +305,7 @@ async def test_advisory_lock_serializes_concurrent_writes(
         # bypassing the append-only trigger via the same session that
         # would normally be locked down. We need to ALTER the trigger
         # because the rows survive the test-session rollback.
-        from sqlalchemy import text as _t
-        await s.execute(_t(
-            "ALTER TABLE audit.events DISABLE TRIGGER events_no_delete"
-        ))
-        await s.execute(
-            _t("DELETE FROM audit.events WHERE project_id = :pid"),
-            {"pid": isolated_project},
-        )
-        await s.execute(_t(
-            "ALTER TABLE audit.events ENABLE TRIGGER events_no_delete"
-        ))
+        await purge_audit_events(s, isolated_project)
         await s.commit()
 
 

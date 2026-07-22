@@ -30,9 +30,22 @@ DEV_KEY = "stra_dev_local_default_project_do_not_use_in_production"
 
 @pytest.fixture(scope="module", autouse=True)
 def _audit_hmac_key():
-    """Set a stable test HMAC key for the whole module."""
+    """Set a stable test HMAC key for the whole module, then put it back.
+
+    Without the teardown this random key outlives the module and every test
+    that runs afterwards in the same process signs and verifies audit rows
+    under it -- a different key than they would otherwise use. That is the
+    same shared-state-mutation class that produced the long-standing CI
+    flake (a test mutating global state its neighbours depend on), so
+    restore the previous value even though nothing depends on it today.
+    """
+    previous = os.environ.get("STRATHON_AUDIT_HMAC_KEY")
     os.environ["STRATHON_AUDIT_HMAC_KEY"] = secrets.token_hex(32)
     yield
+    if previous is None:
+        os.environ.pop("STRATHON_AUDIT_HMAC_KEY", None)
+    else:
+        os.environ["STRATHON_AUDIT_HMAC_KEY"] = previous
 
 
 @pytest.fixture(scope="module")

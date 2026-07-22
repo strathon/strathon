@@ -78,6 +78,21 @@ jobs:
         working-directory: sdk
         run: pytest tests/ -v --tb=short
 
+      # A contributor's first command is `pip install -e ".[dev]"`, not
+      # `[all]`. Optional-framework tests must SKIP when the extra is absent,
+      # never fail -- otherwise that first run is a wall of
+      # ModuleNotFoundError. CI only ever installed [all], so nothing caught
+      # this; guard the contributor path explicitly. Fresh venv so the
+      # framework extras installed above cannot mask a missing guard.
+      - name: SDK tests without framework extras (contributor install path)
+        if: matrix.python-version == '3.12'
+        working-directory: sdk
+        run: |
+          python -m venv /tmp/sdk-noextras
+          /tmp/sdk-noextras/bin/pip install --quiet --upgrade pip
+          /tmp/sdk-noextras/bin/pip install --quiet -e ".[dev]"
+          /tmp/sdk-noextras/bin/pytest tests/ -q
+
   # ============================================================
   # Receiver tests — needs Postgres for the retention DB tests.
   # Python 3.12 only because the receiver requires >= 3.12.

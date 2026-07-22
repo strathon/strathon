@@ -98,6 +98,9 @@ def _reset_steer_state():
 def _make_tool():
     """Build a fresh langchain-core tool. Each test gets a new one so the
     enrollment registry can't collide across tests."""
+    # Optional extra: skip rather than fail when langchain is absent, so
+    # `pip install -e ".[dev]"` + pytest is green for a new contributor.
+    pytest.importorskip("langchain_core")
     from langchain_core.tools import tool
 
     @tool

@@ -17,6 +17,11 @@ from __future__ import annotations
 
 import pytest
 
+# every test here builds a langchain tool, so the whole module needs the optional extra. Skip instead of
+# failing when it is absent -- a contributor running `pip install -e ".[dev]"`
+# should get a green suite, not a wall of ModuleNotFoundError.
+pytest.importorskip("langchain_core")
+
 from strathon.policy import enforce_steer
 from strathon.policy.steer import _uninstall_all_for_testing
 from strathon.policy.types import (

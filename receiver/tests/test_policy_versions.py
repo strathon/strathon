@@ -52,13 +52,45 @@ async def test_update_captures_version(session, isolated_project):
 
 
 @pytest.mark.asyncio
-async def test_delete_captures_version(session, isolated_project):
+async def test_delete_removes_version_history(session, isolated_project):
+    """Deleting a policy takes its version history with it.
+
+    policy_versions has an ON DELETE CASCADE foreign key to policies, so the
+    history is a working log scoped to a live policy, not a record of what
+    was removed. delete_policy used to write a final "delete" snapshot that
+    the same statement then cascaded away; that call is gone, and this pins
+    the behavior so nobody adds it back expecting it to survive.
+
+    Deletions are recorded in the tamper-evident audit log, which is where
+    the durable trail lives.
+
+    (The earlier version of this test asserted nothing at all -- it passed
+    even when delete_policy did nothing.)
+    """
+    from sqlalchemy import text as _text
+
     from repositories.policies import delete_policy
+
     policy = await _create_policy(session, isolated_project)
-    await delete_policy(session, isolated_project, policy.id)
-    # The policy_versions FK is ON DELETE CASCADE, so deleting the policy
-    # also deletes its versions. We verify the version was captured by
-    # checking before the delete.
+
+    before = (
+        await session.execute(
+            _text("SELECT count(*) FROM policy_versions WHERE policy_id = :pid"),
+            {"pid": policy.id},
+        )
+    ).scalar_one()
+    assert before >= 1, "creating a policy should record a version"
+
+    deleted = await delete_policy(session, isolated_project, policy.id)
+    assert deleted is True
+
+    after = (
+        await session.execute(
+            _text("SELECT count(*) FROM policy_versions WHERE policy_id = :pid"),
+            {"pid": policy.id},
+        )
+    ).scalar_one()
+    assert after == 0, "policy_versions is ON DELETE CASCADE; history goes with the policy"
 
 
 @pytest.mark.asyncio

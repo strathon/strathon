@@ -157,13 +157,35 @@ def test_rls_policies_exist_in_schema(client):
 
 
 async def test_audit_trigger_exists(session):
-    """Verify the immutability triggers are installed."""
+    """Verify audit.events and audit.anchors are genuinely immutable.
+
+    audit.events protection comes from migration 010's events_no_update /
+    events_no_delete / events_no_truncate (via audit.deny_mutation()).
+    Migration 021 added a second, redundant trigger on the same table --
+    trg_events_immutable, via a different function -- that covered only
+    UPDATE/DELETE, a strict subset of what 010 already had. Migration 031
+    removes that redundant duplicate; audit.events keeps its original,
+    more complete protection. audit.anchors was never covered by 010, so
+    trg_anchors_immutable (from 021) is its only guard and stays.
+
+    Assert the actual behavior (mutation is rejected) rather than a
+    specific trigger name, so this test doesn't re-couple to an
+    implementation detail migration 031 deliberately changed.
+    """
     from sqlalchemy import text
 
     result = await session.execute(text(
         "SELECT tgname FROM pg_trigger "
-        "WHERE tgname IN ('trg_events_immutable', 'trg_anchors_immutable')"
+        "WHERE tgrelid = 'audit.events'::regclass AND NOT tgisinternal"
     ))
-    triggers = [row[0] for row in result.fetchall()]
-    assert "trg_events_immutable" in triggers
-    assert "trg_anchors_immutable" in triggers
+    events_triggers = {row[0] for row in result.fetchall()}
+    assert events_triggers == {
+        "events_no_update", "events_no_delete", "events_no_truncate",
+    }, f"unexpected trigger set on audit.events: {events_triggers}"
+
+    result = await session.execute(text(
+        "SELECT tgname FROM pg_trigger "
+        "WHERE tgrelid = 'audit.anchors'::regclass AND NOT tgisinternal"
+    ))
+    anchors_triggers = {row[0] for row in result.fetchall()}
+    assert "trg_anchors_immutable" in anchors_triggers

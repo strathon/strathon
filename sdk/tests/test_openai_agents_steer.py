@@ -18,6 +18,11 @@ from __future__ import annotations
 import asyncio
 import pytest
 
+# every test here builds an openai-agents guardrail, so the whole module needs the optional extra. Skip instead of
+# failing when it is absent -- a contributor running `pip install -e ".[dev]"`
+# should get a green suite, not a wall of ModuleNotFoundError.
+pytest.importorskip("agents")
+
 from strathon.policy.types import PolicyDecision
 
 

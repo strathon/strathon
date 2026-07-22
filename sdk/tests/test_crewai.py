@@ -125,6 +125,7 @@ def _make_task(name="research_task", description="Research agent frameworks"):
 
 
 def _make_crew_started_event(event_id="evt_crew_1"):
+    pytest.importorskip("crewai")
     from crewai.events import CrewKickoffStartedEvent
 
     crew = MagicMock()
@@ -149,6 +150,7 @@ def test_crew_kickoff_creates_root_span():
 
 
 def test_full_crew_lifecycle_starts_and_ends_root_span():
+    pytest.importorskip("crewai")
     from crewai.events import CrewKickoffCompletedEvent
 
     listener, bus = make_listener_with_bus()
@@ -169,11 +171,13 @@ def test_full_crew_lifecycle_starts_and_ends_root_span():
 
 
 def test_task_lifecycle_within_crew_scope():
+    pytest.importorskip("crewai")
     from crewai.events import (
         TaskStartedEvent,
         TaskCompletedEvent,
         CrewKickoffCompletedEvent,
     )
+    pytest.importorskip("crewai")
     from crewai.tasks.task_output import TaskOutput
 
     listener, bus = make_listener_with_bus()
@@ -223,8 +227,11 @@ def test_agent_execution_lifecycle():
     """Uses real CrewAI Agent + BaseTool; AgentExecutionStartedEvent type-validates these strictly."""
     pytest.importorskip("openai")  # openai is part of crewai's base deps
 
+    pytest.importorskip("crewai")
     from crewai import Agent
+    pytest.importorskip("crewai")
     from crewai.tools import BaseTool
+    pytest.importorskip("crewai")
     from crewai.events import (
         AgentExecutionStartedEvent,
         AgentExecutionCompletedEvent,
@@ -275,7 +282,9 @@ def test_agent_execution_lifecycle():
 
 
 def test_llm_call_with_token_usage():
+    pytest.importorskip("crewai")
     from crewai.events import LLMCallStartedEvent, LLMCallCompletedEvent
+    pytest.importorskip("crewai")
     from crewai.events.types.llm_events import LLMCallType
 
     listener, bus = make_listener_with_bus()
@@ -308,6 +317,7 @@ def test_llm_call_with_token_usage():
 
 
 def test_tool_usage_lifecycle():
+    pytest.importorskip("crewai")
     from crewai.events import ToolUsageStartedEvent, ToolUsageFinishedEvent
 
     listener, bus = make_listener_with_bus()
@@ -347,11 +357,13 @@ def test_tool_usage_lifecycle():
 
 def test_parent_child_via_emit_order():
     """The bus auto-correlates parent-child via its scope stack when events nest properly."""
+    pytest.importorskip("crewai")
     from crewai.events import (
         TaskStartedEvent,
         TaskCompletedEvent,
         CrewKickoffCompletedEvent,
     )
+    pytest.importorskip("crewai")
     from crewai.tasks.task_output import TaskOutput
 
     listener, bus = make_listener_with_bus()
@@ -398,6 +410,7 @@ def test_parent_child_via_emit_order():
 
 
 def test_failed_event_ends_span_with_error_status():
+    pytest.importorskip("crewai")
     from crewai.events import CrewKickoffFailedEvent
 
     listener, bus = make_listener_with_bus()
