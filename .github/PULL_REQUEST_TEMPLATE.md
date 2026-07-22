@@ -8,7 +8,6 @@ Brief description.
 - [ ] `python -m pytest tests/` passes
 - [ ] `ruff check .` clean
 - [ ] No secrets, API keys, or PII in the diff
-- [ ] No competitor product names in code or comments
 - [ ] Conventional commit message (`feat:` / `fix:` / `docs:`)
 - [ ] Documentation updated (if API surface changed)
 - [ ] Migration included (if schema changed)

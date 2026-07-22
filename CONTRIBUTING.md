@@ -35,7 +35,7 @@ strathon --version
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | Postgres connection string |
-| `STRATHON_AUDIT_HMAC_KEY` | Yes | HMAC key for audit chain |
+| `STRATHON_AUDIT_HMAC_KEY` | No | HMAC key for audit chain (dev fallback with a warning when unset) |
 | `STRATHON_ENCRYPTION_KEY` | No | Fernet key for column encryption |
 | `STRATHON_DOCS_ENABLED` | No | Enable /docs (default: false) |
 
@@ -85,7 +85,7 @@ python -m pytest tests/test_file.py -v       # Single file
 strathon/
 ├── receiver/       # FastAPI API + Postgres (all business logic)
 ├── sdk/            # Python SDK (10 framework instrumentations)
-├── cli/            # CLI tool (Click, 12 command groups)
+├── cli/            # CLI tool (Click, 14 command groups)
 ├── examples/       # Example scripts for all frameworks
 ├── docs/           # Documentation
 └── docker-compose.yml

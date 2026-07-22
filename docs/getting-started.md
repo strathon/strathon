@@ -29,16 +29,29 @@ The dashboard opens at `http://localhost:3000` and the receiver API at
 `http://localhost:4318`. The only dependency is PostgreSQL, which is included in
 the Compose stack, so no separate database or email server is needed.
 
-If you would rather run only the receiver, start it directly:
+For local play, the stack works with no configuration. Before running in
+production, copy `.env.example` to `.env` and set the three security keys
+(`STRATHON_AUDIT_HMAC_KEY`, `STRATHON_ENCRYPTION_KEY`, `STRATHON_PASSWORD_PEPPER`)
+— see [Self-Hosting → Security keys](self-hosting.md#security-keys) for
+generation commands and rotation notes. Docker Compose auto-loads `.env` from
+the repo root, so no other change is needed.
+
+If you would rather run only the receiver against your own PostgreSQL, start
+it directly:
 
 ```bash
 docker run -d --name strathon \
   -p 4318:4318 \
-  -e DATABASE_URL="postgresql://strathon:strathon@db:5432/strathon" \
-  -e STRATHON_AUDIT_HMAC_KEY="$(openssl rand -hex 32)" \
-  -e STRATHON_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
+  -e DATABASE_URL="postgresql://user:pass@host.docker.internal:5432/strathon" \
+  -e STRATHON_AUDIT_HMAC_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')" \
+  -e STRATHON_ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" \
+  -e STRATHON_PASSWORD_PEPPER="$(python -c 'import secrets; print(secrets.token_hex(32))')" \
   ghcr.io/strathon/receiver:latest
 ```
+
+Point `DATABASE_URL` at a reachable PostgreSQL 16 instance;
+`host.docker.internal` targets the host from inside the container on Docker
+Desktop, or use the address of your managed database.
 
 Register the first account in the dashboard; it becomes the project owner. For
 the full stack and production options, see [Self-Hosting](self-hosting.md).

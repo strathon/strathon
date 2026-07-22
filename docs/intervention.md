@@ -343,11 +343,17 @@ action to retire the rule.
 
 ## Policy version history
 
-Every policy mutation (create, update, delete) captures a versioned
-snapshot in the `policy_versions` table. Sequential numbering per
-policy. The audit log also captures before/after state, but the
-versions table provides faster queries, structured version numbers,
-and works independently of audit configuration.
+Creating or updating a policy captures a versioned snapshot in the
+`policy_versions` table, numbered sequentially per policy.
+
+Version history is scoped to a live policy: the table has an
+`ON DELETE CASCADE` foreign key, so deleting a policy removes its
+history along with it. There is no "deleted policy" view to recover
+here -- deletions are recorded in the audit log, which captures the
+policy's full state before removal and is the durable trail. The
+versions table is a working history that supports faster queries,
+structured version numbers, and operates independently of audit
+configuration.
 
 ### Listing versions
 
@@ -358,8 +364,8 @@ Authorization: Bearer stra_…
 
 Returns versions newest-first. Each entry includes the full policy
 snapshot (name, match_expression, action, action_config, applies_to,
-enabled, priority) plus `change_type` (`create`, `update`, `delete`)
-and `changed_at`.
+enabled, priority) plus `change_type` (`create` or `update`) and
+`changed_at`.
 
 ### Getting a specific version
 

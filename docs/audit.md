@@ -176,14 +176,16 @@ The behavior with an empty key depends on the deployment mode
 (`STRATHON_MODE`, default `self-hosted`). In self-hosted mode an empty
 key falls back to a deterministic dev key with a one-time warning in
 the logs, so the receiver is usable out of the box; set a real key
-for any non-development deployment. In cloud mode an empty key raises
-instead of silently signing with a known value.
+for any non-development deployment. In cloud mode (or with
+`STRATHON_REQUIRE_SECURITY_KEYS=true`) an empty key raises instead of
+silently signing with a known value.
 
-Each row records `hmac_key_id` so historical rows continue to
-verify under the key they were signed with. The current release ships a single
-key (`hmac_key_id = 1`); rotation in a future release increments the id and
-keeps the previous key available for chain verification of
-historical rows.
+Each row records an `hmac_key_id` as groundwork for key rotation. The current
+release ships a single key (`hmac_key_id = 1`) and verification always
+recomputes with the key currently in `STRATHON_AUDIT_HMAC_KEY` -- changing it
+makes existing rows fail verification, so treat the key as fixed. Rotation in
+a future release increments the id and keeps the previous key available for
+chain verification of historical rows.
 
 ## Redaction
 

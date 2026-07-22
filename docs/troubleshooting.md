@@ -50,8 +50,8 @@ than stalling. A brief outage does not break your agent.
 For security-critical agents you can set `fail_closed=True`, which stops tool
 calls when policy state cannot be verified within
 `fail_closed_max_staleness_sec`. Choose deliberately: fail-open prioritizes
-uptime, fail-closed prioritizes control. See the Reliability section of the
-README.
+uptime, fail-closed prioritizes control. See the Failure Semantics section of
+the README.
 
 ## How do I test a policy without blocking real traffic?
 
@@ -77,9 +77,10 @@ project.
 ## How do I rotate or revoke an API key?
 
 In **Settings → API Keys**, use the actions menu on a key. **Rotate** issues a
-new secret and invalidates the old one immediately; copy the new secret, it is
-shown only once. **Revoke** disables the key without issuing a replacement. See
-[API Keys](api_keys.md).
+new secret; the old key keeps working for a 72-hour grace period so you can
+update agents without downtime, then expires. Copy the new secret -- it is
+shown only once. **Revoke** disables the key immediately without issuing a
+replacement. See [API Keys](api_keys.md).
 
 ## Throttle decisions don't show up in my usual metrics
 

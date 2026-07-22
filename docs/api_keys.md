@@ -96,6 +96,21 @@ curl -X DELETE http://localhost:4318/v1/api_keys/<key-id> \
 Soft-revokes the key by setting `revoked_at`. Subsequent requests using the
 revoked key get a 401. The key is not deleted from the database (audit trail).
 
+## Rotating a key
+
+```bash
+curl -X POST http://localhost:4318/v1/api_keys/<key-id>/rotate \
+  -H "Authorization: Bearer $STRATHON_API_KEY"
+```
+
+Rotation issues a replacement with the same name and scopes and returns the
+new raw key **once** in the response (`"key"`). The old key keeps working for
+a grace period (default 72 hours, `grace_period_hours` in the request body to
+override) so agents can be updated without downtime, then expires
+automatically. In the dashboard the same action is under
+**Settings → API Keys → Rotate**, and the CLI equivalent is
+`strathon keys rotate <key-id>`.
+
 ## Rotating the dev key
 
 Before any production deployment, do this:

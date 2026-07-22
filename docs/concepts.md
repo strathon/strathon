@@ -72,8 +72,8 @@ outage does not add latency. By default the SDK is **fail-open**: if it cannot
 reach the receiver to refresh policy state, agents keep running on last-known
 state rather than stalling; this favors availability. For security-critical
 agents you can opt into **fail-closed** mode, where an unverifiable state stops
-the call instead. See the Reliability section of the README for the trade-off
-and configuration.
+the call instead. See the Failure Semantics section of the README for the
+trade-off and configuration.
 
 ## Shadow mode
 

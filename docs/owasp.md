@@ -21,14 +21,14 @@ Limitations](scope.md) page is the long version of where those lines fall.
 
 | OWASP Threat | Template | Strathon mechanism |
 |---|---|---|
-| ASI01 Agent Goal Hijack | prompt-injection-detection | CEL policy on span attributes |
-| ASI02 Tool Misuse and Exploitation | tool-access-allowlist | Deny-by-default (allow-list mode) |
+| ASI01 Agent Goal Hijack | block-memory-write-injection | CEL policy on span attributes |
+| ASI02 Tool Misuse and Exploitation | block-dangerous-tools | Deny-by-default (allow-list mode) |
 | ASI03 Identity and Privilege Abuse | (built-in) | Scoped API keys, RBAC, MFA, per-key rate limits |
 | ASI04 Agentic Supply Chain Vulnerabilities | (built-in) | MCP gateway with policy evaluation, egress proxy, credential scanning |
-| ASI05 Unexpected Code Execution | tool-access-allowlist | Block/allow-list on shell, code, and SQL tools; approval before code execution |
-| ASI06 Memory and Context Poisoning | (built-in) | Behavioral drift detection (Vigil), halt propagation, content redaction |
+| ASI05 Unexpected Code Execution | block-sql-injection-patterns | Block/allow-list on shell, code, and SQL tools; approval before code execution |
+| ASI06 Memory and Context Poisoning | alert-memory-retrieval-injection | Behavioral drift detection (Vigil), halt propagation, content redaction |
 | ASI07 Insecure Inter-Agent Communication | (built-in) | MCP gateway policy evaluation, fail-closed enforcement |
-| ASI08 Cascading Failures | iteration-budget-guard, cost-budget-guard | Budgets with auto-halt, circuit breakers, kill switches, halt propagation |
+| ASI08 Cascading Failures | throttle-expensive-models, alert-on-high-cost | Budgets with auto-halt, circuit breakers, kill switches, halt propagation |
 | ASI09 Human-Agent Trust Exploitation | (built-in) | Human approval workflows, tamper-evident audit log, SARIF export |
 | ASI10 Rogue Agents | (built-in) | Vigil drift detection, heartbeat monitoring, kill switches |
 

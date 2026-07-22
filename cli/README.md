@@ -18,7 +18,7 @@ export STRATHON_API_KEY=stra_...
 strathon policies list
 strathon policies create --name "block-email" \
   --expr 'attrs["gen_ai.tool.name"] == "send_email"' --action block
-strathon policies create --template block-prompt-injection
+strathon policies create --template block-dangerous-tools
 strathon policies create --from-english "block all shell commands"   # needs STRATHON_AI_API_KEY on the receiver
 strathon policies import policies.yaml
 strathon policies test --name my-policy --last 100

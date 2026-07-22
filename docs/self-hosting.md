@@ -20,6 +20,19 @@ cd strathon
 docker compose up
 ```
 
+That is the entire local trial: no configuration needed. For anything
+beyond a local trial, set the security keys first -- copy the template,
+fill in the three keys (generation commands are inside the file), and
+Compose picks the `.env` up automatically from the repo root:
+
+```bash
+cp .env.example .env
+# edit .env: set STRATHON_AUDIT_HMAC_KEY, STRATHON_ENCRYPTION_KEY,
+# STRATHON_PASSWORD_PEPPER (and optionally STRATHON_REQUIRE_SECURITY_KEYS=true
+# to make missing keys a hard boot failure -- see Hardened mode below)
+docker compose up -d
+```
+
 On first start:
 
 1. Postgres pulls and initializes (empty database)
@@ -47,6 +60,62 @@ The banner looks like this:
 ```
 
 Once you see it, the receiver is ready for traffic.
+
+### Bare-metal (Python + existing PostgreSQL)
+
+If you already run PostgreSQL and prefer to run the receiver as a normal
+Python process (systemd, supervisor, tmux — anything but Docker), install it
+from source and point it at your database. The receiver ships from this repo,
+not PyPI (the `strathon` package on PyPI is the SDK your agent imports, a
+separate thing):
+
+```bash
+# 1. Create the database and role
+createuser -P strathon
+createdb -O strathon strathon
+
+# 2. Install the receiver from the repo into a venv
+git clone https://github.com/strathon/strathon.git
+cd strathon/receiver
+python -m venv .venv && . .venv/bin/activate
+pip install .
+
+# 3. Copy the env template and fill in values
+cp .env.example .env
+# then edit .env: set DATABASE_URL, STRATHON_AUDIT_HMAC_KEY,
+# STRATHON_ENCRYPTION_KEY, STRATHON_PASSWORD_PEPPER
+# (generation commands are in the file and in the Security keys section below)
+
+# 4. Load the env vars into your shell (the receiver does NOT auto-load .env)
+set -a; source .env; set +a
+
+# 5. Run migrations, then start the receiver (run both from receiver/)
+alembic upgrade head
+uvicorn main:app --host 0.0.0.0 --port 4318
+```
+
+Under systemd, put the env vars in an `EnvironmentFile` instead of exporting
+in a shell, and run from the `receiver/` directory:
+
+```ini
+[Service]
+Type=simple
+User=strathon
+WorkingDirectory=/opt/strathon/receiver
+EnvironmentFile=/etc/strathon/receiver.env
+ExecStartPre=/opt/strathon/receiver/.venv/bin/alembic upgrade head
+ExecStart=/opt/strathon/receiver/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 4318
+Restart=on-failure
+```
+
+The dashboard is a separate Next.js app; build it once (`cd dashboard && npm
+run build && npm run start`) or point a reverse proxy at both processes. It
+reads two env vars of its own: `RECEIVER_URL` (where to reach the receiver;
+default `http://localhost:4318`, so same-box setups need nothing) and
+`STRATHON_COOKIE_SECURE` (set `true` only when the dashboard is served over
+HTTPS -- over plain HTTP the browser drops Secure cookies and login fails).
+`STRATHON_AUTO_MIGRATE=true` (default) lets the receiver run pending
+migrations at boot so you can drop the `ExecStartPre` line if you prefer.
 
 ## Verifying
 
@@ -113,6 +182,7 @@ defaults; the compose file picks it up automatically.
 | `STRATHON_RATE_LIMIT_ENABLED`                  | `true`           | Per-key in-memory rate limiter. Set `false` to bypass entirely.                                 |
 | `STRATHON_RATE_LIMIT_REQUESTS_PER_SECOND`      | `100`            | Sustained per-key throughput. Token bucket refills at this rate.                                |
 | `STRATHON_RATE_LIMIT_BURST`                    | `200`            | Token-bucket capacity. Maximum momentary burst before throttling.                               |
+| `STRATHON_PUBLIC_URL`                          | `http://localhost:4318` | Public base URL used to build links in outbound notifications (approval approve/deny). Set to your reverse-proxy address or the links point to localhost. |
 | `STRATHON_WEBHOOK_REDIS_URL`                   | `` (empty)       | Redis broker for async webhook/alert delivery. Empty uses an in-memory broker (inline send, fine for dev). Set to e.g. `redis://localhost:6379/0` for durable, retried delivery in production. |
 
 ### Security keys
@@ -159,12 +229,76 @@ Changing a value after first use has consequences, so treat them as fixed:
 a new `STRATHON_PASSWORD_PEPPER` invalidates every existing password, and a new
 `STRATHON_ENCRYPTION_KEY` makes already-encrypted TOTP secrets unreadable.
 
-Rotating `STRATHON_AUDIT_HMAC_KEY`: each audit row records the `hmac_key_id`
-it was signed with, so historical rows keep verifying under their original key.
-This release ships a single key (`hmac_key_id = 1`); rotation in a future
-release increments the id and keeps the previous key available for verifying
-old rows. Until then, treat the audit key as fixed. Full detail is in
-[docs/audit.md](audit.md).
+Rotating `STRATHON_AUDIT_HMAC_KEY`: treat it as fixed. Verification always
+recomputes with the *current* key, so changing it makes every existing row
+fail verification -- the chain reads as broken from the rotation point back.
+Each row stores an `hmac_key_id` (always `1` in this release) as groundwork
+for real rotation in a future release, where the id increments and previous
+keys stay available for verifying old rows. Until that ships, a key change is
+a chain reset, not a rotation. Full detail is in [docs/audit.md](audit.md).
+
+### Hardened mode (require keys at boot)
+
+By default the receiver boots with zero configuration for local trials:
+missing security keys fall back to development defaults with loud startup
+warnings. If you would rather have a missing key be a hard failure -- the
+receiver refuses to start instead of warning -- set:
+
+```bash
+STRATHON_REQUIRE_SECURITY_KEYS=true
+```
+
+Nothing else changes: same features, same single-tenant behavior. The
+receiver simply refuses to start until all three keys are set, and the
+startup error names exactly which ones are missing. Recommended for any
+internet-facing deployment. (Cloud mode always enforces this.)
+
+For internet-facing instances, registration is defended in layers:
+per-IP rate limiting (shares the login limiter), a global cap on total
+registrations per minute (`STRATHON_REGISTER_GLOBAL_LIMIT_PER_MINUTE`,
+default 30) as a backstop against distributed floods, account lockout on
+repeated failed logins, and `STRATHON_REGISTRATION_ENABLED=false` to
+close registration entirely once your team is onboarded -- the strongest
+control. Client IPs are taken from the socket, never from
+`X-Forwarded-For`, unless you explicitly opt in behind a trusted reverse
+proxy (`STRATHON_RATE_LIMIT_TRUST_FORWARDED_FOR=true`).
+
+### Browser security headers
+
+The dashboard sends a strict Content-Security-Policy on every response: a
+per-request nonce plus `strict-dynamic`, so an injected `<script>` has no
+valid nonce and the browser refuses to run it. Nothing to configure.
+
+Two headers are sent only when the request arrives over TLS --
+`Strict-Transport-Security` and `upgrade-insecure-requests`. Behind a reverse
+proxy the connection to the dashboard is plain HTTP, so the dashboard reads
+the standard `X-Forwarded-Proto: https` header your proxy should already set
+(nginx: `proxy_set_header X-Forwarded-Proto $scheme;`, Caddy and Traefik do it
+by default). If that header is missing, everything still works -- you simply
+do not get HSTS. They are deliberately withheld on plain HTTP:
+`upgrade-insecure-requests` would rewrite same-origin asset URLs to `https://`
+and leave you with a blank dashboard, and HSTS would pin the host to HTTPS for
+a year, which is a hard state to undo on an internal deployment.
+
+### If you lose a key
+
+Each key fails independently, and none of them brick the deployment:
+
+- **`STRATHON_PASSWORD_PEPPER` lost**: every existing password stops
+  verifying (logins fail with the normal "Invalid email or password"; there
+  is no special error, by design). TOTP and backup codes are unaffected.
+  Recover by setting a new pepper, then resetting each affected account:
+  `python -m admin_cli reset-password --email <email>` (new hashes use the
+  pepper currently in the environment).
+- **`STRATHON_ENCRYPTION_KEY` lost or changed**: stored TOTP secrets can no
+  longer be decrypted, so authenticator codes are rejected ("Invalid MFA
+  code") and the receiver logs the cause. **Backup codes keep working** --
+  they are stored as hashes and never needed the key -- so users can log in
+  with a backup code and re-enroll MFA. For a user without their backup
+  codes: `python -m admin_cli reset-password --email <email> --disable-mfa`.
+- **`STRATHON_AUDIT_HMAC_KEY` lost or changed**: existing audit rows fail
+  verification (chain reset, as above). Nothing else is affected; new rows
+  chain normally under the new key.
 
 ## Lifecycle commands
 

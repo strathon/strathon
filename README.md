@@ -247,7 +247,7 @@ strathon audit list --limit 100
 # API key management
 strathon keys list
 strathon keys create --name "ci-pipeline" --scope traces:read --scope policies:read
-strathon keys rotate <key-id>          # new secret, old one invalidated
+strathon keys rotate <key-id>          # new secret; old key expires after a 72h grace
 strathon keys revoke <key-id>
 
 # Administration
@@ -332,7 +332,7 @@ cd strathon && docker compose up
 
 Register the first account, create a policy, get an API key, and connect your agent. No email server needed; the only dependency is PostgreSQL, included in the Compose stack. Strathon ships as two images, `ghcr.io/strathon/receiver` and `ghcr.io/strathon/dashboard`, plus PostgreSQL. Compose runs all three; you can also run the receiver on its own or scale the dashboard independently.
 
-Before running in production, set the security keys (`STRATHON_AUDIT_HMAC_KEY`, `STRATHON_ENCRYPTION_KEY`, `STRATHON_PASSWORD_PEPPER`) in your `.env`; without them the receiver falls back to development defaults with a warning. See [Self-Hosting](https://getstrathon.com/docs/self-hosting).
+Before running in production, set the security keys (`STRATHON_AUDIT_HMAC_KEY`, `STRATHON_ENCRYPTION_KEY`, `STRATHON_PASSWORD_PEPPER`) in your `.env`; without them the receiver falls back to development defaults with a warning, and `STRATHON_REQUIRE_SECURITY_KEYS=true` turns a missing key into a hard boot failure instead. See [Self-Hosting](https://getstrathon.com/docs/self-hosting).
 
 ### Docker images
 
