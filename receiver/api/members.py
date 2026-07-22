@@ -73,7 +73,7 @@ async def _resolve_project(session, slug: str) -> Project:
 async def list_members(
     slug: str,
     ctx: auth_mod.ApiKeyContext = Depends(
-        require_scope(auth_mod.SCOPE_TRACES_READ)
+        require_scope(auth_mod.SCOPE_PROJECT_SETTINGS_READ)
     ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:

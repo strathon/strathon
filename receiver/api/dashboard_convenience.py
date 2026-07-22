@@ -114,7 +114,7 @@ async def change_password(
 @router.get("/v1/members")
 async def list_members_convenience(
     ctx: auth_mod.ApiKeyContext = Depends(
-        require_scope(auth_mod.SCOPE_AUDIT_READ)
+        require_scope(auth_mod.SCOPE_PROJECT_SETTINGS_READ)
     ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:

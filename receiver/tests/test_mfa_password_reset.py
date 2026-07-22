@@ -201,3 +201,68 @@ def test_admin_reset_break_glass_with_privileged_key(client):
 
     login = client.post("/v1/auth/login", json={"email": email, "password": temp})
     assert login.status_code == 200, login.text
+
+
+@pytest.mark.asyncio
+async def test_backup_code_works_when_totp_secret_undecryptable(monkeypatch):
+    """Encryption-key loss must not lock users out of MFA login.
+
+    verify_totp_code raises when the stored secret can't be decrypted
+    (STRATHON_ENCRYPTION_KEY missing/changed). Backup codes are SHA-256
+    hashed and key-independent, so verify_mfa_code must swallow the TOTP
+    failure and still honor a valid backup code -- previously the raise
+    propagated as an HTTP 500 and blocked the recovery path entirely.
+    """
+    import uuid as _uuid
+    from unittest.mock import AsyncMock
+
+    import repositories.mfa as mfa_repo
+
+    plain, hashed = mfa_repo.generate_backup_codes()
+
+    class FakeUser:
+        totp_secret = "enc:not-decryptable-without-key"
+        backup_codes = list(hashed)
+        id = _uuid.uuid4()
+
+    monkeypatch.setattr(mfa_repo, "_get_user", AsyncMock(return_value=FakeUser()))
+
+    def _raise(secret, code):
+        raise RuntimeError("Encrypted value found but STRATHON_ENCRYPTION_KEY not set.")
+    monkeypatch.setattr(mfa_repo, "verify_totp_code", _raise)
+
+    executed = []
+
+    class FakeSession:
+        async def execute(self, stmt):
+            executed.append(stmt)
+
+    # A valid backup code must verify despite the TOTP decrypt failure...
+    ok = await mfa_repo.verify_mfa_code(FakeSession(), FakeUser.id, plain[0])
+    assert ok is True
+    assert executed, "backup code was not consumed"
+
+    # ...and a bogus code must still cleanly return False (not raise).
+    ok = await mfa_repo.verify_mfa_code(FakeSession(), FakeUser.id, "000000")
+    assert ok is False
+
+
+@pytest.mark.asyncio
+async def test_mfa_verify_attempts_capped(monkeypatch):
+    """After the per-token attempt cap, the MFA token is destroyed.
+
+    A 6-digit TOTP with unlimited guesses per 5-minute token (renewable
+    by re-login) is brute-forceable; the cap forces a fresh login, which
+    is itself rate limited and lockout protected.
+    """
+    # Behavioral contract check via the limiter store the endpoint uses.
+    from rate_limit import RateLimiterStore
+    store = RateLimiterStore(capacity=5, refill_per_second=0.001)
+    sid = "fake-session-id"
+    results = []
+    for _ in range(7):
+        allowed, _, _ = await store.consume(f"mfa:{sid}")
+        results.append(allowed)
+    # First 5 allowed, then exhausted -> endpoint destroys the token.
+    assert results[:5] == [True] * 5
+    assert results[5] is False

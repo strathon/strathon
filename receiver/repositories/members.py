@@ -15,7 +15,7 @@ from uuid import UUID
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import ProjectMember, User
+from models import Project, ProjectMember, User
 
 logger = logging.getLogger("strathon.receiver.repositories.members")
 
@@ -40,9 +40,25 @@ async def get_user_role(
     project_id: UUID,
     user_id: UUID,
 ) -> Optional[str]:
-    """Return the role string for a user in a project, or None."""
-    member = await get_member(session, project_id, user_id)
-    return member.role if member else None
+    """Return the role string for a user in a LIVE project, or None.
+
+    This is the auth boundary's membership check (auth.resolve_api_key,
+    session branch). It deliberately joins to projects and requires
+    deleted_at IS NULL: membership rows survive a project soft-delete,
+    and without this filter a session holder could keep browsing and
+    writing to a deleted project by sending its id in X-Project-Id --
+    the session-auth twin of the revoke-keys-on-delete rule enforced in
+    api/projects.delete_project. Fail closed.
+    """
+    stmt = (
+        select(ProjectMember.role)
+        .join(Project, ProjectMember.project_id == Project.id)
+        .where(ProjectMember.project_id == project_id)
+        .where(ProjectMember.user_id == user_id)
+        .where(Project.deleted_at.is_(None))
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
 
 
 async def list_members(

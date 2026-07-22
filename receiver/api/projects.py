@@ -259,6 +259,20 @@ async def delete_project(
         update(Project)
         .where(Project.slug == slug, Project.deleted_at.is_(None))
         .values(deleted_at=func.now())
+        .returning(Project.id)
     )
-    if not result.rowcount:
+    deleted_row = result.first()
+    if deleted_row is None:
         raise HTTPException(status_code=404, detail="project not found")
+
+    # A deleted project must not keep authenticating. API keys are scoped to
+    # a project; without this, every key minted for the project keeps working
+    # after deletion -- it can still ingest spans into and read data out of a
+    # project the operator believes is gone. Revoke all live keys with the
+    # project (fail closed). There is no restore flow; if the project is
+    # recreated, new keys are minted for it.
+    await session.execute(
+        update(ApiKey)
+        .where(ApiKey.project_id == deleted_row[0], ApiKey.revoked_at.is_(None))
+        .values(revoked_at=func.now())
+    )

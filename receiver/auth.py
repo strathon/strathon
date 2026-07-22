@@ -2,7 +2,7 @@
 
 Key format:
     stra_<43 char base64url>            -- generated via secrets.token_urlsafe(32)
-    e.g. stra_aB3xC9zD2eF1gH4iJ6kL8mN0oP2qR4sT6uV8wX0yZ
+    e.g. stra_<REDACTED-EXAMPLE-NOT-A-REAL-KEY>
 
 Storage:
     key_prefix: first 12 chars of the raw key (indexed for fast lookup)
@@ -128,6 +128,15 @@ SCOPE_AUDIT_WRITE = "audit:write"
 SCOPE_AUDIT_ADMIN = "audit:admin"
 SCOPE_PROJECTS_MANAGE = "projects:manage"
 
+# Bulk export -- deliberately separated from :read scopes. Browsing spans /
+# traces / policies in the dashboard is qualitatively different from
+# downloading them all as a CSV/JSON ZIP: the first is slow, interactive,
+# and leaves an audit trail per page; the second is one-shot bulk
+# exfiltration. Viewer roles get :read on everything they should see in
+# the UI but must NOT get data:export -- that's an admin/operator
+# operation. Applies to POST /v1/export and POST /v1/compliance/export.
+SCOPE_DATA_EXPORT = "data:export"
+
 KNOWN_SCOPES: frozenset[str] = frozenset({
     SCOPE_WILDCARD,
     SCOPE_TRACES_WRITE,
@@ -151,6 +160,7 @@ KNOWN_SCOPES: frozenset[str] = frozenset({
     SCOPE_AUDIT_READ,
     SCOPE_AUDIT_WRITE,
     SCOPE_AUDIT_ADMIN,
+    SCOPE_DATA_EXPORT,
     SCOPE_PROJECTS_MANAGE,
 })
 

@@ -150,10 +150,12 @@ async def metrics_endpoint(request: Request) -> Response:
 # ---- Readiness check implementations --------------------------------------
 #
 # Each check returns a dict with at least {"status": "ok" | "failed"}. On
-# failure the dict additionally has a "reason" field with a short
-# human-readable summary. Success paths add check-specific detail
-# (latency, version numbers, etc.) that's useful for operator dashboards
-# but irrelevant to the pass/fail decision.
+# failure the dict additionally has a "reason" field: a short, FIXED string,
+# never an exception message and never a schema revision. /ready is reachable
+# without authentication (probes and load balancers need it), so the body is
+# treated as public: it carries the pass/fail decision and nothing an attacker
+# could use to fingerprint the build or read internal state. Full detail --
+# exception text, applied vs expected revision -- goes to the server log.
 
 
 async def _check_db() -> dict[str, Any]:
@@ -177,11 +179,13 @@ async def _check_db() -> dict[str, Any]:
             "status": "failed",
             "reason": f"db check exceeded {_DB_CHECK_TIMEOUT_S * 1000:.0f}ms timeout",
         }
-    except Exception as exc:
-        return {
-            "status": "failed",
-            "reason": f"db check raised {type(exc).__name__}: {exc}",
-        }
+    except Exception:
+        # /ready is unauthenticated (probes and load balancers must reach it),
+        # so the response must never carry internal detail. A driver exception
+        # can embed the connection string, host, or filesystem paths. Log the
+        # full error for the operator; return a stable, non-leaky reason.
+        logger.exception("readiness: db check failed")
+        return {"status": "failed", "reason": "database unreachable"}
 
     latency_ms = (time.perf_counter() - start) * 1000.0
     return {"status": "ok", "latency_ms": round(latency_ms, 2)}
@@ -204,11 +208,9 @@ async def _check_migrations() -> dict[str, Any]:
     # I/O against the bundled migrations and doesn't need the DB.
     try:
         script_head = _script_head_revision()
-    except Exception as exc:
-        return {
-            "status": "failed",
-            "reason": f"could not read alembic script head: {type(exc).__name__}: {exc}",
-        }
+    except Exception:
+        logger.exception("readiness: could not read alembic script head")
+        return {"status": "failed", "reason": "migration metadata unreadable"}
 
     # DB read of the currently-applied revision.
     from database import get_session_maker
@@ -226,28 +228,30 @@ async def _check_migrations() -> dict[str, Any]:
             "status": "failed",
             "reason": f"migrations check exceeded {_MIGRATION_CHECK_TIMEOUT_S * 1000:.0f}ms timeout",
         }
-    except Exception as exc:
-        return {
-            "status": "failed",
-            "reason": f"migrations check raised {type(exc).__name__}: {exc}",
-        }
+    except Exception:
+        logger.exception("readiness: migrations check failed")
+        return {"status": "failed", "reason": "database unreachable"}
 
+    # Revision ids stay out of the response body: /ready is unauthenticated,
+    # and the applied schema revision tells a stranger exactly which build is
+    # running. The operator gets the same information -- with more of it --
+    # from the log line below, which is where anyone debugging a stuck
+    # migration is already looking.
     if current is None:
-        return {
-            "status": "failed",
-            "reason": "alembic_version table empty (database not migrated)",
-            "head": script_head,
-        }
+        logger.error(
+            "readiness: alembic_version empty; database not migrated "
+            "(code expects %s)", script_head,
+        )
+        return {"status": "failed", "reason": "database not migrated"}
 
     if current != script_head:
-        return {
-            "status": "failed",
-            "reason": f"schema at {current}, code expects {script_head}",
-            "current": current,
-            "head": script_head,
-        }
+        logger.error(
+            "readiness: schema at %s, code expects %s -- run "
+            "`alembic upgrade head`", current, script_head,
+        )
+        return {"status": "failed", "reason": "schema behind code"}
 
-    return {"status": "ok", "current": current, "head": script_head}
+    return {"status": "ok"}
 
 
 def _script_head_revision() -> str:

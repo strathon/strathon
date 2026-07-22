@@ -46,7 +46,7 @@ async def export_compliance(
     request: Request,
     body: dict[str, Any] | None = None,
     ctx: auth_mod.ApiKeyContext = Depends(
-        require_scope(auth_mod.SCOPE_AUDIT_READ)
+        require_scope(auth_mod.SCOPE_DATA_EXPORT)
     ),
     session: AsyncSession = Depends(get_db_session),
 ) -> Response | dict[str, Any]:

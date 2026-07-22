@@ -548,3 +548,34 @@ async def test_update_monitor_state_writes_partial(session, isolated_project):
     refreshed = await budgets_repo.get_budget(session, b.id, isolated_project)
     assert refreshed.spent_usd == Decimal("42.50")
     assert refreshed.last_evaluated_at is not None
+
+
+async def test_list_active_budgets_for_monitor_skips_deleted_projects(
+    session, isolated_project,
+):
+    """Budgets of a soft-deleted project must not be evaluated.
+
+    Without the projects join, the monitor keeps evaluating them and, on
+    breach, writes halts and fires alert notifications for a project the
+    operator deleted.
+    """
+    b = await budgets_repo.create_budget(
+        session, isolated_project,
+        name="zombie", scope="project",
+        max_spend_usd=Decimal("100"), budget_duration="1d",
+    )
+    rows = await budgets_repo.list_active_budgets_for_monitor(session)
+    assert b.id in {r.id for r in rows}
+
+    # Soft-delete the project; the budget row itself stays active.
+    from sqlalchemy import func, update as sa_update
+    from models.core import Project
+    await session.execute(
+        sa_update(Project)
+        .where(Project.id == isolated_project)
+        .values(deleted_at=func.now())
+    )
+    await session.flush()
+
+    rows = await budgets_repo.list_active_budgets_for_monitor(session)
+    assert b.id not in {r.id for r in rows}

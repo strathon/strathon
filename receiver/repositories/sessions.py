@@ -25,7 +25,7 @@ from uuid import UUID
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Session
+from models import Session, User
 
 logger = logging.getLogger("strathon.receiver.repositories.sessions")
 
@@ -83,8 +83,15 @@ async def resolve_session_token(
     token_hash = _sha256_hex(token)
     stmt = (
         select(Session)
+        .join(User, Session.user_id == User.id)
         .where(Session.token_hash == token_hash)
         .where(Session.expires_at > datetime.now(timezone.utc))
+        # Deactivated users must not keep working off an existing session.
+        # Login already refuses is_active=False; without this join a
+        # session minted before deactivation stays valid until its TTL --
+        # the same deleted-but-still-authenticating pattern fixed for
+        # project API keys. Fail closed here too.
+        .where(User.is_active.is_(True))
     )
     result = await session.execute(stmt)
     return result.scalar_one_or_none()

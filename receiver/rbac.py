@@ -27,6 +27,7 @@ from auth import (
     SCOPE_AUDIT_WRITE,
     SCOPE_BUDGETS_READ,
     SCOPE_BUDGETS_WRITE,
+    SCOPE_DATA_EXPORT,
     SCOPE_HALTS_READ,
     SCOPE_HALTS_WRITE,
     SCOPE_MODEL_PRICES_READ,
@@ -104,6 +105,7 @@ ROLE_SCOPES: dict[str, frozenset[str]] = {
         SCOPE_AUDIT_READ,
         SCOPE_AUDIT_WRITE,
         SCOPE_AUDIT_ADMIN,
+        SCOPE_DATA_EXPORT,
     }),
 
     "operator": frozenset({
@@ -125,6 +127,7 @@ ROLE_SCOPES: dict[str, frozenset[str]] = {
         SCOPE_PROJECT_SETTINGS_READ,
         SCOPE_PROJECT_SETTINGS_WRITE,
         SCOPE_AUDIT_READ,
+        SCOPE_DATA_EXPORT,
     }),
 
     "viewer": frozenset({
@@ -147,18 +150,10 @@ def role_has_scope(role: str, required_scope: str) -> bool:
     return SCOPE_WILDCARD in scopes or required_scope in scopes
 
 
-# ---- Scope for membership management (not a resource scope) --------------
-
-SCOPE_MEMBERS_READ = "members:read"
-SCOPE_MEMBERS_WRITE = "members:write"
-
-
 __all__ = [
     "ROLE_RANK",
     "ROLE_SCOPES",
     "Role",
-    "SCOPE_MEMBERS_READ",
-    "SCOPE_MEMBERS_WRITE",
     "VALID_ROLES",
     "can_manage_role",
     "role_has_scope",

@@ -145,9 +145,22 @@ async def verify_mfa_code(
     if user is None or not user.totp_secret:
         return False
 
-    # Try TOTP first.
-    if verify_totp_code(user.totp_secret, code):
-        return True
+    # Try TOTP first. If the stored secret can't be decrypted (encryption
+    # key lost, rotated, or wrong), TOTP is unavailable -- but that must
+    # not raise out of the login flow: backup codes are SHA-256 hashed,
+    # need no encryption key, and exist precisely for this recovery
+    # scenario. Log the operator-actionable cause and fall through.
+    try:
+        if verify_totp_code(user.totp_secret, code):
+            return True
+    except Exception:
+        logger.warning(
+            "TOTP verification unavailable for user %s (stored secret "
+            "could not be decrypted -- STRATHON_ENCRYPTION_KEY missing or "
+            "changed?). Falling back to backup codes. Recover with: "
+            "python -m admin_cli reset-password --email <email> --disable-mfa",
+            user_id,
+        )
 
     # Try backup codes.
     if user.backup_codes:

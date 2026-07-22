@@ -71,7 +71,7 @@ import logging
 import threading
 import time
 from typing import Any, Dict, List, Optional
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from strathon.exceptions import StrathonReceiverUnreachable
@@ -161,6 +161,25 @@ class HaltEnforcer:
             )
             with urlopen(req, timeout=self._request_timeout_sec) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
+        except HTTPError as exc:
+            err = f"HTTP {exc.code}: {exc.reason}"
+            with self._lock:
+                changed = self._last_refresh_error != err
+                self._last_refresh_error = err
+            if exc.code in (401, 403):
+                # Auth rejection means halts will NEVER arrive: a
+                # project-wide panic halt would not stop this agent.
+                # Warn once per distinct error, not per retry tick.
+                if changed:
+                    logger.warning(
+                        "HaltEnforcer: receiver rejected the API key "
+                        "(%s). Halt sync is INACTIVE -- panic halts "
+                        "will not reach this agent. Check the api_key "
+                        "passed to Client().", err,
+                    )
+            else:
+                logger.debug("HaltEnforcer refresh failed: %s", err)
+            return False
         except URLError as exc:
             with self._lock:
                 self._last_refresh_error = f"network error: {exc}"
@@ -218,9 +237,20 @@ class HaltEnforcer:
             return ALLOW_HALT
 
         attrs = span_context.get("attrs") or {}
-        agent_id = (
+        # Operator-facing tooling (halt CREATE endpoint, CLI, dashboard)
+        # naturally identifies agents by NAME -- that's the string the user
+        # types when creating a halt like {"scope":"agent","scope_value":
+        # "support-agent"}. No SDK instrumentation currently sets .agent.id
+        # at all (Client's service_name flows only into gen_ai.agent.name /
+        # strathon.agent.name at ingest via the resource-level service.name
+        # fallback), so the previous .id-only lookup returned None for every
+        # real span and agent-scope halts SILENTLY NEVER MATCHED. Now falls
+        # back through .name, which is what the operator wrote.
+        agent_identity = (
             attrs.get("strathon.agent.id")
             or attrs.get("gen_ai.agent.id")
+            or attrs.get("strathon.agent.name")
+            or attrs.get("gen_ai.agent.name")
         )
 
         for h in halts:
@@ -235,7 +265,7 @@ class HaltEnforcer:
                     reason=h.get("reason"),
                     state=h.get("state"),
                 )
-            if scope == "agent" and scope_value and agent_id == scope_value:
+            if scope == "agent" and scope_value and agent_identity == scope_value:
                 return HaltDecision(
                     action="halt",
                     halt_id=h.get("id"),

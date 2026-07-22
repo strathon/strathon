@@ -133,6 +133,38 @@ def test_delete_project(client):
     assert resp.status_code == 404
 
 
+def test_delete_project_revokes_its_api_keys(client):
+    """A deleted project's keys must stop authenticating (fail closed).
+
+    Project create auto-mints a '{slug}-default-key'. After the project is
+    soft-deleted, that key must be revoked -- otherwise 'delete' leaves a
+    live credential that can keep ingesting spans into and reading data out
+    of a project the operator believes is gone.
+    """
+    slug = f"delkey-{uuid.uuid4().hex[:8]}"
+    r = client.post(
+        "/v1/projects",
+        headers={"Authorization": f"Bearer {DEV_KEY}"},
+        json={"name": "Del Key", "slug": slug},
+    )
+    assert r.status_code == 201
+    project_key = r.json()["api_key"]
+
+    # The freshly minted key authenticates before deletion.
+    r = client.get("/v1/policies", headers={"Authorization": f"Bearer {project_key}"})
+    assert r.status_code == 200
+
+    r = client.delete(
+        f"/v1/projects/{slug}",
+        headers={"Authorization": f"Bearer {DEV_KEY}"},
+    )
+    assert r.status_code == 204
+
+    # And is rejected after: the delete revoked every live key of the project.
+    r = client.get("/v1/policies", headers={"Authorization": f"Bearer {project_key}"})
+    assert r.status_code == 401
+
+
 def test_requires_projects_manage_scope(client):
     # Mint a key with only traces:read — should be rejected.
     resp = client.post(
@@ -160,14 +192,20 @@ def test_delete_non_last_project_succeeds(client):
 
 def test_cannot_delete_last_project(client):
     h = {"Authorization": f"Bearer {DEV_KEY}"}
-    # Soft-delete every project except one, then assert the final delete is blocked.
+    # Soft-delete every project EXCEPT the seeded default, then assert the
+    # final delete is blocked. The survivor must be 'default' specifically:
+    # DEV_KEY and every other module's fixtures live in that project, so
+    # keeping an arbitrary survivor (as this test previously did with
+    # active[1:]) soft-deleted the shared bootstrap project and poisoned
+    # every spans/analytics/simulate module that ran after it.
     active = [p["slug"] for p in client.get("/v1/projects", headers=h).json()["data"]
               if not p.get("deleted_at")]
-    for s in active[1:]:
-        client.delete(f"/v1/projects/{s}", headers=h)
+    for s in active:
+        if s != "default":
+            client.delete(f"/v1/projects/{s}", headers=h)
     remaining = [p["slug"] for p in client.get("/v1/projects", headers=h).json()["data"]
                  if not p.get("deleted_at")]
-    assert len(remaining) == 1
-    r = client.delete(f"/v1/projects/{remaining[0]}", headers=h)
+    assert remaining == ["default"]
+    r = client.delete("/v1/projects/default", headers=h)
     assert r.status_code == 409
     assert "last project" in r.json()["detail"].lower()

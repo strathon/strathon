@@ -73,6 +73,7 @@ from typing import Any, Optional
 from sqlalchemy import and_, delete, func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from models.core import Project
 from models.intervention import Budget
 from models.traces import Span
 
@@ -540,7 +541,12 @@ async def list_active_budgets_for_monitor(
 
     stmt = (
         select(Budget)
+        .join(Project, Budget.project_id == Project.id)
         .where(Budget.is_active.is_(True))
+        # Skip budgets whose project was soft-deleted: without this the
+        # monitor keeps evaluating them and, on breach, writes halts and
+        # fires alert notifications for a project the operator deleted.
+        .where(Project.deleted_at.is_(None))
         .order_by(Budget.last_evaluated_at.asc().nulls_first(), Budget.id.asc())
         .limit(limit)
     )

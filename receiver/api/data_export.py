@@ -194,7 +194,7 @@ def _csv_bytes(rows: list[dict[str, Any]]) -> bytes:
 async def export_data(
     request: Request,
     body: dict[str, Any] | None = None,
-    ctx: auth_mod.ApiKeyContext = Depends(require_scope(auth_mod.SCOPE_AUDIT_READ)),
+    ctx: auth_mod.ApiKeyContext = Depends(require_scope(auth_mod.SCOPE_DATA_EXPORT)),
     session: AsyncSession = Depends(get_db_session),
 ) -> Response:
     """Export selected datasets for the caller's project.

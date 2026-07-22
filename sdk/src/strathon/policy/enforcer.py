@@ -29,7 +29,7 @@ import logging
 import threading
 import time
 from typing import Any, Dict, List, Optional
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from strathon.exceptions import StrathonReceiverUnreachable
@@ -123,6 +123,27 @@ class PolicyEnforcer:
             req = Request(url, headers=self._auth_headers())
             with urlopen(req, timeout=self._request_timeout_sec) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
+        except HTTPError as exc:
+            err = f"HTTP {exc.code}: {exc.reason}"
+            with self._lock:
+                changed = self._last_refresh_error != err
+                self._last_refresh_error = err
+            if exc.code in (401, 403):
+                # An auth rejection is not transient noise: it means NO
+                # policies will ever load and enforcement is silently
+                # inactive while the agent keeps running. Say so loudly,
+                # once per distinct error (the refresh loop retries
+                # every few seconds and must not spam).
+                if changed:
+                    logger.warning(
+                        "PolicyEnforcer: receiver rejected the API key "
+                        "(%s). Policy enforcement is INACTIVE -- no "
+                        "policies are loaded. Check the api_key passed "
+                        "to Client() (revoked? wrong project?).", err,
+                    )
+            else:
+                logger.debug("PolicyEnforcer refresh failed: %s", err)
+            return False
         except URLError as exc:
             with self._lock:
                 self._last_refresh_error = f"network error: {exc}"

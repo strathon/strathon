@@ -232,11 +232,16 @@ async def rotate_api_key(
     from sqlalchemy import func as sa_func
 
     # Find the old key — must be active (not revoked, not already deprecated).
+    # FOR UPDATE locks the row: two concurrent rotate calls would otherwise
+    # both read it as active and both mint a replacement (double rotation,
+    # two live successors). The second caller now blocks here, then sees
+    # deprecated_at set and returns None.
     stmt = (
         select(ApiKey)
         .where(ApiKey.id == key_id)
         .where(ApiKey.revoked_at.is_(None))
         .where(ApiKey.deprecated_at.is_(None))
+        .with_for_update()
     )
     result = await session.execute(stmt)
     old_key = result.scalar_one_or_none()

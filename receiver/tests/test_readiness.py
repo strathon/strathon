@@ -249,12 +249,17 @@ def test_ready_db_check_includes_latency_on_success(client):
     assert db["latency_ms"] >= 0
 
 
-def test_ready_migrations_check_reports_versions_on_success(client):
+def test_ready_does_not_leak_schema_revision(client):
+    """/ready is unauthenticated: it reports pass/fail, never the build's
+    schema revision. Leaking the applied revision tells an anonymous caller
+    exactly which build is running; the operator gets that detail from the
+    server log instead."""
     r = client.get("/ready")
     body = r.json()
     mig = body["checks"]["migrations"]
     assert mig["status"] == "ok"
-    assert mig["current"] == mig["head"]
+    assert "current" not in mig
+    assert "head" not in mig
 
 
 def test_ready_returns_503_when_background_task_is_dead(client):
