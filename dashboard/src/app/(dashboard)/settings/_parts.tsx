@@ -261,7 +261,7 @@ export function ApiKeysSection() {
       setCreatedSecret(res.key || res.data?.key || res.secret);
       setCreateOpen(true);
       setSecretSaved(false);
-      toast.push({ tone: "success", title: "Key rotated", body: "The old key is now invalid." });
+      toast.push({ tone: "success", title: "Key rotated", body: "The old key keeps working for 72 hours, then expires." });
       refetch();
     } catch (err) {
       toast.push({ tone: "danger", title: err instanceof Error ? err.message : "Failed" });

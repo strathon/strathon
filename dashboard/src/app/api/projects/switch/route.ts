@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { PROJECT_COOKIE, projectCookieOptions } from "@/lib/cookies";
 
 const RECEIVER_URL = process.env.RECEIVER_URL || "http://localhost:4318";
 
@@ -40,13 +41,7 @@ export async function POST(request: Request) {
     return Response.json({ error: { message: "Not a member of that project" } }, { status: 403 });
   }
 
-  cookieStore.set("strathon-project-id", projectId, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
-    path: "/",
-    maxAge: 86400,
-  });
+  cookieStore.set(PROJECT_COOKIE, projectId, projectCookieOptions());
 
   return Response.json({ success: true, project_id: projectId });
 }

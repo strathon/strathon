@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { sessionCookieOptions } from "@/lib/cookies";
+import { PROJECT_COOKIE, projectCookieOptions, sessionCookieOptions } from "@/lib/cookies";
 
 const RECEIVER_URL = process.env.RECEIVER_URL || "http://localhost:4318";
 
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
 
   const data = await res.json().catch(() => null);
   if (res.ok && data?.id) {
-    cookieStore.set("strathon-project-id", data.id, sessionCookieOptions());
+    cookieStore.set(PROJECT_COOKIE, data.id, projectCookieOptions());
   }
   return Response.json(data, { status: res.status });
 }

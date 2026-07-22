@@ -1153,10 +1153,11 @@ def keys_create(name: str, scopes: tuple[str, ...], expires_at: str | None):
 @keys.command("rotate")
 @click.argument("key_id")
 def keys_rotate(key_id: str):
-    """Rotate an API key: issue a new secret, invalidate the old one.
+    """Rotate an API key: issue a new secret with a grace period.
 
-    Prints the new key once. Update your agents before the old key's
-    grace period ends.
+    The old key keeps working for the grace period (default 72h),
+    then expires. Prints the new key once; update your agents before
+    the old key's grace period ends.
     """
     result = api_post(f"/v1/api_keys/{key_id}/rotate")
     if not result:

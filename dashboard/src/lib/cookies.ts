@@ -23,3 +23,25 @@ export function sessionCookieOptions() {
     maxAge: 86400,
   };
 }
+
+// The selected-project cookie. Same flags as the session cookie, and that
+// matters in two ways:
+//
+//   `secure` must follow STRATHON_COOKIE_SECURE, not NODE_ENV. A self-hosted
+//   image is built with NODE_ENV=production but is usually served over plain
+//   HTTP, and browsers silently drop Secure cookies on HTTP -- which would
+//   make project switching quietly fail to persist on the default deployment.
+//
+//   `sameSite` must match the session cookie. Strathon links straight into
+//   the dashboard from Slack approval notifications; on that cross-site
+//   navigation a `strict` cookie is withheld while the `lax` session cookie
+//   is sent, so the page would load authenticated but with no project context.
+export function projectCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: SECURE,
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge: 86400,
+  };
+}
