@@ -110,7 +110,7 @@ export default function PoliciesPage() {
                   <Checkbox checked={policies.length > 0 && policies.every((r: any) => selected.has(r.id))}
                     onChange={() => { const all = policies.every((r: any) => selected.has(r.id)); setSelected((s) => { const n = new Set(s); if (all) policies.forEach((r: any) => n.delete(r.id)); else policies.forEach((r: any) => n.add(r.id)); return n; }); }} />
                 </th>
-                <th style={{ width: "30%" }}>Name</th><th>Status</th><th>Action</th><th style={{ textAlign: "right" }}>Priority</th><th>Hits 7d</th><th>Modified</th><th style={{ width: 40 }} />
+                <th style={{ width: "30%" }}>Name</th><th>Status</th><th>Action</th><th style={{ textAlign: "right" }}>Priority</th><th>Matches</th><th>Modified</th><th style={{ width: 40 }} />
               </tr></thead>
               <tbody>
                 {policies.map((p: any) => (
@@ -123,7 +123,11 @@ export default function PoliciesPage() {
                     <td><Badge kind={ACTION_COLOR[p.action] || "muted"} mono>{p.action}</Badge></td>
                     <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{p.priority}</td>
                     <td>{p.hits7d && <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span onClick={(e) => { e.stopPropagation(); setChartSheet(p); }} style={{ cursor: "pointer" }}><Sparkline data={p.hits7d} width={64} height={20} color="var(--accent)" /></span>
+                      <span onClick={(e) => { e.stopPropagation(); setChartSheet(p); }} style={{ cursor: "pointer" }}>
+                        {p.hits7d.length > 1
+                          ? <Sparkline data={p.hits7d} width={64} height={20} color="var(--accent)" />
+                          : <span className="t-sm text-muted" style={{ display: "inline-block", width: 64 }}>—</span>}
+                      </span>
                       <span className="t-sm text-muted" style={{ fontVariantNumeric: "tabular-nums" }}>{p.hits7d.reduce((a: number, b: number) => a + b, 0)}</span>
                     </div>}</td>
                     <td className="text-secondary t-sm"><Time ago={p.lastModified || p.last_modified} /></td>
@@ -154,10 +158,17 @@ export default function PoliciesPage() {
         body="Every selected policy will be removed. This cannot be undone."
         onConfirm={handleBulkDelete} />
 
-      <Sheet open={!!chartSheet} onClose={() => setChartSheet(null)} eyebrow="Hits over time" title={chartSheet?.name || ""} wide>
+      <Sheet open={!!chartSheet} onClose={() => setChartSheet(null)} eyebrow="Match history" title={chartSheet?.name || ""} wide>
         {chartSheet?.hits7d && (
           <div className="card" style={{ padding: 16 }}>
-            <Sparkline data={chartSheet.hits7d} width={600} height={180} color="var(--accent)" />
+            {chartSheet.hits7d.length > 1 ? (
+              <Sparkline data={chartSheet.hits7d} width={600} height={180} color="var(--accent)" />
+            ) : (
+              <div className="t-sm text-muted" style={{ padding: "24px 0", textAlign: "center" }}>
+                {chartSheet.hits7d.reduce((a: number, b: number) => a + b, 0)} lifetime match{chartSheet.hits7d[0] === 1 ? "" : "es"}.
+                Daily history isn&apos;t tracked yet — a trend will appear here once that&apos;s wired up.
+              </div>
+            )}
           </div>
         )}
       </Sheet>

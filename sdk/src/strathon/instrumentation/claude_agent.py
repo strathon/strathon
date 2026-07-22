@@ -108,8 +108,6 @@ def _wrap_query(original, tracer):
             "strathon.framework": "claude_agent_sdk",
             "gen_ai.provider.name": "anthropic",
             "gen_ai.operation.name": "agent_session",
-            "gen_ai.agent.name": "claude_agent",
-            "strathon.agent.name": "claude_agent",
         }
         if prompt:
             span_attrs["gen_ai.prompt"] = _truncate(str(prompt))

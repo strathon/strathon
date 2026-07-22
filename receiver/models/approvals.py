@@ -40,7 +40,11 @@ class Approval(Base):
     trace_id: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
     span_id: Mapped[Optional[bytes]] = mapped_column(LargeBinary)
     span_name: Mapped[Optional[str]] = mapped_column(Text)
-    agent_name: Mapped[Optional[str]] = mapped_column(Text)
+    agent_name: Mapped[Optional[str]] = mapped_column(
+        Text,
+        comment="Agent that triggered the call (gen_ai.agent.name). "
+                "Null for older rows created before this column existed.",
+    )
     tool_name: Mapped[Optional[str]] = mapped_column(Text)
     tool_args: Mapped[Optional[str]] = mapped_column(Text)
     policy_name: Mapped[Optional[str]] = mapped_column(Text)

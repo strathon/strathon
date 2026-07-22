@@ -294,6 +294,18 @@ class Client:
                 self._policy_enforcer.stop()
             except Exception:
                 logger.debug("Strathon: policy enforcer stop raised")
+        # The halt enforcer runs its own background poll thread (defaults to
+        # 1s, faster than policy refresh's 30s). Without stopping it here,
+        # Client.shutdown() left that thread running forever -- benign in a
+        # normal process (it's daemon=True so it dies with the interpreter)
+        # but a real leak in test suites that construct many Clients, in
+        # apps that rebuild the Client on config reload, and anywhere
+        # someone uses `with Client(...)` and expects a clean __exit__.
+        if self._halt_enforcer is not None:
+            try:
+                self._halt_enforcer.stop()
+            except Exception:
+                logger.debug("Strathon: halt enforcer stop raised")
         self._tracer_provider.shutdown()
 
     def __enter__(self):

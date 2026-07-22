@@ -160,6 +160,7 @@ async def upsert_span(
     input_tokens: Optional[int],
     output_tokens: Optional[int],
     cost_usd: Optional[Any] = None,
+    intervention_state: Optional[str] = None,
     attributes: dict[str, Any],
 ) -> None:
     """Insert-or-merge a span row.
@@ -198,6 +199,7 @@ async def upsert_span(
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "cost_usd": cost_usd,
+        "intervention_state": intervention_state,
         "attributes": attributes,
     }
 
@@ -214,6 +216,12 @@ async def upsert_span(
             # streaming-start record with cost_usd=NULL doesn't blow
             # away a previously-recorded cost.
             "cost_usd": func.coalesce(stmt.excluded.cost_usd, Span.cost_usd),
+            # Same coalesce reasoning as cost_usd: a span starts with no
+            # intervention, the policy decision only happens once the tool
+            # is about to run, which can arrive as the end-time update.
+            "intervention_state": func.coalesce(
+                stmt.excluded.intervention_state, Span.intervention_state
+            ),
             # JSONB concat: existing keys win for collisions where EXCLUDED
             # is undefined, but the standard `||` operator has EXCLUDED win.
             # We want EXCLUDED to overwrite (the new ingest is fresher).
@@ -247,6 +255,9 @@ async def bulk_upsert_spans(
             "status_code": stmt.excluded.status_code,
             "status_message": stmt.excluded.status_message,
             "cost_usd": func.coalesce(stmt.excluded.cost_usd, Span.cost_usd),
+            "intervention_state": func.coalesce(
+                stmt.excluded.intervention_state, Span.intervention_state
+            ),
             "attributes": Span.attributes.op("||")(stmt.excluded.attributes),
         },
     )
@@ -269,6 +280,9 @@ async def bulk_upsert_spans(
                         "status_code": individual.excluded.status_code,
                         "status_message": individual.excluded.status_message,
                         "cost_usd": func.coalesce(individual.excluded.cost_usd, Span.cost_usd),
+                        "intervention_state": func.coalesce(
+                            individual.excluded.intervention_state, Span.intervention_state
+                        ),
                         "attributes": Span.attributes.op("||")(individual.excluded.attributes),
                     },
                 )
@@ -311,7 +325,23 @@ async def recompute_trace_rollup(
                 agent_name = COALESCE(t.agent_name, s.agent_name),
                 workflow_name = COALESCE(
                     t.workflow_name, s.workflow_name, s.root_operation
-                )
+                ),
+                -- intervention_state defaults to 'running' at insert and is
+                -- otherwise never written; without this it stays 'running'
+                -- forever regardless of whether a contained span was
+                -- blocked/throttled/steered/halted, which made the traces
+                -- list always report "ok". Any span carrying a non-null
+                -- intervention_state (set by the SDK on a real intervention)
+                -- flips the trace to 'halted' -- the closest existing value
+                -- in the column's CHECK constraint ('running', 'paused',
+                -- 'halted', 'completed'). 'approval_granted' is the one
+                -- intervention_state value that means the call was allowed
+                -- to proceed, so it's excluded -- an approved call must not
+                -- make the trace read as halted.
+                intervention_state = CASE
+                    WHEN s.intervened THEN 'halted'
+                    ELSE t.intervention_state
+                END
             FROM (
                 SELECT
                     trace_id,
@@ -329,7 +359,11 @@ async def recompute_trace_rollup(
                     COALESCE(
                         MIN(name) FILTER (WHERE parent_span_id IS NULL),
                         MIN(operation_name) FILTER (WHERE operation_name IS NOT NULL)
-                    ) AS root_operation
+                    ) AS root_operation,
+                    BOOL_OR(
+                        intervention_state IS NOT NULL
+                        AND intervention_state NOT IN ('running', 'approval_granted')
+                    ) AS intervened
                 FROM spans
                 WHERE trace_id = ANY(:trace_ids)
                 GROUP BY trace_id

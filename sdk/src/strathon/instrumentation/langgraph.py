@@ -279,13 +279,19 @@ class StrathonLangGraphHandler:
         attrs: Dict[str, Any] = {
             "langgraph.chain.name": chain_name,
         }
-        # LangGraph metadata includes the node name explicitly
+        # LangGraph metadata includes the node name explicitly. This is a
+        # display/debugging label only — for the prebuilt ReAct agent (and
+        # most custom graphs) node names are generic execution-step labels
+        # ("agent", "tools", "should_continue"), not distinct agent
+        # identities. Promoting it into strathon.agent.name/gen_ai.agent.name
+        # used to fragment one real agent into multiple synthetic rows on the
+        # agents page. Identity is left unset here and falls back to the
+        # client's service_name (the OTel resource's service.name) uniformly
+        # for every span in the run, same as tool/LLM leaf spans already do.
         if metadata:
             node_name = metadata.get("langgraph_node") or metadata.get("ls_node_name")
             if node_name:
                 attrs["langgraph.node.name"] = _safe_str(node_name)
-                attrs["strathon.agent.name"] = _safe_str(node_name)
-                attrs["gen_ai.agent.name"] = _safe_str(node_name)
             step = metadata.get("langgraph_step")
             if step is not None:
                 attrs["langgraph.step"] = _safe_str(step)
@@ -316,7 +322,33 @@ class StrathonLangGraphHandler:
         parent_run_id: Optional[UUID] = None,
         **kwargs: Any,
     ) -> None:
-        self._end_span(run_id, error=_safe_str(error))
+        # raise_error=True (set on this handler) means a blocked/throttled/
+        # halted/approval-denied tool call's exception propagates out of
+        # on_tool_start and unwinds through every wrapping chain/node above
+        # it (e.g. the "tools" node, possibly the graph-level chain too) --
+        # LangChain calls on_chain_error on each as it unwinds. Without this,
+        # those wrapping spans had no intervention_state set and fell back to
+        # a generic OTel ERROR, so a single block looked like multiple
+        # unrelated application errors in the spans list rather than one
+        # intervention propagating through its ancestors. Order matters:
+        # StrathonPolicyThrottled and StrathonApprovalDenied are subclasses
+        # of StrathonPolicyBlocked, so check them first.
+        from strathon.policy.types import (
+            StrathonApprovalDenied,
+            StrathonHaltExceeded,
+            StrathonPolicyBlocked,
+            StrathonPolicyThrottled,
+        )
+        attrs: Optional[Dict[str, Any]] = None
+        if isinstance(error, StrathonApprovalDenied):
+            attrs = {"strathon.agent.intervention.state": "approval_denied"}
+        elif isinstance(error, StrathonPolicyThrottled):
+            attrs = {"strathon.agent.intervention.state": "throttled"}
+        elif isinstance(error, StrathonHaltExceeded):
+            attrs = {"strathon.agent.intervention.state": "halted"}
+        elif isinstance(error, StrathonPolicyBlocked):
+            attrs = {"strathon.agent.intervention.state": "blocked"}
+        self._end_span(run_id, attrs=attrs, error=_safe_str(error))
 
     # ---- LLM callbacks (both legacy LLMs and chat models) ----
 
@@ -477,6 +509,7 @@ class StrathonLangGraphHandler:
                 attrs["strathon.policy.id"] = decision.policy_id or ""
                 attrs["strathon.policy.name"] = decision.policy_name or ""
                 attrs["strathon.policy.message"] = decision.message or ""
+                attrs["strathon.agent.intervention.state"] = "blocked"
                 # Open and immediately close a span recording the block
                 self._start_span(
                     f"langgraph.tool.{tool_name}", run_id, parent_run_id, attrs
@@ -499,6 +532,7 @@ class StrathonLangGraphHandler:
                 attrs["strathon.policy.id"] = decision.policy_id or ""
                 attrs["strathon.policy.name"] = decision.policy_name or ""
                 attrs["strathon.policy.message"] = decision.message or ""
+                attrs["strathon.agent.intervention.state"] = "throttled"
                 if decision.retry_after_seconds is not None:
                     attrs["strathon.policy.retry_after_seconds"] = (
                         decision.retry_after_seconds
@@ -528,6 +562,7 @@ class StrathonLangGraphHandler:
                 attrs["strathon.policy.id"] = decision.policy_id or ""
                 attrs["strathon.policy.name"] = decision.policy_name or ""
                 attrs["strathon.policy.message"] = decision.message or ""
+                attrs["strathon.agent.intervention.state"] = "approval_denied"
                 self._start_span(
                     f"langgraph.tool.{tool_name}", run_id, parent_run_id, attrs
                 )
@@ -566,6 +601,7 @@ class StrathonLangGraphHandler:
                 attrs["strathon.policy.id"] = decision.policy_id or ""
                 attrs["strathon.policy.name"] = decision.policy_name or ""
                 attrs["strathon.policy.replacement"] = decision.replacement or ""
+                attrs["strathon.agent.intervention.state"] = "steered"
                 self._start_span(
                     f"langgraph.tool.{tool_name}", run_id, parent_run_id, attrs
                 )

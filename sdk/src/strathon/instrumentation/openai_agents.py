@@ -549,6 +549,11 @@ def _emit_intervention_span_oai(
 
     span_attrs = dict(attrs)
     span_attrs[f"strathon.policy.{decision_kind}"] = True
+    # Same canonical marker as the shared steer.py emitter (kept as a
+    # separate implementation here, but the attribute name and vocabulary
+    # must match so the dashboard's blocked/error classification agrees
+    # across every framework).
+    span_attrs["strathon.agent.intervention.state"] = decision_kind
     if decision.policy_id:
         span_attrs["strathon.policy.id"] = decision.policy_id
     if decision.policy_name:

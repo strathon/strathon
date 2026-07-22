@@ -96,9 +96,27 @@ def _provider_from_model(model_name: Optional[str]) -> Optional[str]:
     return None
 
 
+def _agent_name_from_ctx(ctx: Any) -> Optional[str]:
+    """Pull the real agent identity off Pydantic AI's RunContext, if set.
+
+    Every hook (before_tool_execute, wrap_tool_execute, before_model_request,
+    etc.) receives a RunContext exposing the running Agent via ctx.agent --
+    confirmed in Pydantic AI's docs ("All hooks receive RunContext, which
+    provides access to the running agent via ctx.agent"). Agent.name is the
+    user-supplied identity (Agent(..., name="billing_agent")) and can be None
+    if the agent was never named and name inference from the call frame
+    failed -- in which case we return None and the caller falls back to the
+    client's service_name, same as every other framework's leaf spans.
+    """
+    agent = getattr(ctx, "agent", None)
+    name = getattr(agent, "name", None) if agent is not None else None
+    return str(name) if name else None
+
+
 def _tool_span_attrs(
     tool_name: str,
     tool_args: Any,
+    agent_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build span attributes for a tool call boundary."""
     attrs: Dict[str, Any] = {
@@ -106,6 +124,9 @@ def _tool_span_attrs(
         "gen_ai.tool.name": tool_name,
         "strathon.tool.name": tool_name,
     }
+    if agent_name:
+        attrs["gen_ai.agent.name"] = agent_name
+        attrs["strathon.agent.name"] = agent_name
     # Always set strathon.tool.args (default "") for consistent matching.
     attrs["strathon.tool.args"] = (
         _truncate(_json_or_str(tool_args)) if tool_args is not None else ""
@@ -113,12 +134,19 @@ def _tool_span_attrs(
     return attrs
 
 
-def _model_request_attrs(model_name: Optional[str], message_count: int) -> Dict[str, Any]:
+def _model_request_attrs(
+    model_name: Optional[str],
+    message_count: int,
+    agent_name: Optional[str] = None,
+) -> Dict[str, Any]:
     """Build span attributes for a model request."""
     attrs: Dict[str, Any] = {
         "strathon.framework": "pydantic_ai",
         "gen_ai.operation.name": "chat",
     }
+    if agent_name:
+        attrs["gen_ai.agent.name"] = agent_name
+        attrs["strathon.agent.name"] = agent_name
     if model_name:
         attrs["gen_ai.request.model"] = str(model_name)
         provider = _provider_from_model(model_name)
@@ -236,7 +264,7 @@ def _build_firewall_class():
                 return args
 
             tool_name = tool_def.name if tool_def else getattr(call, "tool_name", "unknown")
-            span_attrs = _tool_span_attrs(tool_name, args)
+            span_attrs = _tool_span_attrs(tool_name, args, _agent_name_from_ctx(ctx))
 
             from strathon.policy.steer import check_halt_or_raise
             check_halt_or_raise(self.client, f"pydantic_ai.tool.{tool_name}", span_attrs)
@@ -338,7 +366,7 @@ def _build_firewall_class():
                 return await handler(args)
 
             tool_name = tool_def.name if tool_def else getattr(call, "tool_name", "unknown")
-            span_attrs = _tool_span_attrs(tool_name, args)
+            span_attrs = _tool_span_attrs(tool_name, args, _agent_name_from_ctx(ctx))
 
             tracer = self.client.tracer
             span = tracer.start_span(
@@ -374,7 +402,7 @@ def _build_firewall_class():
                 model_name = getattr(model, "model_name", None) or str(model)
 
             message_count = len(request_context.messages) if request_context.messages else 0
-            span_attrs = _model_request_attrs(model_name, message_count)
+            span_attrs = _model_request_attrs(model_name, message_count, _agent_name_from_ctx(ctx))
 
             tracer = self.client.tracer
             span = tracer.start_span(

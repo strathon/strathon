@@ -232,6 +232,12 @@ def _recommended_actions(trigger: str, severity: str) -> list[str]:
             "Check upstream API availability",
             "Consider halting the affected agent",
         ])
+    elif trigger == "approval_denied_sensitive":
+        actions.extend([
+            "Review what the agent attempted and why it was denied",
+            "Check whether this reflects a prompt injection or a genuine task the agent misunderstood",
+            "Consider whether the denying policy needs to become a hard block",
+        ])
     elif trigger == "hash_chain_break":
         actions.extend([
             "Investigate potential audit log tampering",
@@ -244,6 +250,98 @@ def _recommended_actions(trigger: str, severity: str) -> list[str]:
             "Document the incident for potential Article 73 reporting"
         )
     return actions
+
+
+async def _check_approval_denied_sensitive(
+    session: AsyncSession,
+    project_id: Any,
+) -> dict[str, Any] | None:
+    """Check for an approval denied on a sensitive tool.
+
+    Documented as a trigger in this module's docstring since the module
+    was written, but never actually wired into _run_checks -- this is
+    the implementation that closes that gap. A denial on a sensitive tool
+    means an agent attempted something like shell_exec/drop_table/send_email
+    and a human operator explicitly said no; that's exactly the kind of
+    near-miss operators want surfaced immediately, not left to be noticed
+    only if someone happens to browse the approvals history.
+    """
+    from sensitive_tools import SENSITIVE_TOOLS
+
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+    sql = (
+        "SELECT id, agent_name, tool_name, policy_name, resolved_at, resolved_by "
+        "FROM approvals "
+        "WHERE project_id = :pid "
+        "  AND status = 'denied' "
+        "  AND resolved_at > :cutoff "
+        "  AND tool_name = ANY(:sensitive_tools)"
+    )
+    result = await session.execute(
+        text(sql),
+        {"pid": project_id, "cutoff": cutoff, "sensitive_tools": list(SENSITIVE_TOOLS)},
+    )
+    rows = result.mappings().all()
+    if rows:
+        return {
+            "trigger": "approval_denied_sensitive",
+            "severity": "medium",
+            "details": {
+                "denials": [
+                    {
+                        "id": str(row["id"]),
+                        "agent_name": row["agent_name"],
+                        "tool_name": row["tool_name"],
+                        "policy_name": row["policy_name"],
+                        "resolved_by": row["resolved_by"],
+                    }
+                    for row in rows
+                ],
+            },
+        }
+    return None
+
+
+async def _check_hash_chain_break(
+    session: AsyncSession,
+    project_id: Any,
+) -> dict[str, Any] | None:
+    """Check the audit hash chain's recent integrity.
+
+    Documented as a trigger since this module was written, but never
+    actually wired into _run_checks. Given Strathon's own audit-integrity
+    claim rests on this chain, a break going unnoticed until someone
+    happens to manually click "verify" on the exact affected event is the
+    wrong failure mode for a security product -- it should be the incident
+    detector's job to notice first.
+
+    Bounded to the most recent N events per project per tick (not the
+    full history every 60s) -- re-verifying everything on every tick
+    doesn't scale, and a break in the chain is permanent once introduced,
+    so catching it within a few ticks of it happening is what matters,
+    not re-discovering an old already-alerted break forever.
+    """
+    from repositories.audit import list_events, verify_event
+
+    SAMPLE_SIZE = 25
+    result = await list_events(session, project_id, limit=SAMPLE_SIZE)
+    events = result.events
+    broken: list[dict[str, Any]] = []
+    for event in events:
+        verdict = await verify_event(session, project_id, event["id"])
+        if not verdict.get("valid"):
+            broken.append({
+                "event_id": str(event["id"]),
+                "sequence_no": event.get("sequence_no"),
+                "error": verdict.get("error"),
+            })
+    if broken:
+        return {
+            "trigger": "hash_chain_break",
+            "severity": "critical",
+            "details": {"broken_events": broken, "sampled": len(events)},
+        }
+    return None
 
 
 async def _run_checks(
@@ -283,6 +381,14 @@ async def _run_checks(
             DEFAULT_THRESHOLDS["agent_error_spike_window_minutes"],
         ),
     )
+    if result:
+        incidents.append(result)
+
+    result = await _check_approval_denied_sensitive(session, project_id)
+    if result:
+        incidents.append(result)
+
+    result = await _check_hash_chain_break(session, project_id)
     if result:
         incidents.append(result)
 

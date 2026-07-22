@@ -23,15 +23,10 @@ import repositories.policies as policies_repo
 from database import get_db_session
 
 from ._deps import require_scope
+from sensitive_tools import SENSITIVE_TOOLS
 
 router = APIRouter(prefix="/v1/agents", tags=["agent-inventory"])
 
-SENSITIVE_TOOLS = frozenset({
-    "shell_exec", "eval", "exec", "os_system", "subprocess_run",
-    "send_email", "send_message", "http_request", "fetch",
-    "web_request", "curl", "database_query", "sql_query",
-    "rm", "rmdir", "drop_table", "delete_database",
-})
 
 
 @router.get("")

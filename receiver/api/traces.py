@@ -488,6 +488,14 @@ async def ingest_traces(
                 )
                 tool_name = span_attrs.get("gen_ai.tool.name")
                 workflow_name = span_attrs.get("gen_ai.workflow.name")
+                # Canonical per-span intervention marker the SDK sets on a
+                # blocked/throttled/steered/approval call (see
+                # strathon.policy.steer._emit_intervention_span and the
+                # langgraph/openai_agents inline emitters). Absent on a
+                # normally-allowed span, which is what leaves this NULL and
+                # the spans list classifying it as ok/error from status_code
+                # alone -- the correct behavior for a non-intervened span.
+                intervention_state = span_attrs.get("strathon.agent.intervention.state")
 
                 # Circuit breaker check: if the agent or tool breaker
                 # is open, mark the span as circuit-broken before policy
@@ -499,9 +507,22 @@ async def ingest_traces(
                         span_attrs["strathon.circuit_breaker.state"] = cb_block["state"]
                         span_attrs["strathon.circuit_breaker.entity"] = cb_block["entity_id"]
 
-                    # Record outcome based on span status for future trips.
-                    span_status = span_attrs.get("status") or ""
-                    is_error = span_status in ("error", "ERROR", "2")
+                    # Record outcome based on the span's real outcome for
+                    # future trips. The previous check read attrs["status"],
+                    # an attribute no SDK instrumentation has ever set --
+                    # span_status was always "", is_error was always False,
+                    # and record_outcome(success=True) fired for every span
+                    # including genuine errors and policy blocks, so the
+                    # breaker could never see a failure to trip on. Use the
+                    # real OTel status (already resolved above for sampling)
+                    # plus the intervention marker resolved just above: a
+                    # block/throttle/steer/halt is also a failure signal for
+                    # this tool, same as a raw error, with the one exception
+                    # being an approval that was actually granted.
+                    is_error = status_code_name == "ERROR" or (
+                        intervention_state is not None
+                        and intervention_state not in ("running", "approval_granted")
+                    )
                     record_outcome(agent_name, tool_name, success=not is_error)
 
                 conversation_id = span_attrs.get("gen_ai.conversation.id")
@@ -594,6 +615,7 @@ async def ingest_traces(
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
                     "cost_usd": cost_usd,
+                    "intervention_state": intervention_state,
                     "attributes": persisted_attrs,
                 })
                 span_count += 1

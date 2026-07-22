@@ -192,6 +192,12 @@ def _emit_intervention_span(
 
     span_attrs = dict(attrs)
     span_attrs[f"strathon.policy.{decision_kind}"] = True
+    # Canonical per-span intervention marker the receiver's spans.intervention_state
+    # column is sourced from. decision_kind values ("blocked", "throttled",
+    # "steered", "approval_requested", "approval_denied", "halted") are already
+    # the vocabulary used here; pass through unchanged so every dispatcher-routed
+    # framework (CrewAI, the async surfaces, halts) agrees on one set of values.
+    span_attrs["strathon.agent.intervention.state"] = decision_kind
     if getattr(decision, "policy_id", None):
         span_attrs["strathon.policy.id"] = decision.policy_id
     if getattr(decision, "policy_name", None):

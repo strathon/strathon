@@ -16,6 +16,19 @@ const num = (v: unknown, d = 0): number => {
   return Number.isFinite(n) ? n : d;
 };
 
+// A span/trace was actively intervened on by Strathon iff intervention_state
+// is set to anything other than "running" (no intervention happened) or
+// "approval_granted" (an intervention was evaluated but the call was allowed
+// to proceed -- this must NOT read as blocked). Every other value -- blocked,
+// throttled, steered, approval_requested, approval_denied, halted, and any
+// future decision kind the SDK adds -- counts. Checking by exclusion instead
+// of matching specific keywords means a new decision kind shows up correctly
+// without a dashboard code change.
+const isIntervened = (state: unknown): boolean => {
+  const s = String(state || "").toLowerCase();
+  return s !== "" && s !== "running" && s !== "approval_granted";
+};
+
 // Classify a span into a kind for coloring. A single-agent trace has one
 // "service", so coloring by service is monochrome; kind (llm/tool/agent/
 // retrieval) is meaningful per-span. Shared by mapTraceTree (tree nodes) and
@@ -99,7 +112,13 @@ export function mapApprovals(body: unknown): unknown {
       agent: a.agent_name ?? a.agent ?? "unknown agent",
       tool: a.tool_name ?? a.tool ?? "",
       policy: a.policy_name ?? a.policy ?? "",
-      params: a.tool_arguments ?? a.params ?? null,
+      // The receiver stores the tool arguments as `tool_args` (a text/JSON
+      // string), matching the `tool_args` column on the approvals table and
+      // the Approval.to_json() output. `tool_arguments` was a stale name the
+      // dashboard was reading -- always undefined, always fell through to
+      // `a.params` which also doesn't exist, so the params column showed
+      // empty for every approval that ever landed on this page.
+      params: a.tool_args ?? a.tool_arguments ?? a.params ?? null,
       status: a.status,
       expiresIn,
     };
@@ -216,10 +235,18 @@ export function mapCostSeries(body: unknown): unknown {
   const dayKeys: string[] = [];
   const daySeen = new Set<string>();
   const agentTotals = new Map<string, number>();
+  // /v1/costs?group_by=agent returns rows keyed by `agent_name` (the group_by
+  // label is what dim_label ends up as -- "agent_name" for group_by=agent,
+  // "model" for group_by=model, "agent_model" for group_by=agent_model).
+  // The prior `agent ?? dimension` fallback never matched anything the
+  // receiver actually returns, so agent labels came back as "" and the
+  // stacked-area chart rendered unlabeled bands.
+  const pickDim = (r: Obj) =>
+    String(r.agent_name ?? r.agent ?? r.model ?? r.agent_model ?? r.dimension ?? "");
   for (const r of rows) {
     const day = String(r.period_start ?? "");
     if (day && !daySeen.has(day)) { daySeen.add(day); dayKeys.push(day); }
-    const agent = String(r.agent ?? r.dimension ?? "");
+    const agent = pickDim(r);
     if (agent) agentTotals.set(agent, (agentTotals.get(agent) ?? 0) + num(r.total_cost_usd));
   }
   dayKeys.sort(); // ISO timestamps sort chronologically
@@ -230,7 +257,7 @@ export function mapCostSeries(body: unknown): unknown {
   // Index cost by agent+day for O(1) lookup when building buckets.
   const costAt = new Map<string, number>();
   for (const r of rows) {
-    const agent = String(r.agent ?? r.dimension ?? "");
+    const agent = pickDim(r);
     const day = String(r.period_start ?? "");
     if (agent && day) costAt.set(`${agent}\u0000${day}`, num(r.total_cost_usd));
   }
@@ -419,7 +446,7 @@ export function mapTraceTree(body: unknown): unknown {
     // explanation. We prefer policy_name for the link/UI label, fall back to
     // halt_reason.
     const interv = String(n.intervention_state || "").toLowerCase();
-    const isBlocked = interv.includes("block") || interv.includes("denied") || interv.includes("halt");
+    const isBlocked = isIntervened(interv);
     const policyName = (n.attributes && typeof n.attributes === "object"
       ? (n.attributes as Obj)["policy_name"] || (n.attributes as Obj)["strathon.policy.name"]
       : undefined) as string | undefined;
@@ -481,7 +508,7 @@ export function mapSpans(body: unknown): unknown {
     const dur = Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, end - start) : 0;
     const intervened = String(s.intervention_state || "").toLowerCase();
     const code = String(s.status_code || "").toLowerCase();
-    const status = intervened.includes("block") || intervened.includes("halt") || intervened.includes("denied") ? "blocked"
+    const status = isIntervened(intervened) ? "blocked"
       : code.includes("error") ? "error" : "ok";
     // Service label: prefer agent_name (the app), then model, then tool. This
     // matches mapTraceTree so the same span shows the same Service in both views.

@@ -19,6 +19,8 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sensitive_tools import SENSITIVE_TOOLS
+
 import auth as auth_mod
 import repositories.policies as policies_repo
 from database import get_db_session
@@ -26,14 +28,6 @@ from database import get_db_session
 from ._deps import require_scope
 
 router = APIRouter(prefix="/v1/policies", tags=["policy-suggestions"])
-
-# Tools considered high-risk for OWASP ASI-02/ASI-05 if uncovered.
-SENSITIVE_TOOLS = frozenset({
-    "shell_exec", "eval", "exec", "os_system", "subprocess_run",
-    "rm", "rmdir", "drop_table", "delete_database", "format_disk",
-    "send_email", "send_message", "http_request", "fetch",
-    "web_request", "curl", "database_query", "sql_query",
-})
 
 # Tools that warrant require_approval for ASI-09.
 APPROVAL_WORTHY_TOOLS = frozenset({

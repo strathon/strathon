@@ -91,7 +91,7 @@ function AuthedShell({ children, mode }: { children: React.ReactNode; mode: "sel
     setHalting(true);
     try {
       await api.post("/api/halts", { scope: "project", reason: "Manual panic stop from dashboard" });
-      toast.push({ tone: "success", title: "Project halted", body: "All agents are stopped. Lift the halt from the budgets/halts view when ready." });
+      toast.push({ tone: "success", title: "Project halted", body: "All agents are stopped. Lift the halt via the API (DELETE /v1/halts/{id}) when ready." });
       setHaltOpen(false);
     } catch (e) {
       toast.push({ tone: "danger", title: "Couldn't create halt", body: e instanceof Error ? e.message : "Try again" });

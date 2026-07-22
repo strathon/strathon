@@ -148,12 +148,35 @@ def _is_always_kept(
     config: SamplingConfig,
 ) -> bool:
     """Return True if this span should bypass sampling and always be stored."""
-    # Any Strathon policy annotation makes the span audit-critical
+    # Any Strathon intervention is audit-critical -- a blocked, throttled,
+    # steered, or approval-related call must not be dropped even under
+    # aggressive sampling, since it's exactly what compliance reporting and
+    # security operators need to see. The canonical marker set on every
+    # intervention span by the SDK (see
+    # strathon.policy.steer._emit_intervention_span and the langgraph inline
+    # emitters) is strathon.agent.intervention.state. Trusting this one
+    # attribute means new decision kinds are covered without a sampling code
+    # change; the previous enumeration only listed blocked/steered and
+    # silently dropped throttled/approval_required/approval_denied spans.
+    intervention = attrs.get("strathon.agent.intervention.state")
+    if intervention and intervention not in ("running",):
+        return True
+
+    # Backward compatibility: older SDK versions (pre-1.2.4) set decision-kind
+    # booleans without the intervention_state marker. Keep every strathon.policy.*
+    # dimension we recognize so upgrades don't retroactively lose audit spans.
+    # steer_attempted and matched_ids are retained for compat with the sampling
+    # test suite even though the shipped SDK doesn't emit them today; a future
+    # decision kind reusing either name would still be caught here.
     if attrs.get("strathon.policy.blocked"):
+        return True
+    if attrs.get("strathon.policy.throttled"):
         return True
     if attrs.get("strathon.policy.steered"):
         return True
     if attrs.get("strathon.policy.steer_attempted"):
+        return True
+    if attrs.get("strathon.policy.approval_required"):
         return True
     if attrs.get("strathon.policy.matched_ids"):
         return True
