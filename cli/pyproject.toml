@@ -7,7 +7,7 @@ name = "strathon-cli"
 version = "1.2.3"
 description = "CLI for Strathon, the open-source AI agent firewall."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{name = "Strathon", email = "hello@getstrathon.com"}]
@@ -18,18 +18,18 @@ classifiers = [
     "Intended Audience :: Developers",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Security",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "click>=8.1",
-    "httpx>=0.27",
-    "rich>=13.0",
-    "pyyaml>=6.0",
+    "click>=8.4.2",
+    "httpx>=0.28.1",
+    "rich>=15.0.0",
+    "pyyaml>=6.0.3",
 ]
 
 [project.scripts]

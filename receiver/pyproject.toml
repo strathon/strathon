@@ -7,45 +7,45 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{name = "Strathon", email = "hello@getstrathon.com"}]
 dependencies = [
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.32.0",
+    "fastapi>=0.139.2",
+    "uvicorn[standard]>=0.51.0",
     # psycopg3 is the single driver — used by both Alembic (sync) and the
     # SQLAlchemy 2.0 async engine.
-    "psycopg[binary]>=3.2.0",
-    "sqlalchemy[asyncio]>=2.0.36",
-    "alembic>=1.14.0",
-    "pydantic>=2.10.0",
-    "pydantic-settings>=2.7.0",
-    "opentelemetry-proto>=1.42.0",
-    "opentelemetry-api>=1.42.0",
-    "opentelemetry-sdk>=1.42.0",
-    # Pin protobuf>=6.31.1 for CVE-2025-4565 (pure-Python DoS via
-    # recursive protobuf parsing). opentelemetry-proto pulls protobuf
-    # but doesn't floor the version high enough.
-    "protobuf>=6.31.1",
+    "psycopg[binary]>=3.3.4",
+    "sqlalchemy[asyncio]>=2.0.51",
+    "alembic>=1.18.5",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.2",
+    "opentelemetry-proto>=1.44.0",
+    "opentelemetry-api>=1.44.0",
+    "opentelemetry-sdk>=1.44.0",
+    # protobuf is floored well above CVE-2025-4565 (pure-Python DoS via
+    # recursive parsing); opentelemetry-proto pulls protobuf but does not
+    # floor it high enough on its own.
+    "protobuf>=7.35.1",
     # google-re2: linear-time regex engine (no backtracking). Prevents
     # ReDoS via crafted span attribute values in PII redaction patterns.
-    "google-re2>=1.1",
+    "google-re2>=1.1.20251105",
     # pyotp: RFC 6238 TOTP implementation for MFA.
-    "pyotp>=2.9.0",
-    "httpx>=0.28.0",
-    "python-multipart>=0.0.18",
-    "authlib>=1.4.0",
+    "pyotp>=2.10.0",
+    "httpx>=0.28.1",
+    "python-multipart>=0.0.32",
+    "authlib>=1.7.2",
     "cel-python>=0.5.0",
-    "prometheus-client>=0.21.0",
+    "prometheus-client>=0.25.0",
     # RBAC: password hashing with Argon2id (OWASP recommended).
     # argon2-cffi wraps the reference C implementation.
     "argon2-cffi>=25.1.0",
     # cryptography: Fernet (AES-256-CBC + HMAC) for column-level
     # encryption of sensitive data (TOTP secrets, webhook secrets).
-    "cryptography>=44.0",
-    # Webhook delivery infrastructure (commit C: reliable alert webhooks).
+    "cryptography>=49.0.0",
+    # Webhook delivery infrastructure for outbound alerts.
     # dramatiq is the queue layer; redis is its broker. standardwebhooks is
     # the spec library for HMAC-SHA256 signing per the Standard Webhooks
     # specification (https://github.com/standard-webhooks/standard-webhooks)
     # adopted by OpenAI, Anthropic, Google Gemini, Svix, Kong, Supabase.
-    "dramatiq[redis]>=1.17.0",
-    "standardwebhooks>=1.0.0",
+    "dramatiq[redis]>=2.2.0",
+    "standardwebhooks>=1.1.0",
 ]
 
 [project.urls]
@@ -54,10 +54,16 @@ Documentation = "https://getstrathon.com"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.3.0",
-    "pytest-asyncio>=0.24.0",
-    "ruff>=0.8.0",
-    "mypy>=1.13.0",
+    # Bounded on both ends, and the floors say what is actually tested
+    # rather than what once worked. Unbounded, a routine release adds
+    # checks and CI fails on unchanged code; floored far below what CI
+    # runs, the range claims support nobody verifies. The receiver suite,
+    # both type checks, and the lint and security scans were all run
+    # green against the low end of every range below.
+    "pytest>=9.1,<10",
+    "pytest-asyncio>=1.4,<2",
+    "ruff>=0.16,<0.17",
+    "mypy>=2.3,<2.4",
 ]
 
 [build-system]
@@ -74,11 +80,17 @@ packages = ["."]
 line-length = 100
 target-version = "py312"
 
+# Selected by name, not inherited from ruff's implicit default. The
+# repo-root ruff.toml explains why; this block exists because ruff
+# resolves the nearest config and would otherwise not see it.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "YTT", "TID"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 # google-re2 ships no py.typed marker; it is a drop-in re replacement we call
 # dynamically. Its absence of stubs is not a defect in our code.
 [[tool.mypy.overrides]]
@@ -102,10 +114,11 @@ module = [
 ]
 disable_error_code = ["attr-defined"]
 
-# mitmproxy is a third-party runtime dependency of the egress proxy addon and
-# contains 3.12-only syntax; following its source under python_version 3.10
-# aborts the whole run ("errors prevented further checking"), masking our own
-# findings. Treat it as an untyped external import.
+# egress_proxy.py imports mitmproxy, but mitmproxy cannot be installed in this
+# environment -- it caps typing-extensions and cryptography below what the
+# receiver requires, so the two never share a virtualenv (see docs/egress.md).
+# Without this override mypy reports import-not-found for mitmproxy and
+# mitmproxy.test and fails the run. Treat it as an untyped external import.
 [[tool.mypy.overrides]]
 module = "mitmproxy.*"
 ignore_missing_imports = true
