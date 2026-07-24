@@ -66,13 +66,27 @@ jobs:
           cache: pip
           cache-dependency-path: sdk/pyproject.toml
 
+      # crewai declares requires-python <3.14, so `.[all]` cannot resolve on
+      # 3.14 at all. Every other framework extra supports it. Install the
+      # extras where they resolve and the core alone on 3.14, which still
+      # proves the SDK itself runs there; the optional-framework tests skip
+      # cleanly via pytest.importorskip. Fold 3.14 back into the line below
+      # when crewai widens its range.
       - name: Install SDK with all framework extras
+        if: matrix.python-version != '3.14'
         working-directory: sdk
         run: |
           python -m pip install --upgrade pip
           # Install with all framework extras so every integration test
           # can actually exercise its framework
           pip install -e ".[all]" pytest pytest-asyncio
+
+      - name: Install SDK core only (3.14)
+        if: matrix.python-version == '3.14'
+        working-directory: sdk
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
 
       - name: Run SDK tests
         working-directory: sdk

@@ -25,6 +25,12 @@ pip install "strathon[crewai]"
 > or from a constraints file you apply at install time and validate yourself.
 > The `strathon` and `strathon-cli` packages themselves audit clean.
 
+> **This extra does not install on Python 3.14.** CrewAI declares
+> `requires-python <3.14`, so `pip install "strathon[crewai]"` cannot resolve
+> there. `strathon` itself supports 3.14 and is tested on it; every other
+> framework extra installs there too. Use 3.11 to 3.13 for CrewAI until
+> CrewAI widens its range.
+
 ## Setup
 
 ```python
