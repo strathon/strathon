@@ -46,12 +46,17 @@ two files. Create `egress/Dockerfile`:
 
 ```dockerfile
 FROM python:3.12-slim
-RUN pip install --no-cache-dir "mitmproxy>=11.0" httpx
+RUN pip install --no-cache-dir "mitmproxy>=12.2.3" httpx "cel-python>=0.5.0"
 WORKDIR /app
-# The addon and the credential patterns it imports. Copy them from the
-# receiver source (the addon does `from credential_patterns import PATTERNS`,
-# so both must sit together on the working directory / import path).
-COPY receiver/egress_proxy.py receiver/credential_patterns.py ./
+# The addon and every receiver module it imports, copied from the receiver
+# source so they sit together on the working directory / import path. All
+# four are required: the addon imports credential_patterns and policies,
+# and policies imports policies_eval. Omitting policies.py makes the addon
+# fail closed and block every request; copying it without cel-python
+# installed is worse, because CEL evaluation then raises inside each policy,
+# every policy is skipped, and the proxy allows everything.
+COPY receiver/egress_proxy.py receiver/credential_patterns.py \
+     receiver/policies.py receiver/policies_eval.py ./
 EXPOSE 8080
 ENTRYPOINT ["mitmdump", "--listen-host", "0.0.0.0", "--listen-port", "8080", \
             "-s", "/app/egress_proxy.py"]

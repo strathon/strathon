@@ -48,15 +48,27 @@ It does two things on every request, and one on every response:
 
 ## Running it
 
-Install mitmproxy (bundled in the `proxy` extra) and start the addon:
+Install mitmproxy and start the addon. The addon runs standalone — it imports
+mitmproxy, httpx, cel-python, and three receiver modules, and uses neither the
+`strathon` SDK nor the installed receiver package — so give it an environment
+of its own:
 
 ```bash
-pip install "strathon[proxy]"      # or: pip install mitmproxy
+pip install "mitmproxy>=12.2.3" httpx "cel-python>=0.5.0"
 
 mitmdump -s receiver/egress_proxy.py \
   --set strathon_url=http://localhost:4318 \
   --set strathon_key=$STRATHON_API_KEY
 ```
+
+> A separate environment is required, not just tidier. On Python below 3.13
+> mitmproxy caps `typing-extensions<=4.14` while the receiver's pydantic needs
+> `>=4.14.1`, and mitmproxy also caps `cryptography<=48.1` against the
+> receiver's `>=49.0.0` — so the two cannot resolve together, and the receiver
+> declares no `proxy` extra for that reason. The deployment in
+> [egress-locking.md](egress-locking.md) already reflects this: the proxy image
+> copies `egress_proxy.py` and `credential_patterns.py` in rather than
+> installing the receiver package.
 
 Then point the agent's process at the proxy:
 
@@ -107,21 +119,38 @@ specific destination.
 
 ## Fail-closed on the policy path
 
-If local policy evaluation raises (for example, the policy engine module is
-unavailable in the proxy process), the request is **blocked**, not allowed. A
+If local policy evaluation raises — for example the policy engine module is not
+importable in the proxy process — the request is **blocked**, not allowed. A
 security control that allowed traffic when its evaluation failed would be a
 bypass. Credential scanning runs independently and is unaffected.
+
+That covers a subtler case too. `evaluate_for_span` deliberately swallows an
+exception from an individual policy and logs it, so one malformed expression
+cannot take down evaluation of the rest. A missing CEL engine would otherwise
+make every policy raise there, every one get skipped, and the addon receive an
+empty match list — which reads as "nothing matched" and would allow the
+request. So the addon imports the CEL engine up front: if it is absent the
+import raises and the request is blocked, rather than the proxy running on
+while quietly enforcing nothing. `test_missing_cel_engine_fails_closed` pins
+that behavior.
 
 ## Deployment constraint
 
 Because policy evaluation happens locally inside the mitmproxy process, that
-process must be able to import Strathon's policy engine
-(`policies.evaluate_for_span` and `credential_patterns`). Running the addon
-from a checkout that has the `receiver/` package importable (as in the
-`mitmdump -s receiver/egress_proxy.py` invocation above) satisfies this. If you
-package the proxy separately, include the policy-engine module on its
-`PYTHONPATH`. Credential scanning alone works without the receiver package only
-if `credential_patterns` is importable.
+process needs three receiver modules importable — `credential_patterns` and
+`policies`, which the addon imports directly, and `policies_eval`, which
+`policies` imports in turn — plus `cel-python` installed for the CEL engine
+itself. Running the addon from a checkout that has `receiver/` on the import
+path (as in the `mitmdump -s receiver/egress_proxy.py` invocation above)
+satisfies the module half; the CEL engine still has to be installed.
+
+If you package the proxy separately, copy all three modules onto its
+`PYTHONPATH` and install `cel-python` alongside mitmproxy. Omitting a module
+makes the addon fail closed and block every request, which is loud. Omitting
+`cel-python` is the quiet failure described above, so verify enforcement rather
+than assuming it. Credential scanning alone works with only
+`credential_patterns` importable and needs neither `policies` nor the CEL
+engine.
 
 ## Egress proxy vs SDK vs MCP gateway
 

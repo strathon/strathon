@@ -77,7 +77,7 @@ attrs["gen_ai.tool.name"] in ["deploy", "rollback", "scale"]
   `ClaudeSDKClient`; `query()` and `ClaudeSDKClient.query()` are wrapped for
   session-level tracing only.
 - Captures extended thinking content as span attributes.
-- Requires `claude-agent-sdk>=0.1.81` (installed by the `claude-agent`
+- Requires `claude-agent-sdk>=0.2.126` (installed by the `claude-agent`
   extra) — the minimum version with the `PreToolUse`/`PostToolUse` hooks used
   for enforcement.
 

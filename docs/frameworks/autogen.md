@@ -10,12 +10,20 @@ captures conversations, tool calls, and LLM interactions.
 > the tool result directly, and `require_approval` pauses until an operator
 > decides (and fails closed on expiry).
 
-
 ## Installation
 
 ```bash
 pip install "strathon[autogen]"
 ```
+
+> **Install this in your agent's environment, not alongside the receiver.**
+> `autogen-core` requires `protobuf~=5.29.3` and the receiver requires
+> `protobuf>=7.35.1`. Those ranges do not overlap, so pip resolves one and
+> reports the other as unsatisfied. The two are designed to run apart — the
+> receiver in its own container or virtualenv, the SDK inside the agent
+> application — so this only appears if both land in one environment. If you are testing the AutoGen adapter, give it a clean
+> virtualenv; an adapter exercised against an unsupported `protobuf` is not
+> a trustworthy result.
 
 ## Setup
 
@@ -38,7 +46,7 @@ instrument(client, frameworks=["autogen"])
 
 ## Example Policy
 
-Block code execution tools in production:
+Block code execution tools outright:
 
 ```cel
 attrs["gen_ai.tool.name"] == "execute_code"
@@ -57,7 +65,7 @@ attrs["gen_ai.tool.name"] == "execute_code"
 - Wraps `BaseChatAgent.on_messages` and `BaseGroupChat.run` for conversation
   and team tracing, and `BaseTool.run_json` to enforce policies on each tool
   call (the enforcement boundary). All installed at instrument time.
-- Requires `autogen-agentchat>=0.7.0` (installed by the `autogen` extra).
+- Requires `autogen-agentchat>=0.7.5` (installed by the `autogen` extra).
 - Multi-agent conversations create a single trace with per-agent spans.
 
 ## Learn More

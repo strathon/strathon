@@ -17,6 +17,14 @@ Two mechanisms, one `instrument()` call.
 pip install "strathon[crewai]"
 ```
 
+> **A dependency scan of this extra will report findings that are not ours to
+> fix.** CrewAI pins `chromadb~=1.1.0` and `json-repair~=0.25.2`, and both of
+> those ranges currently sit below the versions that carry advisory fixes.
+> Neither range can be lifted from here — pip has no mechanism for overriding
+> a dependency's own pins — so remediation has to come from CrewAI upstream,
+> or from a constraints file you apply at install time and validate yourself.
+> The `strathon` and `strathon-cli` packages themselves audit clean.
+
 ## Setup
 
 ```python
@@ -74,7 +82,7 @@ The crew pauses until an operator approves in the dashboard or Slack.
   `ToolUsageStartedEvent`). Enforcement wraps the tool-invoke boundary
   (a class-level patch installed at instrument time), which is what lets
   CrewAI support the full action set including interactive approval.
-- Requires `crewai>=1.14.7` (installed by the `crewai` extra).
+- Requires `crewai>=1.15.5` (installed by the `crewai` extra).
 - Multi-agent crews create a single trace with per-agent spans.
 
 ## Learn More

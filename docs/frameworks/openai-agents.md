@@ -74,7 +74,7 @@ attrs["gen_ai.agent.name"] == "research_agent"
 - `block`, `throttle`, and `require_approval` enforce automatically after
   `instrument()`. `steer` needs the tool guardrail
   (`attach_strathon_guardrails`), which uses the Tool Guardrails API.
-- Requires `openai-agents>=0.17.5` (installed by the `openai-agents` extra).
+- Requires `openai-agents>=0.18.3` (installed by the `openai-agents` extra).
 - Guardrail results are captured as span events.
 
 ## Learn More

@@ -70,7 +70,7 @@ attrs["gen_ai.tool.name"] == "fetch_record"
 
 - Uses `AbstractCapability`: Pydantic AI's official plugin interface.
 - Zero monkey-patching. You pass the capability in `Agent(capabilities=[...])`.
-- Requires `pydantic-ai-slim>=1.80.0` (installed by the `pydantic-ai` extra).
+- Requires `pydantic-ai-slim>=2.17.0` (installed by the `pydantic-ai` extra).
 - 36 tests cover the integration.
 
 ## Learn More

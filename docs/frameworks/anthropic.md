@@ -72,7 +72,7 @@ attrs["gen_ai.provider.name"] == "anthropic"
 
 - Wraps `messages.create` (sync and async).
 - Streaming responses are traced with token counts at completion.
-- Requires `anthropic>=0.40.0` (installed by the `anthropic` extra).
+- Requires `anthropic>=0.119.0` (installed by the `anthropic` extra).
 
 ## Learn More
 
