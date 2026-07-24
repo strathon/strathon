@@ -1216,10 +1216,16 @@ def admin_create_user(email, password, display_name, role):
 
 
 @admin.command("list-users")
-def admin_list_users():
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def admin_list_users(as_json: bool):
     """List all members of the current project."""
     data = api_get( "/v1/members")
     items = data.get("data", []) if data else []
+
+    if as_json:
+        click.echo(json_mod.dumps(items, indent=2))
+        return
+
     if not items:
         console.print("[yellow]No members found.[/]")
         return
