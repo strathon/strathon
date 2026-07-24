@@ -19,5 +19,13 @@
 #          values are bound parameters (:pid, :limit, ...). Verified no raw
 #          user input reaches the SQL string. See repositories/* and api/*.
 #
+# This is a deny list over bandit's defaults, not an allow list, and that
+# is deliberate. An allow list would freeze the check set: a new bandit
+# release could add a genuinely useful check and it would never run. The
+# version is pinned in requirements-ci.txt and watched by dependabot, so a
+# new release arrives as a reviewable pull request instead of a surprise
+# red build -- which is the property an allow list would be buying, at the
+# cost of never learning anything new.
+#
 # Run locally:  bandit -r receiver/ sdk/src/ cli/ scripts/ -x '*/tests/*,*/test_*.py'
 skips: [B101, B105, B110, B112, B310, B404, B603, B607, B608]

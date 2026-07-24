@@ -40,7 +40,7 @@ jobs:
           python-version: "3.12"
       - name: Bandit static security scan
         run: |
-          pip install bandit
+          pip install -r requirements-ci.txt
           bandit -r receiver/ sdk/src/ cli/ scripts/ \
             -x '*/tests/*,*/test_*.py' -c .bandit -q
 
@@ -55,7 +55,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v7
 
@@ -209,6 +209,39 @@ jobs:
         run: pytest tests/ -v --tb=short
 
   # ============================================================
+  # Egress proxy tests — run in the proxy's OWN dependency set, not the
+  # receiver's. The addon ships as a separate image (docs/egress-locking.md)
+  # because mitmproxy caps cryptography and typing-extensions below what the
+  # receiver requires. Installing receiver[dev] here leaves mitmproxy absent,
+  # pytest.importorskip skips the whole module, and all ten tests silently do
+  # not run — which is what happened before this job existed. cel-python is
+  # explicit: without it every policy raises inside the evaluator and the
+  # addon must fail closed rather than allow.
+  # ============================================================
+  egress-proxy-tests:
+    name: Egress proxy tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install the proxy dependency set
+        run: |
+          python -m pip install --upgrade pip
+          pip install "mitmproxy>=12.2.3" httpx "cel-python>=0.5.0" \
+            pydantic pydantic-settings pytest pytest-asyncio
+          pip check
+
+      - name: Run egress proxy tests
+        working-directory: receiver
+        run: pytest tests/test_egress_proxy.py -v
+
+  # ============================================================
   # Docker build verification — proves the receiver image actually
   # builds. Catches Dockerfile regressions before they hit users on
   # quickstart. We don't push the image anywhere yet (no registry
@@ -287,7 +320,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install ruff
-        run: pip install ruff
+        run: pip install -r requirements-ci.txt
 
       - name: Run ruff check
         run: ruff check .
@@ -310,6 +343,9 @@ jobs:
           python-version: "3.12"
       - name: Check referenced CEL attributes are all emitted
         run: python scripts/check_cel_attributes.py
+
+      - name: Check documented dependency versions match the code
+        run: python scripts/check_doc_versions.py
 
   # ============================================================
   # SDK type check — BLOCKING. The SDK passes mypy clean: a scoped
@@ -337,7 +373,7 @@ jobs:
           # lazy runtime imports, not their static types), so the framework
           # extras are not needed here and only make mypy follow their
           # transitive deps. One of those, numpy via crewai, ships 3.12-only
-          # stub syntax that aborts the run under the SDK's 3.10 mypy target.
+          # stub syntax that aborts the run under the SDK's 3.11 mypy target.
           # Framework behavior is covered by the sdk-tests matrix.
           pip install -e "./sdk[dev]"
       - name: mypy (SDK)

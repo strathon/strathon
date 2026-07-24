@@ -1,0 +1,32 @@
+# Lint rules are selected by name rather than inherited from ruff's
+# implicit default. That default has widened before -- 0.16.0 added the
+# bugbear, isort, pyupgrade, and bandit families among others -- which
+# turns a ruff release into a red CI job on code that never changed.
+# Naming the rules means a ruff upgrade changes what we lint only when
+# we decide it should.
+#
+# The set below is E4/E7/E9/F, which the tree was already clean against,
+# plus two families measured at zero findings and kept for what they
+# encode: YTT flags sys.version slicing and string comparison, which
+# silently misread a two-digit minor, and TID252 requires absolute
+# imports over relative-from-parent, so moving a module cannot make it
+# resolve to a different package. (TID also carries TID251, banned-api,
+# which stays inert until banned names are configured.)
+#
+# Deliberately not selected yet, with the finding counts measured when
+# this was written: ISC 1, LOG 1, PIE 5, A 6, C4 6, EXE 7, DTZ 9, N 9,
+# RET 9, Q 11, ERA 14, and the larger B, SIM, UP, PL, RUF, S families.
+# Each is a real style decision and several touch behavior -- DTZ
+# rewrites naive datetimes in a system that partitions on nanosecond
+# timestamps. Adopt them one family at a time, with the diff reviewed on
+# purpose, not in bulk.
+#
+# target-version tracks the lowest Python the packages here support, which
+# is 3.11 (sdk and cli); receiver/pyproject.toml carries its own
+# [tool.ruff] block, resolved separately by ruff's config discovery, and
+# targets 3.12 because that is its own floor. Both select the same rules.
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = ["E4", "E7", "E9", "F", "YTT", "TID"]
