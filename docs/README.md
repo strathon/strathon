@@ -8,6 +8,7 @@ it takes you from zero to a running firewall blocking a real agent action.
 | [Getting started](getting-started.md) | Install, connect an agent, write your first policy, see it block a call |
 | [Core concepts](concepts.md) | The mental model: spans, traces, policies, the seven actions, inline enforcement, audit log |
 | [Scope & limitations](scope.md) | What the three enforcement layers do and don't do, and what's roadmap vs shipped |
+| [Failure model](failure-model.md) | What every component does when something breaks: fail closed, fail open, fail static, and the two settings that only look like failure modes |
 | [Runtime intervention](intervention.md) | CEL policies, the seven actions (block/steer/throttle/log/alert/require_approval/allow), allow-list mode, time-based rules, policy versioning, halts, budgets, webhooks |
 | [Human approval](approvals.md) | The require_approval action, N-of-M multi-party sign-off, fail-closed expiry with notifications, approvals at the MCP boundary |
 | [Analytics](analytics.md) | Trace list, trace tree, span aggregation, behavioral drift detection (Vigil) |

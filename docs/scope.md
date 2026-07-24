@@ -31,7 +31,8 @@ log, alert, or allow. Across the supported frameworks the available actions vary
 by surface: some frameworks expose a synchronous callback that can block but
 cannot pause for approval; see [intervention.md](intervention.md) for the
 per-surface matrix. Where a surface cannot fully execute a matched action, it
-fails closed.
+fails closed; [failure-model.md](failure-model.md) states what every component
+does when something breaks.
 
 **MCP gateway.** Evaluates every `tools/call` against the same policies, fails
 closed if evaluation can't complete, and scans tool responses for leaked

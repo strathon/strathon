@@ -50,7 +50,8 @@ than stalling. A brief outage does not break your agent.
 For security-critical agents you can set `fail_closed=True`, which stops tool
 calls when policy state cannot be verified within
 `fail_closed_max_staleness_sec`. Choose deliberately: fail-open prioritizes
-uptime, fail-closed prioritizes control. See the Failure Semantics section of
+uptime, fail-closed prioritizes control. See the [failure model](failure-model.md)
+for what every component does when something breaks, and the Failure Semantics section of
 the README.
 
 ## How do I test a policy without blocking real traffic?

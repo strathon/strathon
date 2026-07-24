@@ -7,7 +7,7 @@ receiver API; ships in the Docker Compose stack.
 ## Run
 
 ```bash
-npm install
+npm ci   # reproduces package-lock.json exactly; use npm install only to change a dependency
 npm run dev
 ```
 

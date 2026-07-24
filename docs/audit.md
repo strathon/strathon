@@ -17,7 +17,8 @@ Every mutation routed through the receiver's REST API emits one
 `audit.events` row inside the same database transaction as the
 mutation itself. If the audit insert fails, the mutation rolls back.
 This is the fail-closed contract: there is no path where the
-control plane changes and the audit log doesn't notice.
+control plane changes and the audit log doesn't notice. It is one row of
+the [failure model](failure-model.md), which covers every component.
 
 Audited endpoints:
 

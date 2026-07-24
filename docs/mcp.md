@@ -103,6 +103,9 @@ matches MCP calls and framework-captured calls identically.
 
 ## Fail-closed by default
 
+What every other component does when something breaks is in the
+[failure model](failure-model.md).
+
 If policy evaluation cannot complete (for example, the policy set fails to
 load), a `tools/call` is **blocked**, not allowed. A security gateway that
 allowed traffic whenever its policy engine was unavailable would be a

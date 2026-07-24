@@ -57,23 +57,23 @@ The five call-affecting actions (`block`, `steer`, `throttle`,
 whichever of Strathon's three enforcement layers the call passes through: the
 in-process SDK for instrumented frameworks, the [MCP gateway](mcp.md) for
 MCP-routed tool calls, and the [egress proxy](egress.md) for raw outbound
-HTTP. That is what makes Strathon a firewall rather than an observability
-tool: enforcement is inline, not after the fact.
+HTTP.
 
 ## Enforcement is inline
 
-Because enforcement runs in your agent's process before each call, a `block`
-genuinely prevents the action — the tool function body never runs. That is what
-makes Strathon a firewall rather than an observability tool: enforcement is
-inline, not after the fact.
+A `block` genuinely prevents the action: the tool function body never runs, the
+`tools/call` is rejected, or the outbound request is refused, depending on which
+layer caught it. That is what makes Strathon a firewall rather than an
+observability tool — enforcement is inline, not after the fact.
 
 Policies are evaluated against a short-lived local cache, so a brief receiver
 outage does not add latency. By default the SDK is **fail-open**: if it cannot
 reach the receiver to refresh policy state, agents keep running on last-known
 state rather than stalling; this favors availability. For security-critical
 agents you can opt into **fail-closed** mode, where an unverifiable state stops
-the call instead. See the Failure Semantics section of the README for the
-trade-off and configuration.
+the call instead. The [failure model](failure-model.md) states what every
+component does when something breaks, including the two settings that only look
+like failure modes.
 
 ## Shadow mode
 

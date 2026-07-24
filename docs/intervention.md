@@ -100,7 +100,7 @@ for outbound network requests. By the time a span reaches the server, the
 action has already happened, so `log` and `alert` are the only server-side
 actions.
 
-### Approval support by surface {#approval-support}
+### Approval support by surface
 
 `require_approval` always enforces — it never silently allows. *How* it
 enforces depends on whether the surface can suspend execution to wait for a
@@ -431,7 +431,8 @@ executes.
 
 A halt check failing (network blip during refresh) is fail-open by
 default; the SDK uses its last-known halt cache rather than blocking
-every call. Operators who prefer safer-but-noisier semantics can opt
+every call. See [failure-model.md](failure-model.md) for how this sits
+alongside every other component. Operators who prefer safer-but-noisier semantics can opt
 into fail-closed mode by passing `fail_closed=True` on the client:
 
 ```python
@@ -750,7 +751,7 @@ no extra per-tool call. Where a cell names a function, that action needs that
 opt-in. "Interactive" means a matched `require_approval` policy pauses the call
 until an operator approves or denies; "fails closed" means it blocks (and
 records) the call because the surface is synchronous and cannot pause. See the
-[approval matrix](#approval-support).
+[approval matrix](#approval-support-by-surface).
 
 Why steer differs by surface: a hook that can replace a tool's return value —
 CrewAI, AutoGen, Google ADK, Claude Agent SDK, and Pydantic AI — enforces steer
@@ -767,7 +768,7 @@ paths) can pause the call for an interactive human decision. The synchronous
 callback surfaces (LangGraph, LangChain, Pydantic AI) cannot pause, so a
 matched `require_approval` policy there **fails closed**; it blocks the call
 and records the intervention rather than silently allowing it. See the
-[approval support matrix](#approval-support).
+[approval support matrix](#approval-support-by-surface).
 
 The raw model-SDK integrations (OpenAI, Anthropic) are **observe-only**: they
 emit spans for visibility but do not enforce, because at the raw model-call

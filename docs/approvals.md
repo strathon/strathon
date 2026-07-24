@@ -71,7 +71,8 @@ inside the window.
 Failing closed on an unanswered high-risk call is deliberate: if no one signs off
 in time, the sensitive action does not run. This is separate from the SDK's
 global fail-open or fail-closed setting, which governs what happens when the
-receiver itself is unreachable. See the reliability discussion in
+receiver itself is unreachable. The [failure model](failure-model.md) sets the
+two side by side; the reliability discussion is in
 [Runtime Intervention](intervention.md).
 
 ## At the MCP boundary

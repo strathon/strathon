@@ -5,7 +5,7 @@ standards, and the PR process.
 
 ## Development Setup
 
-**Prerequisites:** Python 3.12+, PostgreSQL 16+, Docker + Compose
+**Prerequisites:** Python 3.12+, Node 24 (dashboard only), PostgreSQL 16+, Docker + Compose
 
 ```bash
 git clone https://github.com/strathon/strathon.git

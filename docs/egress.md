@@ -119,6 +119,9 @@ specific destination.
 
 ## Fail-closed on the policy path
 
+This is one row of the [failure model](failure-model.md), which covers every
+component.
+
 If local policy evaluation raises — for example the policy engine module is not
 importable in the proxy process — the request is **blocked**, not allowed. A
 security control that allowed traffic when its evaluation failed would be a

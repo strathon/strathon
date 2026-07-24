@@ -143,7 +143,7 @@ client = Client(
 )
 ```
 
-Fail-open prioritizes uptime, fail-closed prioritizes containment. Choose deliberately. See [docs/intervention](https://getstrathon.com/docs/intervention) for the full contract.
+Fail-open prioritizes uptime, fail-closed prioritizes containment. Choose deliberately. Every component's behavior under failure is in [docs/failure-model](https://getstrathon.com/docs/failure-model); the full SDK contract is in [docs/intervention](https://getstrathon.com/docs/intervention).
 
 ## Core Features
 

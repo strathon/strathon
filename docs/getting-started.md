@@ -153,7 +153,8 @@ client = Client(
 ```
 
 Choose deliberately: fail-open prioritizes uptime, fail-closed prioritizes
-containment. See [Runtime Intervention](intervention.md) for the full contract.
+containment. The [failure model](failure-model.md) covers every component, and
+[Runtime Intervention](intervention.md) has the full contract.
 
 ## What's next
 
