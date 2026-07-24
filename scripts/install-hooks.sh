@@ -4,7 +4,7 @@
 #   ./scripts/install-hooks.sh
 #
 # Wires scripts/check_secrets.py as the pre-commit hook so staged content is
-# scanned for secrets and a configurable list of disallowed terms before every
+# scanned for secrets before every
 # commit. The same scan runs in CI (.github/workflows/ci.yml), so this is local
 # defense-in-depth, not the only line.
 set -euo pipefail

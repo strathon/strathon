@@ -44,10 +44,10 @@ EXEMPT_PATH_RE = re.compile(
     r"(credential_patterns\.py$"
     r"|/tests?/"
     r"|\.lock$|lock\.json$|\.lockb$"
-    # Both secret scanners necessarily contain secret-shaped detection patterns
-    # and documented example keys (AKIA…EXAMPLE, PEM headers). Each exempts the
-    # other so a scanner's own patterns aren't flagged as a leak.
-    r"|check_secrets\.py$|check-secrets\.sh$)"
+    # This scanner necessarily contains secret-shaped detection patterns and
+    # documented example keys (AKIA…EXAMPLE, PEM headers), so it exempts
+    # itself rather than flagging its own patterns as a leak.
+    r"|check_secrets\.py$)"
 )
 
 

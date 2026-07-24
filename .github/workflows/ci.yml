@@ -21,10 +21,8 @@ permissions:
 
 jobs:
   # ============================================================
-  # Secret + forbidden-term scan. Stdlib-only, no deps, fast.
-  # Blocks accidental credential leaks and a configurable list of
-  # disallowed terms (loaded from a gitignored local file / CI secret)
-  # from reaching the public repo. Mirrors the local pre-commit hook.
+  # Secret scan. Stdlib-only, no deps, fast. Mirrors the local
+  # pre-commit hook.
   # ============================================================
   secret-scan:
     name: Security scan
@@ -32,7 +30,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - name: Scan tracked files for secrets and forbidden terms
+      - name: Scan tracked files for secrets
         run: python scripts/check_secrets.py --all
       - name: Set up Python
         uses: actions/setup-python@v7
