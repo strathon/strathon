@@ -79,6 +79,24 @@ def _segment_path_match(name: str, token: str) -> bool:
     )
 
 
+class PolicyEvaluationUnavailable(RuntimeError):
+    """Every candidate policy failed to evaluate.
+
+    An empty result from ``evaluate_for_span`` used to mean two different
+    things: no policy matched, or evaluation could not run at all. On a
+    recording path those are equivalent. On an enforcement surface they are
+    the difference between allowing a call and blocking it, and the caller
+    had no way to tell them apart -- a missing CEL engine made every policy
+    raise, every one get skipped, and the empty list read as "nothing
+    matched". Raising here makes that case reach a fail-closed handler
+    instead of being mistaken for a clean pass.
+
+    Only raised when *every* evaluable policy failed. A single malformed
+    expression is still swallowed and logged, so one bad policy cannot stop
+    the rest from being evaluated.
+    """
+
+
 def evaluate_for_span(
     policies: List[Dict[str, Any]],
     span_name: str,
@@ -88,25 +106,39 @@ def evaluate_for_span(
 
     Pure function: no DB, no webhook. Caller decides what to do with matches.
     Skips disabled policies and policies whose applies_to filter excludes
-    this span. Crashes inside individual policy evaluation are swallowed
-    and logged so one bad policy can't poison the rest of ingest.
+    this span. A crash inside an individual policy is swallowed and logged so
+    one bad policy can't poison the rest of ingest.
+
+    Raises PolicyEvaluationUnavailable if every policy that was actually
+    evaluated crashed, which means evaluation is broken rather than simply
+    unmatched. Callers that enforce must let that propagate to their
+    fail-closed path; callers that only record may catch it and carry on.
     """
     if not policies:
         return []
     span_ctx = _build_span_context(span_name, attrs)
     matched: List[Dict[str, Any]] = []
+    evaluated = 0
+    failed = 0
     for policy in policies:
         if not policy.get("enabled", True):
             continue
         if not _span_matches_applies_to(span_name, policy.get("applies_to") or []):
             continue
+        evaluated += 1
         try:
             if _evaluate(policy["match_expression"], span_ctx):
                 matched.append(policy)
         except Exception:
+            failed += 1
             logger.exception(
                 "policy evaluation crashed for policy %s", policy.get("id")
             )
+    if evaluated and failed == evaluated:
+        raise PolicyEvaluationUnavailable(
+            f"all {evaluated} candidate policies failed to evaluate for span "
+            f"{span_name!r}; treating as evaluation failure, not as no-match"
+        )
     return matched
 
 
@@ -117,6 +149,7 @@ def evaluate_for_span(
 
 
 __all__ = [
+    "PolicyEvaluationUnavailable",
     "PolicyExpressionError",
     "VALID_ACTIONS",
     "evaluate_for_span",

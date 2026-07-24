@@ -338,9 +338,23 @@ async def ingest_traces(
                         # won't match on cost for this span.
                         pass
 
-                matched_policies = policy_mod.evaluate_for_span(
-                    active_policies, span.name, merged_attrs
-                )
+                try:
+                    matched_policies = policy_mod.evaluate_for_span(
+                        active_policies, span.name, merged_attrs
+                    )
+                except policy_mod.PolicyEvaluationUnavailable:
+                    # Every policy failed to evaluate. This is the recording
+                    # path, not an enforcement surface: the enforcement
+                    # surfaces let this propagate to their fail-closed
+                    # handlers, but dropping the span here would lose
+                    # telemetry as well as enforcement. Record it unmatched
+                    # and let the logged exception carry the diagnosis.
+                    logger.exception(
+                        "policy evaluation unavailable for span %s; "
+                        "recording it without matches",
+                        span.name,
+                    )
+                    matched_policies = []
                 if matched_policies:
                     matched_ids = [p["id"] for p in matched_policies]
                     matched_actions = sorted({p["action"] for p in matched_policies})

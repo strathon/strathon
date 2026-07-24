@@ -204,6 +204,7 @@ try:
                 return {"action": "allow"}
             try:
                 from policies import evaluate_for_span
+
                 tool_name = f"http.{method.lower()}"
                 attrs = {
                     "strathon.tool.name": tool_name,
