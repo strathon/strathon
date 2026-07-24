@@ -141,6 +141,32 @@ def test_eval_error_fails_closed(monkeypatch):
     assert verdict["policy_name"] == "_fail_closed"
 
 
+def test_all_policies_failing_to_evaluate_fails_closed(monkeypatch):
+    """Broken evaluation must block, not read as "nothing matched".
+
+    evaluate_for_span logs and swallows a per-policy crash so one malformed
+    expression cannot stop the rest. If every policy crashes -- a proxy image
+    built without cel-python is the usual cause -- the old contract returned an
+    empty list, indistinguishable from a clean no-match, and this addon would
+    allow the request while looking healthy. It now raises
+    PolicyEvaluationUnavailable, which lands in the fail-closed branch. The MCP
+    gateway has the same test.
+    """
+    addon = _addon()
+    addon._policies = [{
+        "id": "p1", "name": "x", "enabled": True, "action": "block",
+        "applies_to": [], "match_expression": "true", "priority": 1,
+    }]
+    addon._default_action = "allow"
+
+    def boom(*a, **k):
+        raise RuntimeError("CEL engine unavailable")
+
+    monkeypatch.setattr("policies._evaluate", boom)
+
+    verdict = addon._evaluate_policies("POST", "http://upstream.test/x")
+    assert verdict["action"] == "block"
+    assert verdict["policy_name"] == "_fail_closed"
 def test_response_credentials_are_redacted():
     addon = _addon()
     f = _request_flow()

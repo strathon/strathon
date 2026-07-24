@@ -21,6 +21,9 @@ sys.path.insert(0, _RECEIVER_DIR)
 
 
 # Import after sys.path setup so the receiver's top-level modules resolve
+import pytest  # noqa: E402
+
+import policies  # noqa: E402
 from policies import evaluate_for_span  # noqa: E402
 
 
@@ -169,3 +172,58 @@ def test_disabled_policy_is_skipped_regardless_of_applies_to():
         attrs={},
     )
     assert matches == []
+
+
+# ---- Evaluation failure is not a no-match ------------------------------
+
+
+def test_all_policies_failing_raises_rather_than_returning_empty(monkeypatch):
+    """An unevaluable policy set must not look like a clean no-match.
+
+    Returning [] for "every policy crashed" is indistinguishable from
+    "nothing matched", and the enforcement surfaces read the second as
+    permission to allow. Raising forces them into their fail-closed paths.
+    """
+    def boom(*a, **k):
+        raise RuntimeError("CEL engine unavailable")
+
+    monkeypatch.setattr(policies, "_evaluate", boom)
+
+    with pytest.raises(policies.PolicyEvaluationUnavailable):
+        evaluate_for_span(
+            policies=[_policy(applies_to=[]), _policy(applies_to=[])],
+            span_name="tool.call",
+            attrs={},
+        )
+
+
+def test_one_bad_policy_still_lets_the_rest_evaluate(monkeypatch):
+    """Resilience is preserved: only a total failure escalates.
+
+    A single malformed expression must stay swallowed, or one bad policy
+    could take down evaluation for the whole project.
+    """
+    real = policies._evaluate
+
+    def selective(expression, ctx):
+        if expression == "BROKEN":
+            raise RuntimeError("bad expression")
+        return real(expression, ctx)
+
+    monkeypatch.setattr(policies, "_evaluate", selective)
+
+    matched = evaluate_for_span(
+        policies=[
+            _policy(applies_to=[], match_expression="BROKEN"),
+            _policy(applies_to=[], match_expression="true"),
+        ],
+        span_name="tool.call",
+        attrs={},
+    )
+    assert len(matched) == 1
+    assert matched[0]["match_expression"] == "true"
+
+
+def test_no_policies_returns_empty_without_raising():
+    """An empty policy set is a genuine no-match, not a failure."""
+    assert evaluate_for_span(policies=[], span_name="tool.call", attrs={}) == []

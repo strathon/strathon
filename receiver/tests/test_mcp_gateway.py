@@ -104,6 +104,29 @@ def test_fail_closed_blocks_on_eval_error(monkeypatch):
     assert verdict["policy_name"] == "_fail_closed"
 
 
+def test_all_policies_failing_to_evaluate_fails_closed(monkeypatch):
+    """Broken evaluation must block, not read as "nothing matched".
+
+    evaluate_for_span logs and swallows a per-policy crash so one malformed
+    expression cannot stop the rest. If every policy crashes -- a missing CEL
+    engine is the usual cause -- the old contract returned an empty list,
+    indistinguishable from a clean no-match, and this surface would allow the
+    call. It now raises PolicyEvaluationUnavailable, which lands here in the
+    fail-closed branch. The egress proxy has the same test.
+    """
+    gw = _make_gateway(policies=[{
+        "id": "p1", "name": "x", "enabled": True, "action": "block",
+        "applies_to": [], "match_expression": "true", "priority": 1,
+    }])
+
+    def boom(*a, **k):
+        raise RuntimeError("CEL engine unavailable")
+
+    monkeypatch.setattr("policies._evaluate", boom)
+
+    verdict = gw._evaluate("any_tool", {})
+    assert verdict["action"] == "block"
+    assert verdict["policy_name"] == "_fail_closed"
 def test_fail_open_allows_on_eval_error_when_opted_in(monkeypatch):
     gw = _make_gateway(policies=[{"bad": "policy"}], fail_open=True)
 
