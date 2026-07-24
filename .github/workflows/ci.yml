@@ -35,7 +35,7 @@ jobs:
       - name: Scan tracked files for secrets and forbidden terms
         run: python scripts/check_secrets.py --all
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Bandit static security scan
@@ -60,7 +60,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -123,7 +123,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -178,7 +178,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -258,7 +258,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -282,7 +282,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -305,7 +305,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Check referenced CEL attributes are all emitted
@@ -326,7 +326,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install SDK with dev deps
@@ -357,7 +357,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install receiver with dev deps
