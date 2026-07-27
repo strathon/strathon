@@ -5,8 +5,8 @@ The receiver's existing endpoints use /v1/projects/{slug}/members and
 /v1/project/settings. These convenience routes bridge the gap by
 resolving the project from the authenticated user's context.
 
-Also adds endpoints that don't exist yet: capabilities, change-password,
-version, member MFA/password management, transfer-ownership, GDPR export.
+Also adds endpoints that don't exist yet: capabilities, version,
+member MFA/password management, transfer-ownership, GDPR export.
 """
 
 from __future__ import annotations
@@ -55,58 +55,6 @@ async def get_capabilities() -> dict[str, Any]:
 @router.get("/v1/version")
 async def get_version() -> dict[str, str]:
     return {"version": VERSION, "api_version": API_VERSION}
-
-
-# ---- Change password ---------------------------------------------------------
-
-class ChangePasswordBody(BaseModel):
-    current_password: str
-    new_password: str = Field(min_length=1, max_length=128)
-    model_config = {"extra": "forbid"}
-
-
-@router.post("/v1/auth/change-password")
-async def change_password(
-    body: ChangePasswordBody,
-    ctx: auth_mod.ApiKeyContext = Depends(
-        require_scope(auth_mod.SCOPE_AUDIT_READ)
-    ),
-    session: AsyncSession = Depends(get_db_session),
-) -> dict[str, Any]:
-    """Change own password. Requires current password verification."""
-    from password import verify_password
-    from api.auth_endpoints import _validate_password
-
-    _validate_password(body.new_password)
-
-    result = await session.execute(
-        text("SELECT password_hash FROM users WHERE id = :uid"),
-        {"uid": ctx.user_id},
-    )
-    row = result.first()
-    if not row or not verify_password(row[0], body.current_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Current password is incorrect",
-        )
-
-    new_hash = hash_password(body.new_password)
-    await session.execute(
-        text(
-            "UPDATE users SET password_hash = :h, "
-            "force_password_change = false "
-            "WHERE id = :uid"
-        ),
-        {"h": new_hash, "uid": ctx.user_id},
-    )
-
-    # Invalidate all sessions (user must re-login with new password).
-    await session.execute(
-        text("DELETE FROM sessions WHERE user_id = :uid"),
-        {"uid": ctx.user_id},
-    )
-    await session.commit()
-    return {"status": "password_changed"}
 
 
 # ---- Members convenience (resolves project from auth context) ----------------
@@ -804,3 +752,4 @@ async def mfa_enable_alias(
     from api.auth_endpoints import mfa_setup
     authorization = request.headers.get("authorization", "")
     return await mfa_setup(request=request, authorization=authorization, session=session)
+
