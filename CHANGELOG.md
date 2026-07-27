@@ -4,15 +4,18 @@ All notable changes to Strathon are documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 > Versions 0.1.0, 1.0.0, and 1.0.1 were early development builds published
-> during initial setup. v1.1.0 is the first release intended for general use,
-> and this changelog starts there.
+> during initial setup; this changelog starts at v1.1.0.
+>
+> **v1.3.0 is the first public release.** 1.1.0 through 1.2.3 were pre-release
+> iterations that hardened the enforcement surfaces, the audit chain, and the
+> deployment story ahead of it.
 
 ## [Unreleased]
 
-## [1.3.0] - 2026-07-24
+## [1.3.0] - 2026-07-25
 
-This release drops Python 3.10 and removes the SDK `proxy` extra. See
-**Removed** before upgrading.
+_First public release._ Drops Python 3.10 and removes the SDK `proxy` extra;
+see **Removed** before upgrading.
 
 ### Added
 - Interventions are now visible end to end. The SDK marks every span where
@@ -132,7 +135,7 @@ This release drops Python 3.10 and removes the SDK `proxy` extra. See
 - Bulk data export now requires its own scope rather than riding on read
   access. Browsing spans and dumping the dataset are different capabilities.
 
-## [1.2.3] - 2026-06-27
+## [1.2.3] - 2026-06-28
 
 ### Added
 - Approvals can now require multiple approvers (N-of-M). A policy may demand a
