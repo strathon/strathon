@@ -147,43 +147,51 @@ Fail-open prioritizes uptime, fail-closed prioritizes containment. Choose delibe
 
 ## Core Features
 
-### Policy Engine
+Three groups: **enforcement** stops or reshapes an action at the boundary, **detection** surfaces when an agent starts behaving wrong, and **evidence** proves what happened for auditors and operators.
+
+### Enforcement
+
+#### Policy Engine
 
 Write rules in [CEL](https://cel.dev) (Common Expression Language, the same language used by Kubernetes, Firebase, and Google Cloud IAM). Seven enforcement actions: **block**, **steer**, **throttle**, **log**, **alert**, **require_approval**, **allow**. Policies evaluate inside the agent process with sub-millisecond overhead. 12 OWASP-mapped templates for one-click setup. Shadow mode evaluates and records against live traffic but never enforces, so you can validate a policy's match rate before turning it on. [Learn more → getstrathon.com/docs/intervention](https://getstrathon.com/docs/intervention)
 
-### Human Approval Workflows
+#### Human Approval Workflows
 
 Pause an agent until an operator approves or denies in the dashboard, Slack, or the CLI. Multi-party approval (N-of-M) for high-risk actions like financial transactions or data deletion. Undecided requests expire automatically, so an unanswered approval fails closed instead of leaving the agent hung. On surfaces that can pause (async pre-execution hooks, tool-invoke wrapping, CrewAI) the SDK holds the call until a decision arrives; on synchronous callback surfaces that cannot pause (LangGraph, LangChain, Pydantic AI) a matched approval fails closed, blocked and recorded. The per-surface matrix is in the docs. [Learn more → getstrathon.com/docs/intervention](https://getstrathon.com/docs/intervention)
 
-### MCP Security Gateway
+#### MCP Security Gateway
 
 Enforce policy on tools you never instrumented. Point any MCP client at the receiver's `/v1/mcp/proxy` endpoint and every `tools/call` is evaluated before it reaches the server: a blocked call comes back as a JSON-RPC error instead of executing, a steered call returns the replacement without ever contacting the upstream tool, and `tools/list` is filtered so blocked tools never appear in the model's context at all. Responses are scanned for leaked credentials on the way back. If policies cannot be loaded or evaluated, the call is blocked, not allowed. [Learn more → getstrathon.com/docs/mcp](https://getstrathon.com/docs/mcp)
 
-### Egress Proxy
+#### Egress Proxy
 
 Govern the traffic no SDK can see. Run the proxy in front of the agent, set `HTTP_PROXY`, and every outbound request from any library, instrumented or not, is evaluated against the same policy set: calls carry the tool name `http.<method>` and the full URL, so the policy that blocks a domain for your agent blocks it for a third-party dependency too. A credential detected in a request body blocks the request outright; one detected in a response is redacted before the agent reads it. Runs as a separate mitmproxy process in explicit `HTTP_PROXY` mode today; transparent interception is on the roadmap. [Learn more → getstrathon.com/docs/egress](https://getstrathon.com/docs/egress)
 
-### Credential Leak Detection
+### Detection
+
+#### Credential Leak Detection
 
 Catch secrets in motion. 70+ patterns cover AWS keys, GCP service accounts, GitHub tokens, Stripe keys, database URIs, private keys, JWTs, and more, scanned across tool arguments and request and response bodies. Pair the detector with a CEL policy to block any tool call carrying a credential, and stored spans are scrubbed at ingest so a leaked key never sits in your trace history. [Learn more → getstrathon.com/docs/redaction](https://getstrathon.com/docs/redaction)
 
-### Behavioral Drift Detection
+#### Behavioral Drift Detection
 
 EWMA and CUSUM statistical analysis per agent, tracking four signals: policy deny rate, error rate, tool-call rate, and cost per minute. Auto-calibrates from each agent's first 100 observations (configurable), then fires webhook alerts when behavior shifts from the learned baseline, catching both sudden spikes and gradual drift from compromised or malfunctioning agents. [Learn more → getstrathon.com/docs/analytics](https://getstrathon.com/docs/analytics)
 
-### Circuit Breakers
+#### Circuit Breakers
 
 Per-agent and per-tool failure tracking, modeled on the standard CLOSED → OPEN → HALF-OPEN pattern. When an agent or tool exceeds the error threshold the breaker trips: subsequent spans are flagged with the breaker state at ingest, open breakers surface in the API and dashboard, and you can pair the flag with a policy or halt to stop the agent. Half-open probes detect recovery; a reset endpoint closes a breaker manually. [Learn more → getstrathon.com/docs/budgets](https://getstrathon.com/docs/budgets)
 
-### Tamper-Evident Audit Log
+### Evidence & operations
+
+#### Tamper-Evident Audit Log
 
 Prove the trail was not rewritten. Every operator action is chained with HMAC-SHA256, Merkle roots are anchored at configurable intervals, and the table is append-only at the database level (triggers reject UPDATE, DELETE, and TRUNCATE). Built for environments where the audit log is evidence, not just history. [Learn more → getstrathon.com/docs/audit](https://getstrathon.com/docs/audit)
 
-### EU AI Act & NIST AI RMF
+#### EU AI Act & NIST AI RMF
 
 Maps Strathon's runtime controls to obligations in the EU AI Act (Regulation (EU) 2024/1689) and the NIST AI RMF, so deployers can produce the evidence auditors ask for: a tamper-evident audit trail for record-keeping, policy simulation and export for testing documentation, agent inventory with risk scoring, and Article 73 serious-incident reporting metadata. This is a mapping of controls to requirements, not a certification of compliance. Confirm your obligations with qualified counsel. [Learn more → getstrathon.com/docs/compliance-mapping](https://getstrathon.com/docs/compliance-mapping)
 
-### Dashboard
+#### Dashboard
 
 Next.js operator UI: trace waterfall, policy editor, approval cards, agent risk scoring, audit log with hash verification, budget charts, and compliance export. BFF security proxy with httpOnly cookies. Light and dark mode, mobile responsive. [Learn more → getstrathon.com/docs](https://getstrathon.com/docs)
 
@@ -283,7 +291,7 @@ Strathon's threat model is anchored on the [OWASP Top 10 for Agentic Application
 
 | Threat | Strathon Coverage |
 |--------|-------------------|
-| **ASI01** Agent Goal Hijack | CEL policies on prompt content and input patterns, block/alert on detected hijack attempts |
+| **ASI01** Agent Goal Hijack | CEL policies constrain which tools the agent may call and with what arguments, so a hijacked goal that reaches a dangerous call is blocked at the tool-call boundary whether or not the hijack was detected; shadow mode validates a policy before it enforces |
 | **ASI02** Tool Misuse and Exploitation | Pre-execution policy enforcement on tool names and arguments (block/allow-list), exact tool-name matching with default-deny allow-lists, and approval workflows for sensitive tools |
 | **ASI03** Identity and Privilege Abuse | Scoped API keys, RBAC (4 roles), MFA, per-key rate limits |
 | **ASI04** Agentic Supply Chain Vulnerabilities | [MCP gateway](https://getstrathon.com/docs/mcp) evaluates third-party tool/MCP-server calls against policies; [egress proxy](https://getstrathon.com/docs/egress) with domain allowlisting; credential scanning on tool responses |
