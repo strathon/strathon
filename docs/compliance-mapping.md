@@ -159,7 +159,7 @@ for the risk level of the AI system.
 | CBRN Information | Tool-call blocking policies can prevent agents from accessing CBRN-relevant tools or data sources. |
 | Confabulation | Trace capture preserves model outputs alongside tool call context, enabling factual verification workflows. |
 | Data Privacy | PII redaction at ingest (regex + Luhn-validated credit card detection). Configurable per-project redaction rules. |
-| Information Security (Prompt Injection) | CEL policies can match on span attributes to detect prompt injection patterns. OWASP template for prompt injection included. |
+| Information Security (Prompt Injection) | CEL policies constrain which tools an agent may call and with what arguments at the tool-call boundary, so an injected instruction that reaches a dangerous call is blocked whether or not the injection is recognized. OWASP template for prompt injection included. |
 | Harmful Bias | Per-agent, per-model cost attribution and span aggregation surface usage distribution patterns. |
 | Intellectual Property | Audit log provides tamper-evident records of all agent actions for IP dispute resolution. |
 
