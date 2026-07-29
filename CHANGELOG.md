@@ -6,15 +6,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > Versions 0.1.0, 1.0.0, and 1.0.1 were early development builds published
 > during initial setup; this changelog starts at v1.1.0.
 >
-> **v1.3.0 is the first public release.** 1.1.0 through 1.2.3 were pre-release
-> iterations that hardened the enforcement surfaces, the audit chain, and the
-> deployment story ahead of it.
+> Versions 1.1.0 through 1.3.0 were pre-release iterations that hardened the
+> enforcement surfaces, the audit chain, and the deployment story.
 
 ## [Unreleased]
 
 ## [1.3.0] - 2026-07-25
 
-_First public release._ Drops Python 3.10 and removes the SDK `proxy` extra;
+Drops Python 3.10 and removes the SDK `proxy` extra;
 see **Removed** before upgrading.
 
 ### Added
