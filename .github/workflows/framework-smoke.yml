@@ -1,0 +1,61 @@
+name: Framework drift smoke
+
+# Runs the framework adapter smoke tests against the LATEST release of each
+# framework, weekly, to catch an upstream change that breaks an adapter before a
+# user hits it. This is a drift alarm, not a release gate: the pinned-floor smoke
+# in the main CI (the sdk-tests job) proves the ">=floor" support claim on every
+# push; this job proves nothing has broken at the top of the range yet.
+#
+# It installs each framework unpinned, so a red run here means "a framework
+# released something our adapter does not handle -- go look", not "main is
+# broken". Never make this a required check.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-latest:
+    name: Adapters vs latest frameworks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: sdk/pyproject.toml
+
+      - name: Install SDK and the latest of every framework
+        working-directory: sdk
+        run: |
+          python -m pip install --upgrade pip
+          # SDK core plus the latest release of each framework, unpinned, so the
+          # smoke runs against whatever is current rather than the floors.
+          pip install -e . pytest pytest-asyncio
+          pip install --upgrade \
+            anthropic \
+            "autogen-agentchat" \
+            "claude-agent-sdk" \
+            crewai \
+            "google-adk" \
+            langchain \
+            langgraph \
+            openai \
+            "openai-agents" \
+            "pydantic-ai-slim"
+
+      - name: Report installed framework versions
+        working-directory: sdk
+        run: pip list | grep -iE 'anthropic|autogen|claude-agent|crewai|google-adk|langchain|langgraph|openai|pydantic-ai' || true
+
+      - name: Smoke the adapters
+        working-directory: sdk
+        run: python -m pytest tests/test_framework_smoke.py -q -rs
