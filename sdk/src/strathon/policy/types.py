@@ -253,3 +253,19 @@ class StrathonHaltExceeded(Exception):
         self.scope = scope
         self.scope_value = scope_value
         self.reason = reason
+
+
+# Canonical set of exceptions that represent a real enforcement decision and
+# MUST reach the tool boundary. Adapter pre-tool hooks catch broad Exception so a
+# bug in instrumentation cannot break the user's agent, but that swallow must
+# never absorb one of these -- doing so silently converts a block, a halt, or a
+# fail-closed refusal into an allow. StrathonReceiverUnreachable is only raised
+# under Client(fail_closed=True), so if it is raised the operator has explicitly
+# chosen safety over availability and the call must stop.
+from strathon.exceptions import StrathonReceiverUnreachable  # noqa: E402
+
+ENFORCEMENT_SIGNALS: tuple = (
+    StrathonPolicyBlocked,   # covers StrathonPolicyThrottled, StrathonApprovalDenied
+    StrathonHaltExceeded,
+    StrathonReceiverUnreachable,
+)

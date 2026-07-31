@@ -284,9 +284,11 @@ def test_throttle_decision_carries_retry_after_consistent_with_config():
     assert d.retry_after_seconds == pytest.approx(2.0, abs=0.1)
 
 
-def test_throttle_malformed_config_admits_call_with_warning(caplog):
-    """A throttle policy whose config is missing required keys must
-    NOT silently block agents. Log a warning and admit the call."""
+def test_throttle_malformed_config_fails_closed_with_warning(caplog):
+    """A throttle policy whose config is malformed must FAIL CLOSED: a matched
+    policy whose action cannot execute must not silently admit, or the control
+    the operator configured is silently disabled. Deny the call (as a throttle)
+    and log a warning so the operator sees it."""
     e = _enforcer()
     e.set_policies_for_testing([
         Policy(
@@ -297,7 +299,8 @@ def test_throttle_malformed_config_admits_call_with_warning(caplog):
     ])
     with caplog.at_level("WARNING"):
         d = e.check_policy(_ctx())
-    assert d.is_allow
+    assert not d.is_allow
+    assert d.action == "throttle"
     assert any("malformed action_config" in m for m in caplog.messages)
 
 

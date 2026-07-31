@@ -25,6 +25,8 @@ This instrumentation captures:
 
 from __future__ import annotations
 
+from strathon.policy.types import ENFORCEMENT_SIGNALS
+
 import functools
 import json
 import logging
@@ -244,9 +246,10 @@ def _install_tool_patch(client) -> bool:
         # Always set strathon.tool.args (default "") so an args-based policy
         # matches consistently across every surface — a missing key makes a
         # CEL index error and the policy silently never matches here.
-        span_attrs["strathon.tool.args"] = _truncate(
+        span_attrs["strathon.tool.args"] = (
             _json_or_str(dict(args) if hasattr(args, "items") else args)
-        ) if args else ""
+            if args else ""
+        )  # full for eval; OTel SpanLimits bounds the span copy
 
         # Halt check OUTSIDE the policy try/except: an operator kill-switch
         # must propagate, not be swallowed by the fail-open policy handler.
@@ -258,6 +261,8 @@ def _install_tool_patch(client) -> bool:
                 "name": f"autogen.tool.{tool_name}",
                 "attrs": span_attrs,
             })
+        except ENFORCEMENT_SIGNALS:
+            raise
         except Exception:
             logger.exception(
                 "Policy check failed for tool %s; allowing", tool_name

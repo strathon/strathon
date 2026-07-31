@@ -68,6 +68,9 @@ class PolicyEnforcer:
         self._fail_closed_max_staleness_sec = fail_closed_max_staleness_sec
 
         self._lock = threading.RLock()
+        # Actions we've already warned about not understanding, so the
+        # per-call warning fires once per distinct unknown action, not per call.
+        self._warned_unknown_actions: set = set()
         self._policies: List[Policy] = []
         self._last_refresh_at: float = 0.0
         self._last_refresh_error: Optional[str] = None
@@ -142,12 +145,30 @@ class PolicyEnforcer:
                         "to Client() (revoked? wrong project?).", err,
                     )
             else:
-                logger.debug("PolicyEnforcer refresh failed: %s", err)
+                # Any other HTTP error (500, 404, ...) also means no policies
+                # loaded and enforcement inactive. Warn once per distinct error,
+                # same as the auth case -- DEBUG hid this while the agent ran
+                # unprotected.
+                if changed:
+                    logger.warning(
+                        "PolicyEnforcer: policy refresh failed (%s). Policy "
+                        "enforcement is INACTIVE -- no policies are loaded. "
+                        "The receiver may be unhealthy.", err,
+                    )
             return False
         except URLError as exc:
+            err = f"network error: {exc}"
             with self._lock:
-                self._last_refresh_error = f"network error: {exc}"
-            logger.debug("PolicyEnforcer refresh failed: %s", exc)
+                changed = self._last_refresh_error != err
+                self._last_refresh_error = err
+            # Receiver unreachable: no policies load, enforcement inactive.
+            # Warn once per distinct error rather than hiding it at DEBUG.
+            if changed:
+                logger.warning(
+                    "PolicyEnforcer: cannot reach the receiver to refresh "
+                    "policies (%s). Policy enforcement is INACTIVE -- no "
+                    "policies are loaded.", exc,
+                )
             return False
         except Exception as exc:
             with self._lock:
@@ -247,12 +268,44 @@ class PolicyEnforcer:
                 # Enforcing one here would block live traffic during what the
                 # operator believes is a dry run.
                 continue
-            if policy.action not in {"block", "steer", "throttle", "allow", "require_approval"}:
-                continue
             if not _span_matches_applies_to(span_context, policy.applies_to):
                 continue
             if not evaluate(policy.match_expression, span_context):
                 continue
+
+            # log/alert are known but non-enforcing: they record server-side and
+            # must not block client-side. Skip them (fall through to allow),
+            # exactly as before.
+            if policy.action in {"log", "alert"}:
+                continue
+
+            # The policy MATCHED. If this SDK version does not recognize its
+            # action, we cannot execute the operator's intent -- fail closed
+            # (block) rather than silently skip and let the tool run unenforced.
+            # Warn once per distinct action so the operator knows to upgrade the
+            # SDK. (Today the server only emits known actions, so this is
+            # forward-compat, not a live path.)
+            if policy.action not in {
+                "block", "steer", "throttle", "allow", "require_approval"
+            }:
+                if policy.action not in self._warned_unknown_actions:
+                    self._warned_unknown_actions.add(policy.action)
+                    logger.warning(
+                        "PolicyEnforcer: policy %r matched but its action %r is "
+                        "not understood by this SDK version. Blocking (fail "
+                        "closed) and continuing to warn once per action. Upgrade "
+                        "the strathon SDK to honor this policy correctly.",
+                        policy.name, policy.action,
+                    )
+                return PolicyDecision(
+                    action="block",
+                    policy_id=policy.id,
+                    policy_name=policy.name,
+                    message=(
+                        f"Policy '{policy.name}' uses action '{policy.action}' "
+                        f"unknown to this SDK version; blocked (fail closed)."
+                    ),
+                )
 
             if policy.action == "block":
                 message = (
@@ -374,9 +427,10 @@ class PolicyEnforcer:
         Server-side validation ensures the config has the right shape
         before the policy lands here, but the SDK still defends against
         a malformed cache (e.g. an older SDK reading a newer policy
-        format). On malformed config we log once and admit the call —
-        the alternative is silently throttling agents based on a
-        misconfigured rule, which is worse than letting it through.
+        format). On malformed config we log once and FAIL CLOSED (deny the
+        call as a throttle) -- a matched policy whose action cannot execute
+        must not silently admit, or a misconfigured rule silently disables
+        the control.
         """
         cfg = policy.action_config or {}
         max_calls = cfg.get("max_calls")
@@ -389,12 +443,26 @@ class PolicyEnforcer:
             or isinstance(window_seconds, bool)
             or window_seconds <= 0
         ):
+            # A matched policy whose action cannot execute must fail closed, not
+            # silently admit -- otherwise a misconfigured throttle silently
+            # disables a control the operator put there to limit a dangerous
+            # tool. Deny this call (as a throttle decision) and log once so the
+            # operator sees it and fixes the config.
             logger.warning(
                 "PolicyEnforcer: throttle policy %r has malformed action_config "
-                "(max_calls=%r, window_seconds=%r); admitting call",
+                "(max_calls=%r, window_seconds=%r); failing closed (denying call)",
                 policy.name, max_calls, window_seconds,
             )
-            return None
+            return PolicyDecision(
+                action="throttle",
+                policy_id=policy.id,
+                policy_name=policy.name,
+                message=(
+                    f"Throttle policy '{policy.name}' is misconfigured; failing "
+                    f"closed. Fix its max_calls/window_seconds."
+                ),
+                retry_after_seconds=None,
+            )
 
         scope = cfg.get("scope", "agent")
         if scope == "global":

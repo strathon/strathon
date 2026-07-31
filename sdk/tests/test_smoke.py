@@ -161,3 +161,71 @@ def test_client_registers_atexit_flush():
     # Explicit shutdown unregisters it (no double-flush into a torn-down provider).
     client.shutdown()
     assert client._atexit_registered is False
+
+
+def test_shutdown_restores_global_tracer_provider():
+    # A client that installs itself as the global tracer provider must put the
+    # global back on shutdown. Otherwise the provider it just shut down stays
+    # installed and every later trace.get_tracer() -- including a second
+    # client's -- resolves to a dead provider and drops its spans.
+    from opentelemetry import trace
+
+    # Establish a known starting point: an earlier test in the session may have
+    # left a real provider installed, so reset to the unset (proxy) state first.
+    trace._TRACER_PROVIDER_SET_ONCE = trace.Once()
+    trace._TRACER_PROVIDER = None
+    assert isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider)
+
+    client = Client(
+        api_key="test-key",
+        endpoint="http://localhost:4318",
+        set_global_tracer=True,
+        enable_policies=False,
+        enable_halts=False,
+    )
+    assert client._installed_global_provider is True
+    assert trace.get_tracer_provider() is client._tracer_provider
+
+    client.shutdown()
+    # Global is unset again, so a fresh provider can install cleanly.
+    assert isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider)
+
+    second = Client(
+        api_key="test-key",
+        endpoint="http://localhost:4318",
+        set_global_tracer=True,
+        enable_policies=False,
+        enable_halts=False,
+    )
+    assert second._installed_global_provider is True
+    assert trace.get_tracer_provider() is second._tracer_provider
+    second.shutdown()
+
+
+def test_shutdown_leaves_foreign_global_provider_untouched():
+    # When the client did NOT install the global provider (someone else owns
+    # it), shutdown must not reset it.
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+
+    foreign = TracerProvider()
+    trace._TRACER_PROVIDER_SET_ONCE = trace.Once()
+    trace._TRACER_PROVIDER = None
+    trace.set_tracer_provider(foreign)
+
+    client = Client(
+        api_key="test-key",
+        endpoint="http://localhost:4318",
+        set_global_tracer=True,
+        enable_policies=False,
+        enable_halts=False,
+    )
+    # A real provider was already set, so the client did not install its own.
+    assert client._installed_global_provider is False
+
+    client.shutdown()
+    assert trace.get_tracer_provider() is foreign
+
+    # Reset for any later test.
+    trace._TRACER_PROVIDER_SET_ONCE = trace.Once()
+    trace._TRACER_PROVIDER = None

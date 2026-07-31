@@ -37,6 +37,13 @@ class Config:
     max_retries: int = 3
     retry_backoff_seconds: float = 1.0
 
+    # Maximum length of a string attribute value recorded on a span. Oversized
+    # values are truncated by the OTel SDK for storage/transport only; policy
+    # evaluation always runs against the full, untruncated value. Set to 0 (or
+    # negative) to disable truncation entirely. Kept generous so ordinary tool
+    # arguments are stored whole; it exists to bound pathological payloads.
+    max_span_attr_len: int = 16384
+
     def __post_init__(self) -> None:
         """Validate configuration so misconfiguration fails fast with a clear
         message rather than surfacing as a confusing error deep in the export

@@ -17,6 +17,8 @@ from typing import Any, Dict, Optional
 from opentelemetry import trace as otel_trace
 from opentelemetry.trace import Span as OTelSpan, Status, StatusCode
 
+from strathon.policy.types import ENFORCEMENT_SIGNALS
+
 logger = logging.getLogger(__name__)
 
 
@@ -385,7 +387,7 @@ def _build_strathon_run_hooks(client, user_hooks):
                 "strathon.framework": "agents",
                 "gen_ai.tool.name": tool_name,
                 "strathon.tool.name": tool_name,
-                "strathon.tool.args": _truncate(_safe_json(args), 1500),
+                "strathon.tool.args": _safe_json(args),  # full for eval; span bounded at write
             }
 
             from strathon.policy.steer import check_halt_or_raise
@@ -395,6 +397,8 @@ def _build_strathon_run_hooks(client, user_hooks):
                     "name": f"agents.tool.{tool_name}",
                     "attrs": attrs,
                 })
+            except ENFORCEMENT_SIGNALS:
+                raise
             except Exception:
                 logger.exception("policy check raised in OAI Agents hook; allowing tool")
                 if user_hooks is not None:
@@ -767,7 +771,7 @@ def _build_strathon_guardrail_function(client):
             "strathon.framework": "agents",
             "gen_ai.tool.name": tool_name,
             "strathon.tool.name": tool_name,
-            "strathon.tool.args": _truncate(_safe_str(raw_args), 1500),
+            "strathon.tool.args": _safe_str(raw_args),  # full for eval; span bounded at write
         }
 
         # Halt check first: an operator kill-switch overrides any policy.
@@ -775,6 +779,8 @@ def _build_strathon_guardrail_function(client):
             halt_decision = client.check_halt({
                 "name": f"agents.tool.{tool_name}", "attrs": attrs,
             })
+        except ENFORCEMENT_SIGNALS:
+            raise
         except Exception:
             logger.exception("Strathon guardrail halt check raised; continuing")
             halt_decision = None
@@ -793,6 +799,8 @@ def _build_strathon_guardrail_function(client):
                 "name": f"agents.tool.{tool_name}",
                 "attrs": attrs,
             })
+        except ENFORCEMENT_SIGNALS:
+            raise
         except Exception:
             # Policy lookup failures must NEVER break the user's tool.
             logger.exception("Strathon guardrail policy check raised; allowing")

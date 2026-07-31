@@ -42,6 +42,8 @@ Requires google-adk >= 1.7.0 (the release that shipped the plugin system).
 
 from __future__ import annotations
 
+from strathon.policy.types import ENFORCEMENT_SIGNALS
+
 import json
 import logging
 import time
@@ -93,8 +95,8 @@ def _tool_span_attrs(
     }
     # Always set strathon.tool.args (default "") for consistent matching.
     attrs["strathon.tool.args"] = (
-        _truncate(_json_or_str(tool_args)) if tool_args is not None else ""
-    )
+        _json_or_str(tool_args) if tool_args is not None else ""
+    )  # full for eval; OTel SpanLimits bounds the span copy
     if agent_name:
         attrs["strathon.agent.name"] = agent_name
     return attrs
@@ -241,6 +243,8 @@ def _build_plugin_class():
                     "attrs": span_attrs,
                 }
                 decision = self.client.check_policy(span_context)
+            except ENFORCEMENT_SIGNALS:
+                raise
             except Exception:
                 logger.exception(
                     "Policy check failed for tool %s; allowing execution",

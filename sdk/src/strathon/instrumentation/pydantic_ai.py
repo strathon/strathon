@@ -35,6 +35,8 @@ and the Hooks/SkipToolExecution API).
 
 from __future__ import annotations
 
+from strathon.policy.types import ENFORCEMENT_SIGNALS
+
 import json
 import logging
 import time
@@ -129,8 +131,8 @@ def _tool_span_attrs(
         attrs["strathon.agent.name"] = agent_name
     # Always set strathon.tool.args (default "") for consistent matching.
     attrs["strathon.tool.args"] = (
-        _truncate(_json_or_str(tool_args)) if tool_args is not None else ""
-    )
+        _json_or_str(tool_args) if tool_args is not None else ""
+    )  # full for eval; OTel SpanLimits bounds the span copy
     return attrs
 
 
@@ -271,6 +273,8 @@ def _build_firewall_class():
             try:
                 span_context = {"name": f"pydantic_ai.tool.{tool_name}", "attrs": span_attrs}
                 decision = self.client.check_policy(span_context)
+            except ENFORCEMENT_SIGNALS:
+                raise
             except Exception:
                 logger.exception(
                     "Policy check failed for tool %s; allowing execution", tool_name

@@ -78,6 +78,7 @@ import threading
 from typing import Any, Callable, Dict, Mapping, Optional, Set, Type
 
 from strathon.policy.types import (
+    ENFORCEMENT_SIGNALS,
     StrathonApprovalDenied,
     StrathonHaltExceeded,
     StrathonPolicyBlocked,
@@ -135,7 +136,12 @@ def build_tool_span_attrs(
     attrs: Dict[str, Any] = {
         "gen_ai.tool.name": tool_name,
         "strathon.tool.name": tool_name,
-        "strathon.tool.args": _truncate(_json_or_str(input_value), _MAX_ARG_LEN),
+        # FULL, untruncated args: a content policy (SQL-injection, exfil,
+        # prompt-injection templates all use strathon.tool.args.contains(...))
+        # must see the whole payload. Truncating here let an attacker pad the
+        # arguments past the limit to push the malicious substring out of the
+        # evaluator's view. The span copy is bounded at emission instead.
+        "strathon.tool.args": _json_or_str(input_value),
     }
     if framework:
         attrs["strathon.framework"] = framework
@@ -264,6 +270,10 @@ def check_halt_or_raise(client: Any, span_name: str, attrs: Dict[str, Any]) -> N
     tool_name = attrs.get("strathon.tool.name") or attrs.get("gen_ai.tool.name") or "tool"
     try:
         halt_decision = client.check_halt({"name": span_name, "attrs": attrs})
+    except ENFORCEMENT_SIGNALS:
+        # A halt, a policy block, or a fail-closed refusal is a real enforcement
+        # decision -- it must reach the tool boundary, never be swallowed to allow.
+        raise
     except Exception:
         logger.exception("halt check raised for %s; allowing tool", tool_name)
         return
@@ -348,6 +358,8 @@ def dispatch_policy_decision(
     # halt code can't break the user's tool.
     try:
         halt_decision = client.check_halt({"name": span_name, "attrs": attrs})
+    except ENFORCEMENT_SIGNALS:
+        raise
     except Exception:
         logger.exception(
             "halt check raised for %s; allowing tool", tool_name,
@@ -381,6 +393,8 @@ def dispatch_policy_decision(
 
     try:
         decision = client.check_policy({"name": span_name, "attrs": attrs})
+    except ENFORCEMENT_SIGNALS:
+        raise
     except Exception:
         # Policy lookup failures must NEVER break the user's tool.
         logger.exception(
@@ -528,6 +542,8 @@ async def dispatch_policy_decision_async(
     # ---- Halt check first (operator kill-switch overrides everything) ----
     try:
         halt_decision = client.check_halt({"name": span_name, "attrs": attrs})
+    except ENFORCEMENT_SIGNALS:
+        raise
     except Exception:
         logger.exception("halt check raised for %s; allowing tool", tool_name)
         halt_decision = None
@@ -559,6 +575,8 @@ async def dispatch_policy_decision_async(
 
     try:
         decision = client.check_policy({"name": span_name, "attrs": attrs})
+    except ENFORCEMENT_SIGNALS:
+        raise
     except Exception:
         logger.exception("policy check raised for %s; allowing tool", tool_name)
         return await _run_allow()

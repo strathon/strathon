@@ -473,11 +473,13 @@ class StrathonLangGraphHandler:
         tool_name = _tool_name_from_serialized(serialized)
         # Canonical attribute across all frameworks: strathon.tool.args holds
         # the tool's input as a JSON string (or raw string fallback). Policies
-        # match on this name regardless of framework.
+        # match on this name regardless of framework. Kept FULL for evaluation
+        # -- a content policy must see the whole payload, so truncating here
+        # would let a padded argument evade it. The span copy is bounded below.
         if inputs:
-            tool_args = _truncate(_json_or_str(inputs), 1500)
+            tool_args = _json_or_str(inputs)
         elif input_str:
-            tool_args = _truncate(_safe_str(input_str), 1500)
+            tool_args = _safe_str(input_str)
         else:
             tool_args = ""
 
@@ -608,11 +610,12 @@ class StrathonLangGraphHandler:
                 self._end_span(run_id)
                 return
         except Exception as exc:
-            # Reraise StrathonPolicyBlocked (and its StrathonPolicyThrottled
-            # subclass); swallow other errors so a broken policy never
-            # breaks the underlying app.
-            from strathon.policy import StrathonPolicyBlocked
-            if isinstance(exc, StrathonPolicyBlocked):
+            # Reraise any real enforcement decision (block, throttle, approval
+            # denied, halt, or a fail-closed unreachable-receiver refusal);
+            # swallow only unexpected errors so a broken policy never breaks the
+            # underlying app.
+            from strathon.policy.types import ENFORCEMENT_SIGNALS
+            if isinstance(exc, ENFORCEMENT_SIGNALS):
                 raise
             logger.exception("policy check raised; allowing tool to proceed")
 

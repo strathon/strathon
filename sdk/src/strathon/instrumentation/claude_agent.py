@@ -40,6 +40,8 @@ use ``strathon.instrumentation.anthropic`` instead.
 
 from __future__ import annotations
 
+from strathon.policy.types import ENFORCEMENT_SIGNALS
+
 import functools
 import json
 import logging
@@ -213,9 +215,9 @@ def _build_pre_tool_use_hook(client):
             "strathon.tool.name": tool_name,
         }
         # Always set strathon.tool.args (default "") for consistent matching.
-        span_attrs["strathon.tool.args"] = _truncate(
-            _json_or_str(tool_input)
-        ) if tool_input else ""
+        span_attrs["strathon.tool.args"] = (
+            _json_or_str(tool_input) if tool_input else ""
+        )  # full for eval; OTel SpanLimits bounds the span copy
 
         # Halt check before the policy try/except so an operator kill-switch
         # propagates rather than being swallowed by the fail-open handler.
@@ -227,6 +229,8 @@ def _build_pre_tool_use_hook(client):
                 "name": f"claude_agent.tool.{tool_name}",
                 "attrs": span_attrs,
             })
+        except ENFORCEMENT_SIGNALS:
+            raise
         except Exception:
             logger.exception(
                 "Policy check failed for tool %s; allowing", tool_name
@@ -339,9 +343,9 @@ def _build_post_tool_use_hook(client):
             "strathon.tool.name": tool_name,
         }
         # Always set strathon.tool.args (default "") for consistent matching.
-        span_attrs["strathon.tool.args"] = _truncate(
-            _json_or_str(tool_input)
-        ) if tool_input else ""
+        span_attrs["strathon.tool.args"] = (
+            _json_or_str(tool_input) if tool_input else ""
+        )  # full for eval; OTel SpanLimits bounds the span copy
 
         start = _TOOL_START_TIMES.pop(tool_use_id or "", None)
         if start is not None:

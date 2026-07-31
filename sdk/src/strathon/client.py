@@ -7,13 +7,32 @@ from typing import Optional
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace import SpanLimits, TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 from strathon.config import Config
 from strathon.exceptions import AuthenticationError
 
 logger = logging.getLogger(__name__)
+
+
+def _reset_global_tracer_provider() -> None:
+    """Return OpenTelemetry's global tracer provider to its unset state.
+
+    ``trace.set_tracer_provider`` is guarded by a one-time flag, so it cannot be
+    called twice and there is no public way to clear it. To let a later
+    ``set_tracer_provider`` succeed, reset the module-level provider to a fresh
+    proxy and reset the guard. Touches OpenTelemetry internals, so each step is
+    guarded: an upstream rename degrades to leaving the global as-is rather than
+    raising.
+    """
+    try:
+        if hasattr(trace, "_TRACER_PROVIDER_SET_ONCE"):
+            trace._TRACER_PROVIDER_SET_ONCE = trace.Once()
+        if hasattr(trace, "_TRACER_PROVIDER"):
+            trace._TRACER_PROVIDER = None
+    except Exception:  # pragma: no cover - defensive against OTel internals
+        logger.debug("Strathon: could not reset the global tracer provider")
 
 
 class Client:
@@ -115,8 +134,27 @@ class Client:
             export_timeout_millis=int(self.config.http_timeout_seconds * 1000),
         )
 
-        # Tracer provider owns the span processor and resource
-        self._tracer_provider = TracerProvider(resource=resource)
+        # Tracer provider owns the span processor and resource.
+        #
+        # Attribute-value truncation belongs to the telemetry layer, not the
+        # enforcement path. Policies evaluate against the full attribute dict
+        # before it becomes a span (see PolicyEnforcer.check_policy); the OTel
+        # SDK then truncates oversized string values when they are recorded on a
+        # span, for storage and transport. Doing it here -- once, in the SDK --
+        # instead of in each adapter's attribute builder is what keeps a padded
+        # argument from pushing content past a length limit and out of a content
+        # policy's view. The bound is Config.max_span_attr_len (default 16 KB);
+        # set it to 0 to disable truncation entirely. When left at the default,
+        # the standard OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT env var is not
+        # consulted because an explicit limit is passed; pass 0 to defer to it.
+        span_limits = None
+        if self.config.max_span_attr_len and self.config.max_span_attr_len > 0:
+            span_limits = SpanLimits(
+                max_span_attribute_length=self.config.max_span_attr_len
+            )
+        self._tracer_provider = TracerProvider(
+            resource=resource, span_limits=span_limits
+        )
         self._tracer_provider.add_span_processor(self._span_processor)
 
         # Flush buffered spans on interpreter exit. Without this, a script
@@ -131,11 +169,16 @@ class Client:
             # atexit can be unavailable in some embedded runtimes; non-fatal.
             logger.debug("Strathon: could not register atexit flush")
 
-        # Register as the global provider only if no real one is set yet
+        # Register as the global provider only if no real one is set yet.
+        # Record whether we did, so shutdown() can put the global back rather
+        # than leaving a provider we are about to shut down installed for the
+        # rest of the process.
+        self._installed_global_provider = False
         if set_global_tracer:
             current = trace.get_tracer_provider()
             if isinstance(current, trace.ProxyTracerProvider):
                 trace.set_tracer_provider(self._tracer_provider)
+                self._installed_global_provider = True
 
         # Named tracer for instrumentations and manual span emission
         self._tracer = self._tracer_provider.get_tracer("strathon", "1.3.0")
@@ -307,6 +350,15 @@ class Client:
             except Exception:
                 logger.debug("Strathon: halt enforcer stop raised")
         self._tracer_provider.shutdown()
+        # If this client installed itself as the global provider, put the
+        # global back. OpenTelemetry has no public API to unset it (a one-time
+        # guard blocks a second set_tracer_provider), so reset the module-level
+        # provider to a fresh proxy and clear the guard. Without this, once any
+        # Client is shut down every later trace.get_tracer() call -- including a
+        # second Client's -- resolves to the dead provider and drops its spans.
+        if getattr(self, "_installed_global_provider", False):
+            _reset_global_tracer_provider()
+            self._installed_global_provider = False
 
     def __enter__(self):
         return self
