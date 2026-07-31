@@ -265,6 +265,22 @@ class Settings(BaseSettings):
 
     # ---- Audit log ----
 
+    admin_api_key: str = Field(
+        default="",
+        alias="STRATHON_ADMIN_API_KEY",
+        description=(
+            "Instance-level admin credential for operations that span every "
+            "tenant on the instance rather than a single project -- currently "
+            "the instance-wide audit anchor chain (audit.anchors is a single "
+            "Merkle chain over all events, not per-project data). Presented as "
+            "`Authorization: Bearer <key>`. Must be at least 32 bytes of "
+            "high-entropy material; generate with "
+            "`python -c 'import secrets; print(secrets.token_hex(32))'`. When "
+            "unset, instance-admin endpoints fail closed (503) rather than "
+            "falling back to per-project auth."
+        ),
+    )
+
     audit_hmac_key: str = Field(
         default="",
         alias="STRATHON_AUDIT_HMAC_KEY",

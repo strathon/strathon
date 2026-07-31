@@ -289,16 +289,102 @@ def test_invalid_cursor_returns_500_or_400(client):
 # --- Anchors -----------------------------------------------------------------
 
 
-def test_anchors_endpoint_returns_list(client):
-    key = _mint(client, f"audit-a-{uuid.uuid4().hex[:6]}", ["audit:read"])
+def _set_admin_key(value):
+    """Set STRATHON_ADMIN_API_KEY on the live settings and clear the cache."""
+    import os as _os
+
+    from config import get_settings
+
+    if value is None:
+        _os.environ.pop("STRATHON_ADMIN_API_KEY", None)
+    else:
+        _os.environ["STRATHON_ADMIN_API_KEY"] = value
+    get_settings.cache_clear()
+
+
+def _set_mode(value):
+    """Set STRATHON_MODE ('self-hosted' or 'cloud') and clear the cache."""
+    import os as _os
+
+    from config import get_settings
+
+    if value is None:
+        _os.environ.pop("STRATHON_MODE", None)
+    else:
+        _os.environ["STRATHON_MODE"] = value
+    get_settings.cache_clear()
+
+
+def test_anchors_list_requires_instance_admin(client):
+    """In cloud (multi-tenant) mode the full anchor chain is instance-wide (one
+    Merkle chain over every tenant), so a per-project audit:read key must NOT
+    read it -- it requires the instance-admin credential."""
+    admin = secrets.token_hex(32)
+    _set_mode("cloud")
+    _set_admin_key(admin)
+    try:
+        key = _mint(client, f"audit-a-{uuid.uuid4().hex[:6]}", ["audit:read"])
+        # audit:read is rejected (no instance-admin credential)
+        resp = client.get(
+            "/v1/audit/anchors", headers={"Authorization": f"Bearer {key}"}
+        )
+        assert resp.status_code == 401
+        # the instance-admin key works
+        resp = client.get(
+            "/v1/audit/anchors", headers={"Authorization": f"Bearer {admin}"}
+        )
+        assert resp.status_code == 200
+        assert isinstance(resp.json()["data"], list)
+    finally:
+        _set_admin_key(None)
+        _set_mode(None)
+
+
+def test_anchors_list_fails_closed_without_admin_key(client):
+    """In cloud mode, if STRATHON_ADMIN_API_KEY is unset the endpoint denies
+    (503) rather than falling back to per-project auth or allowing the
+    request."""
+    _set_mode("cloud")
+    _set_admin_key(None)
+    try:
+        key = _mint(client, f"audit-a-{uuid.uuid4().hex[:6]}", ["audit:read"])
+        resp = client.get(
+            "/v1/audit/anchors", headers={"Authorization": f"Bearer {key}"}
+        )
+        assert resp.status_code == 503
+    finally:
+        _set_mode(None)
+
+
+def test_anchors_list_uses_audit_read_in_self_hosted(client):
+    """In self-hosted (single-tenant) mode the chain only covers the one
+    organization, so an audit:read key is the correct authority and no
+    instance-admin credential is required. This matches the pre-audit
+    behavior -- the operator is not locked out of their own integrity chain."""
+    _set_mode("self-hosted")
+    _set_admin_key(None)
+    try:
+        key = _mint(client, f"audit-a-{uuid.uuid4().hex[:6]}", ["audit:read"])
+        resp = client.get(
+            "/v1/audit/anchors", headers={"Authorization": f"Bearer {key}"}
+        )
+        assert resp.status_code == 200
+        assert isinstance(resp.json()["data"], list)
+    finally:
+        _set_mode(None)
+
+
+def test_anchor_status_is_per_project(client):
+    """The per-project status endpoint returns only anchored/latest_at under a
+    normal audit:read key, with no cross-tenant anchor detail."""
+    key = _mint(client, f"audit-s-{uuid.uuid4().hex[:6]}", ["audit:read"])
     resp = client.get(
-        "/v1/audit/anchors",
-        headers={"Authorization": f"Bearer {key}"},
+        "/v1/audit/anchors/status", headers={"Authorization": f"Bearer {key}"}
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert "data" in body
-    assert isinstance(body["data"], list)
+    assert set(body.keys()) == {"anchored", "latest_at"}
+    assert isinstance(body["anchored"], bool)
 
 
 # --- Audit-of-audit ---------------------------------------------------------

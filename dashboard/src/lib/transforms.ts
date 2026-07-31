@@ -313,16 +313,16 @@ export function mapAudit(body: unknown): unknown {
  * a signature). The most recent anchor is the one that matters.
  */
 export function mapAuditAnchors(body: unknown): unknown {
-  const rows = asArray((body as Obj)?.data);
-  if (rows.length === 0) return { data: { anchored: false } };
-  const latest = rows[0] as Obj; // receiver orders anchors newest-first
+  // The receiver's anchor-status endpoint returns only { anchored, latest_at }.
+  // Per-anchor event counts / sequences / signatures were instance-wide and are
+  // no longer exposed to a per-project caller; the header only needs to show
+  // whether, and when, the log was last anchored.
+  const d = (body as Obj)?.data as Obj | undefined;
+  if (!d || !d.anchored) return { data: { anchored: false } };
   return {
     data: {
       anchored: true,
-      anchored_at: latest.anchor_at ?? null,
-      event_count: typeof latest.event_count === "number" ? latest.event_count : null,
-      last_sequence: typeof latest.last_sequence === "number" ? latest.last_sequence : null,
-      signed: Boolean(latest.signature),
+      anchored_at: d.latest_at ?? null,
     },
   };
 }

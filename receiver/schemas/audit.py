@@ -110,6 +110,15 @@ class AuditAnchorListResponse(BaseModel):
     data: list[AuditAnchorRead]
 
 
+class AuditAnchorStatusResponse(BaseModel):
+    """Per-project-safe anchor status: whether the log is anchored and when
+    last, with no per-anchor roots/sequences/counts (which are instance-wide).
+    """
+
+    anchored: bool
+    latest_at: Optional[datetime] = None
+
+
 class AuditVerifyResponse(BaseModel):
     """Result of /v1/audit/events/{id}/verify."""
 

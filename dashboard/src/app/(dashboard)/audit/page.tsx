@@ -4,12 +4,13 @@ import { createPortal } from "react-dom";
 import { Icons } from "@/components/icons";
 import { Badge, Segmented, Sheet, SkeletonTable, Time } from "@/components/ui";
 import { useApi, api } from "@/lib/api-client";
+import type { AuditRow } from "@/lib/types";
 
 export default function AuditPage() {
   const [q, setQ] = useState("");
   const [time, setTime] = useState("7d");
   const [popover, setPopover] = useState<string | null>(null);
-  const [diff, setDiff] = useState<any>(null);
+  const [diff, setDiff] = useState<AuditRow | null>(null);
   // Per-event integrity verdicts, fetched lazily when a badge is opened.
   // null = not checked, "loading" = in flight, else the verify result.
   const [verifyState, setVerifyState] = useState<Record<string, "loading" | { valid: boolean; sequence_no: number | null; error: string | null }>>({});
@@ -52,8 +53,8 @@ export default function AuditPage() {
 
   const params: Record<string, string> = { range: time };
   if (q) params.search = q;
-  const { data, loading, error, refetch } = useApi<{ data: any[] }>("/api/audit", params, [q, time]);
-  const { data: anchorData } = useApi<{ data: { anchored: boolean; anchored_at?: string | null; event_count?: number | null; signed?: boolean } }>("/api/audit/anchors");
+  const { data, loading, error, refetch } = useApi<{ data: AuditRow[] }>("/api/audit", params, [q, time]);
+  const { data: anchorData } = useApi<{ data: { anchored: boolean; anchored_at?: string | null } }>("/api/audit/anchors");
   const anchor = anchorData?.data;
   const entries = data?.data || [];
   const editable = (a: string) => a.includes("update") || a.includes("create") || a.includes("delete") || a.includes("revoke");
@@ -67,7 +68,7 @@ export default function AuditPage() {
       const s = v == null ? "" : String(v);
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const rows = entries.map((e: any) => [
+    const rows = entries.map((e: AuditRow) => [
       e.ts ?? e.timestamp ?? "",
       e.actor ?? "",
       e.category ?? "",
@@ -116,7 +117,7 @@ export default function AuditPage() {
           <table className="table">
             <thead><tr><th style={{ width: 36 }} /><th style={{ width: 200 }}>Timestamp</th><th>Action</th><th>Category</th><th>Actor</th><th>Resource</th><th>IP</th></tr></thead>
             <tbody>
-              {entries.map((e: any) => (
+              {entries.map((e: AuditRow) => (
                 <tr key={e.id} className={editable(e.action) ? "clickable" : ""} onClick={() => { if (editable(e.action)) setDiff(e); }}>
                   <td style={{ position: "relative" }}>
                     {(() => {
@@ -138,7 +139,7 @@ export default function AuditPage() {
                       );
                     })()}
                   </td>
-                  <td className="mono text-secondary" style={{ fontSize: 12 }}><Time absolute ago={e.ts || e.timestamp} /></td>
+                  <td className="mono text-secondary" style={{ fontSize: 12 }}><Time absolute ago={e.timestamp || (e.ts ? String(e.ts) : undefined)} /></td>
                   <td><Badge kind={e.action.includes("delete") || e.action.includes("revoke") || e.action.includes("deny") ? "danger" : e.action.includes("create") ? "success" : "muted"} mono>{e.action}</Badge></td>
                   <td className="text-secondary">{e.category}</td>
                   <td>
@@ -198,7 +199,7 @@ export default function AuditPage() {
         document.body,
       )}
       <Sheet open={!!diff} onClose={() => setDiff(null)} eyebrow="Audit entry" title={diff?.action || ""} wide>
-        {diff && <div><div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}><Badge mono>{diff.id}</Badge><Badge kind="muted">{diff.category}</Badge><span className="t-sm text-secondary">{diff.actor} &middot; <Time absolute ago={diff.ts || diff.timestamp} /></span></div>
+        {diff && <div><div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}><Badge mono>{diff.id}</Badge><Badge kind="muted">{diff.category}</Badge><span className="t-sm text-secondary">{diff.actor} &middot; <Time absolute ago={diff.timestamp || (diff.ts ? String(diff.ts) : undefined)} /></span></div>
           <div className="t-caption text-muted" style={{ marginBottom: 6 }}>Resource</div><div className="code" style={{ marginBottom: 16 }}>{diff.resource}</div>
         </div>}
       </Sheet>

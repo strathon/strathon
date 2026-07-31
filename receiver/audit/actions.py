@@ -94,6 +94,13 @@ AUDIT_EXPORT: Final[str] = "audit.export"
 
 
 # --- Outcomes ------------------------------------------------------------
+#
+# Complete, intentional vocabulary of audit-event outcomes. Not every member is
+# referenced from application code yet (an event today is usually ALLOW/DENY),
+# but the set is the authoritative enumeration an audit record may carry, so the
+# members are defined together and kept whole -- removing the currently-unused
+# ones would leave a lopsided vocabulary and force a schema-ish change the first
+# time one is needed. Treat this block as an enum, not as dead code.
 
 OUTCOME_ALLOW: Final[str] = "allow"
 OUTCOME_DENY: Final[str] = "deny"
@@ -102,6 +109,9 @@ OUTCOME_PARTIAL: Final[str] = "partial"
 
 
 # --- Actor types ---------------------------------------------------------
+#
+# Complete, intentional vocabulary of actor types (see the note on Outcomes).
+# Kept whole for the same reason.
 
 ACTOR_HUMAN: Final[str] = "human"
 ACTOR_SERVICE_ACCOUNT: Final[str] = "service_account"

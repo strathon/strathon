@@ -43,6 +43,7 @@ from schemas.audit import (
     DEFAULT_LIMIT,
     MAX_LIMIT,
     AuditAnchorListResponse,
+    AuditAnchorStatusResponse,
     AuditAnchorRead,
     AuditEventActor,
     AuditEventListResponse,
@@ -54,7 +55,7 @@ from schemas.audit import (
     AuditVerifyResponse,
 )
 
-from ._deps import build_audit_context, require_scope
+from ._deps import build_audit_context, require_anchor_list_access, require_scope
 
 
 logger = logging.getLogger("strathon.receiver.api.audit")
@@ -239,11 +240,12 @@ async def list_anchors_endpoint(
         description="ISO 8601. Return anchors at or after this time.",
     ),
     limit: int = Query(default=100, ge=1, le=MAX_LIMIT),
-    ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
-        require_scope(auth_mod.SCOPE_AUDIT_READ)
-    ),
+    _: None = Depends(require_anchor_list_access),
     session: AsyncSession = Depends(get_db_session),
 ) -> AuditAnchorListResponse:
+    # audit.anchors is a single instance-wide Merkle chain over every tenant's
+    # events (no project_id column), so this is an instance-admin operation, not
+    # a per-project one. Guarded by STRATHON_ADMIN_API_KEY; fails closed if unset.
     rows = await audit_repo.list_anchors(session, since=since, limit=limit)
     return AuditAnchorListResponse(
         data=[
@@ -261,6 +263,28 @@ async def list_anchors_endpoint(
             for r in rows
         ]
     )
+
+
+@router.get("/anchors/status", response_model=AuditAnchorStatusResponse)
+async def anchor_status_endpoint(
+    ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
+        require_scope(auth_mod.SCOPE_AUDIT_READ)
+    ),
+    session: AsyncSession = Depends(get_db_session),
+) -> AuditAnchorStatusResponse:
+    """Whether the audit log is anchored, and when it was last anchored.
+
+    Returns only two fields -- a boolean and the latest anchor timestamp -- and
+    no per-anchor roots, sequences, or counts, so it exposes none of the
+    cross-tenant volume/timing detail that the full anchor list does. This is
+    the standing "is the log tamper-evident" signal the dashboard header needs,
+    scoped to a normal audit:read credential. The full chain remains behind the
+    instance-admin endpoint above.
+    """
+    latest = await audit_repo.latest_anchor(session)
+    if latest is None:
+        return AuditAnchorStatusResponse(anchored=False, latest_at=None)
+    return AuditAnchorStatusResponse(anchored=True, latest_at=latest["anchor_at"])
 
 
 # --- Export ------------------------------------------------------------------
