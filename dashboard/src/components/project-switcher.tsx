@@ -13,7 +13,7 @@ import { api } from "@/lib/api-client";
  * under the new project context), and offers project creation.
  */
 export function ProjectSwitcher({ collapsed }: { collapsed?: boolean }) {
-  const { user, projects, refetch } = useUser();
+  const { user, projects } = useUser();
   const toast = useToast();
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
@@ -31,6 +31,7 @@ export function ProjectSwitcher({ collapsed }: { collapsed?: boolean }) {
       await api.post("/api/projects/switch", { project_id: projectId });
       // Full reload: every page's data is project-scoped, so reload under
       // the new context rather than trying to refetch each view.
+      // eslint-disable-next-line react-hooks/immutability -- full-page navigation after switching project
       window.location.href = "/";
     } catch (e) {
       toast.push({ tone: "danger", title: e instanceof Error ? e.message : "Failed to switch project" });

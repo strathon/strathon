@@ -46,6 +46,7 @@ export function UserProvider({ children, mode = "self-hosted" }: { children: Rea
     } catch {}
   };
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches the current user once on mount
   useEffect(() => { refetch(); }, []);
 
   return <UserContext.Provider value={{ user, projects, loading, refetch, receiverVersion, mode }}>{children}</UserContext.Provider>;

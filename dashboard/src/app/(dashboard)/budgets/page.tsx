@@ -1,14 +1,15 @@
 "use client";
 import { useState } from "react";
 import { Icons } from "@/components/icons";
-import { Badge, StatusBadge, Segmented, AreaChart, CountUp, Skeleton, Empty, Modal, Dropdown, useToast } from "@/components/ui";
+import { Badge, StatusBadge, AreaChart, CountUp, Skeleton, Modal, Dropdown, useToast } from "@/components/ui";
 import { useApi, api } from "@/lib/api-client";
+import type { BudgetRow, BudgetData } from "@/lib/types";
 
 export default function BudgetsPage() {
-  const { data, loading, error, refetch } = useApi<{ data: any }>("/api/budgets");
+  const { data, loading, error, refetch } = useApi<{ data: BudgetData }>("/api/budgets");
   const { data: forecastData } = useApi<{ data: { forecast?: number; headroom?: number | null; burn_rate_usd_per_hour?: number } }>("/api/budgets/forecast");
   const { data: spendSeriesData } = useApi<{ data: { agents?: string[]; series?: Array<Record<string, number>> } }>("/api/budgets/spend-series");
-  const budgets = data?.data || data;
+  const budgets = data?.data;
   const toast = useToast();
 
   const [showCreate, setShowCreate] = useState(false);
@@ -25,7 +26,7 @@ export default function BudgetsPage() {
   const [editAmount, setEditAmount] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
 
-  function openEdit(r: any) {
+  function openEdit(r: BudgetRow) {
     setEditTarget({ id: r.id, name: r.name, threshold: String(r.threshold), kind: r.kind });
     setEditName(r.name);
     setEditAmount(String(r.threshold));
@@ -101,7 +102,7 @@ export default function BudgetsPage() {
   // (not 0) so the KPI shows a muted dash rather than an alarming red 0%.
   const headroom = forecastData?.data?.headroom ?? null;
   const activeRules = budgets?.active_rules || rules.length;
-  const stackedSeries = agents.map((_: string, ai: number) => series.map((d: any) => d?.[agents[ai]] || 0));
+  const stackedSeries = agents.map((_: string, ai: number) => series.map((d: Record<string, number>) => d?.[agents[ai]] || 0));
 
   return (
     <div className="page">
@@ -138,7 +139,7 @@ export default function BudgetsPage() {
           <div className="table-wrap" style={{ border: "none" }}>
             <table className="table" style={{ background: "transparent" }}>
               <thead><tr><th>Name</th><th>Scope</th><th>Threshold</th><th>Period</th><th>Type</th><th>Status</th><th style={{ width: 40 }}></th></tr></thead>
-              <tbody>{rules.map((r: any, i: number) => (
+              <tbody>{rules.map((r: BudgetRow, i: number) => (
                 <tr key={r.id || i}><td style={{ fontWeight: 500 }}>{r.name}</td><td>{r.scope}</td><td className="mono">{r.threshold}</td><td>{r.period}</td>
                   <td><Badge kind={r.kind === "iteration" ? "info" : "accent"} mono>{r.kind === "iteration" ? "iteration" : "cost"}</Badge></td>
                   <td>{r.status === "enabled" ? StatusBadge.enabled() : StatusBadge.shadow()}</td>

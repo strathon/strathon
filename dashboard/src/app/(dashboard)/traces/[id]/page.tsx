@@ -6,6 +6,7 @@ import { Icons } from "@/components/icons";
 import { Badge, StatusBadge, Segmented, Sheet, ServiceDot, CopyableCode, Skeleton, Time, Empty } from "@/components/ui";
 import { useApi } from "@/lib/api-client";
 import { KIND_COLOR, spanColor } from "@/lib/span-colors";
+import type { TraceDetail } from "@/lib/types";
 
 interface WaterfallSpan {
   id: string; parent: string | null; depth: number; name: string;
@@ -24,7 +25,6 @@ interface WaterfallSpan {
   attributes?: Record<string, unknown>;
 }
 
-const SERVICES = ["orchestrator", "tool-shell", "tool-http", "vector-store", "llm-gateway", "policy-engine", "memory-store", "tool-sql"];
 
 // Color spans by KIND (llm/tool/agent/retrieval), not by service: a single-agent
 // trace has one service and would render monochrome. Blocked always overrides to
@@ -136,14 +136,17 @@ export default function WaterfallPage() {
   const params = useParams();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   
-  const { data: traceData, loading: traceLoading, error: traceError, refetch } = useApi<{ data: any }>(`/api/traces/${id}`);
-  const traceResp = traceData?.data || traceData;
-  const trace = traceResp || { id, agent: "", operation: "", status: "ok", started: "", model: "", durationMs: 0, spans: 0 };
+  const { data: traceData, loading: traceLoading, error: traceError, refetch } = useApi<{ data: TraceDetail }>(`/api/traces/${id}`);
+  const traceResp = traceData?.data;
+  const trace: TraceDetail = traceResp || { id, shortId: id, agent: "", operation: "", status: "ok", started: "" };
   // `traceResp.spans` is the span *count* (a number); the actual array lives in
   // `waterfall_spans`. Read the array field, and guard so a non-array can never
   // reach the spreads below.
-  const rawSpans = traceResp?.waterfall_spans ?? traceResp?.spans;
-  const spans: WaterfallSpan[] = Array.isArray(rawSpans) ? rawSpans : [];
+  const rawSpans = traceResp?.waterfall_spans;
+  const spans: WaterfallSpan[] = useMemo(
+    () => (Array.isArray(rawSpans) ? (rawSpans as WaterfallSpan[]) : []),
+    [rawSpans],
+  );
   const totalDur = useMemo(() => spans.length > 0 ? Math.max(...spans.map((s) => s.start + s.dur)) : 1, [spans]);
 
   // Build a chronological log view from the trace's real spans. Each span
@@ -259,7 +262,7 @@ export default function WaterfallPage() {
             <div className="t-caption text-muted">Trace</div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
               <span className="mono" style={{ fontSize: 14, fontWeight: 500 }}>{trace.id}</span>
-              <button className="btn ghost icon sm" title="Copy" onClick={() => navigator.clipboard?.writeText(trace.id)}><Icons.Copy size={13} /></button>
+              <button className="btn ghost icon sm" title="Copy" onClick={() => navigator.clipboard?.writeText(trace.id ?? "")}><Icons.Copy size={13} /></button>
               {StatusBadge[trace.status as keyof typeof StatusBadge]?.() || trace.status}
             </div>
             <div className="t-sm text-secondary" style={{ marginTop: 4 }}>

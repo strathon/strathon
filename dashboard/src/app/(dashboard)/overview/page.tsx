@@ -3,12 +3,12 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Icons } from "@/components/icons";
-import { Badge, StatusBadge, Sparkline, Ring, CountUp, SkeletonTable, Skeleton, useToast, Time } from "@/components/ui";
-import { useApi, api } from "@/lib/api-client";
+import { Badge, Sparkline, CountUp, Skeleton, Time } from "@/components/ui";
+import { useApi } from "@/lib/api-client";
+import type { TraceRow } from "@/lib/types";
 
 export default function OverviewPage() {
   const router = useRouter();
-  const toast = useToast();
 
   const { data: policiesData, loading: pLoading, error: pError } = useApi<{ data: Array<{ id: string; name: string; status: string; action: string; hits7d: number[]; priority: number }> }>("/api/policies");
   const { data: tracesData, loading: tLoading, error: tError } = useApi<{ data: Array<{ id: string; shortId?: string; agent: string; operation: string; status: string; started: string }> }>("/api/traces", { limit: "6" });
@@ -52,6 +52,7 @@ export default function OverviewPage() {
   // Compact relative age for dot tooltips ("12m", "3h", "2d").
   const ageLabel = (iso: string | null): string => {
     if (!iso) return "no activity";
+    // eslint-disable-next-line react-hooks/purity -- relative-time label reads the clock by design
     const sec = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
     if (sec < 60) return `${Math.round(sec)}s ago`;
     if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
@@ -73,7 +74,7 @@ export default function OverviewPage() {
   );
 
   // Derive throughput from real trace data
-  const recentSpanCount = traces.reduce((a: number, t: any) => a + (t.spans || t.span_count || 0), 0);
+  const recentSpanCount = traces.reduce((a: number, t: TraceRow) => a + (t.spans || t.span_count || 0), 0);
   const topPolicies = [...policies].sort((a, b) => (b.hits7d?.reduce((x, y) => x + y, 0) || 0) - (a.hits7d?.reduce((x, y) => x + y, 0) || 0)).slice(0, 4);
 
   const allLoading = pLoading || tLoading || aLoading || bLoading;
@@ -81,6 +82,7 @@ export default function OverviewPage() {
 
   // Welcome banner (show when no policies and no api keys, dismissible)
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- reads localStorage (client-only), so the effect is required
   useEffect(() => { try { if (localStorage.getItem("strathon-welcome-dismissed") === "1") setBannerDismissed(true); } catch {} }, []);
   const showWelcome = !bannerDismissed && !pLoading && policies.length === 0;
 

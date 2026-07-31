@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { PROJECT_COOKIE, projectCookieOptions, sessionCookieOptions } from "@/lib/cookies";
+import { PROJECT_COOKIE, projectCookieOptions } from "@/lib/cookies";
 
 const RECEIVER_URL = process.env.RECEIVER_URL || "http://localhost:4318";
 

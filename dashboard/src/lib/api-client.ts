@@ -80,6 +80,9 @@ export function useApi<T = unknown>(
   const [status, setStatus] = useState<number | null>(null);
   const [loading, setLoading] = useState(!!path);
 
+  // Serialize params to a stable string so the callback identity only changes
+  // when the actual query changes, not on every render's new object.
+  const paramsKey = JSON.stringify(params ?? {});
   const refetch = useCallback(async () => {
     if (!path) return;
     setLoading(true);
@@ -94,7 +97,13 @@ export function useApi<T = unknown>(
     } finally {
       setLoading(false);
     }
-  }, [path, JSON.stringify(params), ...deps]);
+    // `deps` is the caller-supplied list of values the fetch depends on (sort,
+    // filters, ...); spreading it here is the hook's contract. `params` is
+    // covered by paramsKey.
+    // A generic data hook takes its dependency list from the caller, so the
+    // array cannot be a static literal here; params are tracked via paramsKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/use-memo -- caller-supplied dynamic deps
+  }, [path, paramsKey, ...deps]);
 
   useEffect(() => { refetch(); }, [refetch]);
   return { data, error, status, loading, refetch };

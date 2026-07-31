@@ -18,6 +18,7 @@ interface Capabilities {
 export default function LoginPage() {
   const router = useRouter();
   const [themeMode, setThemeMode] = useState<"light" | "dark">("dark");
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- browser-only/async-sync effect
   useEffect(() => { setThemeMode(resolveTheme(getStoredTheme())); }, []);
   function toggleTheme() {
     const next = themeMode === "dark" ? "light" : "dark";

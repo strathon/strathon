@@ -2,14 +2,15 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icons } from "@/components/icons";
-import { Badge, Ring, Sparkline, Skeleton, Empty, Dropdown, useToast } from "@/components/ui";
-import { useApi, api } from "@/lib/api-client";
+import { Badge, Ring, Skeleton, Empty, Dropdown, useToast } from "@/components/ui";
+import { useApi } from "@/lib/api-client";
+import type { ComplianceFramework, ComplianceRecommendation } from "@/lib/types";
 
 export default function CompliancePage() {
   const router = useRouter();
   const toast = useToast();
   const [exporting, setExporting] = useState(false);
-  const { data, loading, error, refetch } = useApi<{ data: { frameworks?: any[]; recommendations?: any[] } }>("/api/compliance");
+  const { data, loading, error, refetch } = useApi<{ data: { frameworks?: ComplianceFramework[]; recommendations?: ComplianceRecommendation[] } }>("/api/compliance");
   const frameworks = data?.data?.frameworks || data?.data || [];
   const recommendations = data?.data?.recommendations || [];
 
@@ -45,7 +46,7 @@ export default function CompliancePage() {
       </div>
       {loading ? <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 16 }}>{[1,2,3,4].map(i => <Skeleton key={i} width="100%" height={200} style={{ borderRadius: 12 }} />)}</div> : (Array.isArray(frameworks) && frameworks.length > 0) ? (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 16, marginBottom: 28 }}>
-          {frameworks.map((fw: any) => {
+          {frameworks.map((fw: ComplianceFramework) => {
             const color = fw.coverage >= 80 ? "var(--success)" : fw.coverage >= 60 ? "var(--warning)" : "var(--danger)";
             return (
               <div key={fw.id} className="card">
@@ -69,7 +70,7 @@ export default function CompliancePage() {
         <>
           <h2 className="t-h2" style={{ marginBottom: 14 }}>Recommendations</h2>
           <div className="col" style={{ gap: 10 }}>
-            {recommendations.map((r: any, i: number) => (
+            {recommendations.map((r: ComplianceRecommendation, i: number) => (
               <div key={i} className="card dense" style={{ borderLeftWidth: 3, borderLeftStyle: "solid", borderLeftColor: "var(--warning)", paddingLeft: 18, display: "flex", alignItems: "center", gap: 16 }}>
                 <Icons.AlertTriangle size={18} stroke="var(--warning)" />
                 <div style={{ flex: 1, minWidth: 0 }}>

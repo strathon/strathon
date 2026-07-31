@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Icons } from "@/components/icons";
 import { useUser } from "@/lib/user-context";
 import { Badge, Segmented, Checkbox, Switch, Dropdown, Sheet, useToast, Skeleton, Empty, Modal } from "@/components/ui";
@@ -8,7 +8,17 @@ import { useApi, api } from "@/lib/api-client";
 import { setTheme as persistTheme, getStoredTheme } from "@/lib/theme";
 import { usePermissions } from "@/lib/permissions";
 import { formatDate, formatRelative } from "@/lib/format";
+import type { ApiKeyRow, NotificationChannel } from "@/lib/types";
 
+
+function SettingsRow({ label, sub, children }: { label: string; sub?: string; children: React.ReactNode }) {
+  return (
+    <div className="settings-row">
+      <div className="settings-row-label"><span>{label}</span>{sub && <span className="t-sm text-muted">{sub}</span>}</div>
+      <div className="settings-row-value">{children}</div>
+    </div>
+  );
+}
 
 export function GeneralSettings() {
   const { user: currentUser, refetch } = useUser();
@@ -23,15 +33,19 @@ export function GeneralSettings() {
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- seeds the name field from the fetched user
   useEffect(() => { if (currentUser?.display_name) setName(currentUser.display_name); }, [currentUser]);
   useEffect(() => {
     if (settingsData) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- seeds project fields from fetched settings
       if (settingsData.project_name) setProjectName(settingsData.project_name);
     }
   }, [settingsData]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- reads localStorage (client-only), so the effect is required
   useEffect(() => { try { const s = parseInt(localStorage.getItem("strathon-avatar-idx") || "0", 10); if (s >= 0 && s < 7) setAvatarIdx(s); } catch {} }, []);
   const [theme, setTheme] = useState<string>("system");
   const [isDark, setIsDark] = useState(true);
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- reads the stored theme (client-only) on mount
   useEffect(() => { setTheme(getStoredTheme()); setIsDark(document.documentElement.dataset.theme !== "light"); }, []);
 
   const AVATARS = [
@@ -82,27 +96,21 @@ export function GeneralSettings() {
     }
   };
 
-  const Row = ({ label, sub, children }: { label: string; sub?: string; children: React.ReactNode }) => (
-    <div className="settings-row">
-      <div className="settings-row-label"><span>{label}</span>{sub && <span className="t-sm text-muted">{sub}</span>}</div>
-      <div className="settings-row-value">{children}</div>
-    </div>
-  );
 
   return (
     <div className="settings-rows">
       <div className="settings-section-title">Profile</div>
-      <Row label="Avatar">
+      <SettingsRow label="Avatar">
         <button className="settings-avatar-btn" title="Click to shuffle avatar" onClick={cycleAvatar} style={{ background: av.bg, color: avatarIdx === 0 && !isDark ? "#3a3830" : "rgba(255,255,255,0.85)", borderColor: avatarIdx === 0 && !isDark ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.12)" }}>
           {av.icon ? av.icon : <span>{name.charAt(0).toUpperCase()}</span>}
           <span className="shuffle-icon"><Icons.Shuffle size={16} /></span>
         </button>
-      </Row>
-      <Row label="Full name"><input className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" /></Row>
-      <Row label="Email"><span className="text-secondary" style={{ fontSize: 13.5 }}>{currentUser?.email || ""}</span></Row>
+      </SettingsRow>
+      <SettingsRow label="Full name"><input className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" /></SettingsRow>
+      <SettingsRow label="Email"><span className="text-secondary" style={{ fontSize: 13.5 }}>{currentUser?.email || ""}</span></SettingsRow>
 
       <div className="settings-section-title" style={{ marginTop: 8 }}>Preferences</div>
-      <Row label="Appearance">
+      <SettingsRow label="Appearance">
         <div className="theme-picker">
           {[{ v: "dark", Icon: Icons.Moon }, { v: "light", Icon: Icons.Sun }, { v: "system", Icon: Icons.Cpu }].map((opt) => (
             <button key={opt.v} className="theme-opt" data-active={theme === opt.v} onClick={() => { persistTheme(opt.v as "light" | "dark" | "system"); setTheme(opt.v); setIsDark(document.documentElement.dataset.theme !== "light"); }} title={opt.v}>
@@ -110,20 +118,20 @@ export function GeneralSettings() {
             </button>
           ))}
         </div>
-      </Row>
-      <Row label="Timezone">
+      </SettingsRow>
+      <SettingsRow label="Timezone">
         <span className="text-secondary" style={{ fontSize: 14 }}>UTC</span>
-      </Row>
-      <Row label="Language">
+      </SettingsRow>
+      <SettingsRow label="Language">
         <span className="text-secondary" style={{ fontSize: 14 }}>English (US)</span>
-      </Row>
+      </SettingsRow>
 
       <div className="settings-section-title" style={{ marginTop: 8 }}>Workspace</div>
-      <Row label="Project name">
+      <SettingsRow label="Project name">
         {sLoading ? <Skeleton width={200} height={32} /> : (
           <input className="input" value={projectName} onChange={(e) => setProjectName(e.target.value)} style={{ maxWidth: 240 }} />
         )}
-      </Row>
+      </SettingsRow>
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12, gap: 8 }}>
         <button className="btn primary" onClick={saveSettings} disabled={saving}>
           {saving ? <><span className="spinner" /> Saving&hellip;</> : "Save changes"}
@@ -168,6 +176,7 @@ export function RetentionSliders() {
 
   useEffect(() => {
     if (settingsData?.retention) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- seeds sliders from fetched retention settings
       setValues({
         traces: settingsData.retention.traces_days || 30,
         audit: settingsData.retention.audit_days || 365,
@@ -221,7 +230,7 @@ export function RetentionSliders() {
 
 export function ApiKeysSection() {
   const perms = usePermissions();
-  const { data: keysData, loading, refetch } = useApi<{ data: any[] }>("/api/api-keys");
+  const { data: keysData, loading, refetch } = useApi<{ data: ApiKeyRow[] }>("/api/api-keys");
   const [createOpen, setCreateOpen] = useState(false);
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
   const [secretSaved, setSecretSaved] = useState(false);
@@ -286,7 +295,7 @@ export function ApiKeysSection() {
           <table className="table">
             <thead><tr><th>Name</th><th>Key prefix</th><th>Created</th><th>Last used</th><th /></tr></thead>
             <tbody>
-              {keys.map((k: any) => (
+              {keys.map((k: ApiKeyRow) => (
                 <tr key={k.id}>
                   <td style={{ fontWeight: 500 }}>{k.name}</td>
                   <td className="mono" style={{ fontSize: 12.5 }}>{k.prefix || k.key_prefix || "sk_…"}</td>
@@ -467,7 +476,7 @@ const RECOMMENDED_EVENTS = new Set([
 
 export function IntegrationsSection() {
   const perms = usePermissions();
-  const { data, loading, refetch } = useApi<{ data: any[] }>("/api/notifications");
+  const { data, loading, refetch } = useApi<{ data: NotificationChannel[] }>("/api/notifications");
   const [createOpen, setCreateOpen] = useState(false);
   const [chType, setChType] = useState<string>("slack");
   const [chName, setChName] = useState("");
@@ -510,7 +519,7 @@ export function IntegrationsSection() {
     }
   };
 
-  const toggleEnabled = async (ch: any) => {
+  const toggleEnabled = async (ch: NotificationChannel) => {
     try {
       await api.patch(`/api/notifications/${ch.id}`, { enabled: !ch.enabled });
       refetch();
@@ -544,7 +553,7 @@ export function IntegrationsSection() {
         <Empty icon={<Icons.Bell size={24} />} title="No integrations yet" subtitle="Add a Slack, Discord, GitHub, or webhook channel to receive alerts." />
       ) : (
         <div className="col" style={{ gap: 10 }}>
-          {channels.map((ch: any) => {
+          {channels.map((ch: NotificationChannel) => {
             const meta = CHANNEL_TYPES.find((t) => t.id === ch.channel_type);
             return (
               <div key={ch.id} className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>

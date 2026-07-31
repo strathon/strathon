@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, use } from "react";
+import { useState, useRef, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
 import { Icons } from "@/components/icons";
-import { Badge, StatusBadge, Sparkline, Heatmap, Dropdown, Sheet, InlineEdit, HighlightedCEL, Kbd, Skeleton, Modal, useToast } from "@/components/ui";
+import { Badge, StatusBadge, Sparkline, Dropdown, Sheet, InlineEdit, HighlightedCEL, Skeleton, Modal, useToast } from "@/components/ui";
 import { useApi, api } from "@/lib/api-client";
 import { validatePolicyName, validateCEL } from "@/lib/validation";
+import type { PolicyDetail, PolicyVersion, SimResult, SimExample } from "@/lib/types";
 
 const ACTION_COLOR: Record<string, string> = { block: "danger", steer: "warning", throttle: "warning", log: "muted", alert: "info", require_approval: "info" };
 
@@ -14,8 +15,8 @@ export default function PolicyDetailPage({ params }: { params: Promise<{ id: str
   const router = useRouter();
   const toast = useToast();
 
-  const { data, loading, error, refetch } = useApi<{ data: any }>(`/api/policies/${id}`);
-  const policy = data?.data || data;
+  const { data, loading, error, refetch } = useApi<{ data: PolicyDetail }>(`/api/policies/${id}`);
+  const policy = data?.data;
 
   const [name, setName] = useState("");
   const [status, setStatus] = useState("enabled");
@@ -27,12 +28,13 @@ export default function PolicyDetailPage({ params }: { params: Promise<{ id: str
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [simRunning, setSimRunning] = useState(false);
-  const [simResult, setSimResult] = useState<any>(null);
-  const [diffVersion, setDiffVersion] = useState<any>(null);
+  const [simResult, setSimResult] = useState<SimResult | null>(null);
+  const [diffVersion, setDiffVersion] = useState<PolicyVersion | null>(null);
 
   // Sync local state when policy loads
   useEffect(() => {
     if (policy) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- seeds the edit form from fetched policy data once loaded
       setName(policy.name || "");
       setStatus(policy.status || "enabled");
       setPriority(policy.priority ?? 100);
@@ -155,9 +157,9 @@ export default function PolicyDetailPage({ params }: { params: Promise<{ id: str
                   <span style={{ color: "var(--warning)" }}>Would flag <b>{simResult.would_flag || 0}</b></span>
                   <span style={{ color: "var(--danger)" }}>New blocks <b>+{simResult.new_blocks || 0}</b></span>
                 </div>
-                {simResult.examples?.length > 0 && (
+                {(simResult.examples?.length ?? 0) > 0 && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {simResult.examples.map((ex: any, i: number) => (
+                    {simResult.examples?.map((ex: SimExample, i: number) => (
                       <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", borderRadius: 6, background: "var(--bg-input)", fontSize: 12.5 }}>
                         <span className="mono text-secondary">{ex.trace_id || ex.traceId}</span><span>{ex.agent}</span>
                         <span style={{ color: "var(--text-muted)", marginLeft: "auto" }}>{ex.reason}</span>
@@ -216,7 +218,7 @@ export default function PolicyDetailPage({ params }: { params: Promise<{ id: str
             <div className="card dense">
               <div className="card-header"><span className="card-title">Version history</span></div>
               <div className="col" style={{ gap: 8 }}>
-                {versions.map((v: any) => (
+                {versions.map((v: PolicyVersion) => (
                   <button key={v.v || v.version} onClick={() => setDiffVersion(v)} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "8px 10px", borderRadius: 6, background: "var(--bg-input)", textAlign: "left", border: "1px solid transparent", cursor: "pointer" }}>
                     <Badge kind="muted" mono>v{v.v || v.version}</Badge>
                     <div style={{ flex: 1, minWidth: 0 }}><div className="t-sm" style={{ fontWeight: 500 }}>{v.note}</div><div className="t-sm text-muted">{v.when || v.created_at} &middot; {v.by || v.author}</div></div>

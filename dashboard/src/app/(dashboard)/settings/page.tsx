@@ -10,6 +10,7 @@ import { useUser } from "@/lib/user-context";
 import { useApi, api } from "@/lib/api-client";
 import { validatePassword } from "@/lib/validation";
 import { formatDate, formatRelative } from "@/lib/format";
+import type { MemberRow, TransferRow } from "@/lib/types";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -38,12 +39,13 @@ export default function SettingsPage() {
 
   useEffect(() => {
     const s = searchParams.get("section");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs the active section to the URL query on change
     if (s && s !== section) setSection(s);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  const { data: membersData, loading: membersLoading, refetch: refetchMembers } = useApi<{ data: any[] }>("/api/members", undefined, [currentUser?.display_name]);
-  const { data: pendingTransfers, refetch: refetchTransfers } = useApi<{ data: any[] }>("/api/ownership-transfers/pending");
+  const { data: membersData, loading: membersLoading, refetch: refetchMembers } = useApi<{ data: MemberRow[] }>("/api/members", undefined, [currentUser?.display_name]);
+  const { data: pendingTransfers, refetch: refetchTransfers } = useApi<{ data: MemberRow[] }>("/api/ownership-transfers/pending");
 
   const respondToTransfer = async (transferId: string, action: "accept" | "reject") => {
     try {
@@ -57,7 +59,7 @@ export default function SettingsPage() {
     }
   };
   const members = membersData?.data || [];
-  const { data: pendingData, refetch: refetchPending } = useApi<{ data: any[] }>("/api/members/pending");
+  const { data: pendingData, refetch: refetchPending } = useApi<{ data: MemberRow[] }>("/api/members/pending");
   const pending = pendingData?.data || [];
 
   const isAdmin = currentUser?.role === "owner" || currentUser?.role === "admin";
@@ -175,7 +177,7 @@ export default function SettingsPage() {
           <>
             <h2 className="t-h2" style={{ marginBottom: 4 }}>Members</h2>
             <p className="text-secondary" style={{ marginBottom: 24 }}>People with access to this workspace.</p>
-            {(pendingTransfers?.data || []).map((t: any) => (
+            {(pendingTransfers?.data || []).map((t: TransferRow) => (
               <div key={t.id} className="card" style={{ marginBottom: 20, padding: 16, border: "1px solid var(--accent-border)", background: "var(--accent-bg)" }}>
                 <div className="row" style={{ alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
                   <div className="row" style={{ alignItems: "center", gap: 10 }}>
@@ -204,7 +206,7 @@ export default function SettingsPage() {
               <table className="table">
                 <thead><tr><th>Member</th><th>Role</th><th>Joined</th><th>Last active</th><th /></tr></thead>
                 <tbody>
-                  {members.map((m: any) => {
+                  {members.map((m: MemberRow) => {
                     const isSelf = m.email === currentUser?.email;
                     const isOwner = m.role === "owner";
                     // Strict outrank, mirroring the backend's can_manage_role.
@@ -253,7 +255,7 @@ export default function SettingsPage() {
                     </tr>
                     );
                   })}
-                  {pending.map((p: any) => (
+                  {pending.map((p: TransferRow) => (
                     <tr key={`pending-${p.email}`} style={{ opacity: 0.75 }}>
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: 10, height: 48 }}>

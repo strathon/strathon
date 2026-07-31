@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import QRCode from "qrcode";
 import { Icons } from "@/components/icons";
-import { Badge, Sheet, Modal, useToast } from "@/components/ui";
+import { Badge, Sheet, useToast } from "@/components/ui";
 import { api } from "@/lib/api-client";
 import { useUser } from "@/lib/user-context";
 
@@ -43,6 +43,7 @@ export function MfaCard() {
 
   // Render the QR locally whenever we get a new otpauth URI.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- derives the QR from an async-provisioned URI
     if (!otpauthUri) { setQrSvg(""); return; }
     let cancelled = false;
     QRCode.toString(otpauthUri, { type: "svg", margin: 1, width: 200 })

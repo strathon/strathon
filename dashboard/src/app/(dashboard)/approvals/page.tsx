@@ -1,14 +1,15 @@
 "use client";
 import { useState } from "react";
 import { Icons } from "@/components/icons";
-import { Badge, Segmented, Empty, Ring, Modal, Skeleton, useToast } from "@/components/ui";
+import { Segmented, Empty, Ring, Modal, Skeleton, useToast } from "@/components/ui";
 import { useApi, api } from "@/lib/api-client";
+import type { ApprovalRow } from "@/lib/types";
 
 export default function ApprovalsPage() {
   const toast = useToast();
   const [tab, setTab] = useState("pending");
   const [denyModal, setDenyModal] = useState<{ id: string; agent: string } | null>(null);
-  const { data, loading, error, refetch } = useApi<{ data: any[] }>("/api/approvals", tab === "pending" ? { status: "pending" } : { status: "resolved" }, [tab]);
+  const { data, loading, error, refetch } = useApi<{ data: ApprovalRow[] }>("/api/approvals", tab === "pending" ? { status: "pending" } : { status: "resolved" }, [tab]);
   const items = data?.data || [];
 
   async function handleAction(id: string, action: "approve" | "deny") {
@@ -30,7 +31,7 @@ export default function ApprovalsPage() {
         <Empty icon={<Icons.UserCheck size={24} />} title={tab === "pending" ? "All clear" : "No history yet"} subtitle={tab === "pending" ? "No approvals waiting. Your agents are operating within policy." : "Resolved approvals will appear here."} />
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 }}>
-          {items.map((a: any) => (
+          {items.map((a: ApprovalRow) => (
             <div key={a.id} className="card">
               <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
                 <div style={{ width: 40, height: 40, borderRadius: 8, background: "var(--warning-bg)", color: "var(--warning)", display: "grid", placeItems: "center", flexShrink: 0 }}><Icons.UserCheck size={18} /></div>

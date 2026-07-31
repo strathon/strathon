@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icons } from "@/components/icons";
-import { Badge, StatusBadge, Sparkline, Checkbox, Dropdown, Pagination, Modal, Sheet, Segmented, Empty, Time, Kbd, SkeletonTable, useToast } from "@/components/ui";
+import { Badge, StatusBadge, Sparkline, Checkbox, Dropdown, Pagination, Modal, Sheet, Empty, Time, SkeletonTable, useToast } from "@/components/ui";
 import { useApi, api } from "@/lib/api-client";
 import { usePermissions } from "@/lib/permissions";
+import type { PolicyRow } from "@/lib/types";
 
 const ACTION_COLOR: Record<string, string> = { block: "danger", steer: "warning", throttle: "warning", log: "muted", alert: "info", require_approval: "info" };
 
@@ -19,14 +20,14 @@ export default function PoliciesPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirm, setConfirm] = useState<{ id: string; name: string } | null>(null);
   const [bulkConfirm, setBulkConfirm] = useState<string | null>(null);
-  const [chartSheet, setChartSheet] = useState<any>(null);
+  const [chartSheet, setChartSheet] = useState<PolicyRow | null>(null);
   const pageSize = 8;
 
   const params: Record<string, string> = { limit: String(pageSize), offset: String((page - 1) * pageSize) };
   if (q) params.search = q;
   if (statusFilter !== "all") params.status = statusFilter;
 
-  const { data, loading, error, refetch } = useApi<{ data: any[]; total?: number }>("/api/policies", params, [q, statusFilter, page]);
+  const { data, loading, error, refetch } = useApi<{ data: PolicyRow[]; total?: number }>("/api/policies", params, [q, statusFilter, page]);
 
   const policies = data?.data || [];
   const total = data?.total || policies.length;
@@ -107,13 +108,13 @@ export default function PoliciesPage() {
             <table className="table">
               <thead><tr>
                 <th style={{ width: 36, padding: "10px 0 10px 16px" }}>
-                  <Checkbox checked={policies.length > 0 && policies.every((r: any) => selected.has(r.id))}
-                    onChange={() => { const all = policies.every((r: any) => selected.has(r.id)); setSelected((s) => { const n = new Set(s); if (all) policies.forEach((r: any) => n.delete(r.id)); else policies.forEach((r: any) => n.add(r.id)); return n; }); }} />
+                  <Checkbox checked={policies.length > 0 && policies.every((r: PolicyRow) => selected.has(r.id))}
+                    onChange={() => { const all = policies.every((r: PolicyRow) => selected.has(r.id)); setSelected((s) => { const n = new Set(s); if (all) policies.forEach((r: PolicyRow) => n.delete(r.id)); else policies.forEach((r: PolicyRow) => n.add(r.id)); return n; }); }} />
                 </th>
                 <th style={{ width: "30%" }}>Name</th><th>Status</th><th>Action</th><th style={{ textAlign: "right" }}>Priority</th><th>Matches</th><th>Modified</th><th style={{ width: 40 }} />
               </tr></thead>
               <tbody>
-                {policies.map((p: any) => (
+                {policies.map((p: PolicyRow) => (
                   <tr key={p.id} className="clickable" onClick={() => router.push(`/policies/${p.id}`)}>
                     <td onClick={(e) => e.stopPropagation()} style={{ width: 36, padding: "0 0 0 16px" }}>
                       <Checkbox checked={selected.has(p.id)} onChange={() => setSelected((s) => { const n = new Set(s); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n; })} />
