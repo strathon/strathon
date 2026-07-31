@@ -40,9 +40,19 @@ services:
       # python -c 'import secrets; print(secrets.token_hex(32))'
       # and set in .env. See docs/self-hosting.md (Security keys).
       STRATHON_MODE: ${STRATHON_MODE:-self-hosted}
+      # Fail to boot rather than fall back to the public dev HMAC key and
+      # plaintext MFA secrets. Without this the "prod" stack signs the audit
+      # chain with a constant committed to the repo -- forgeable by anyone --
+      # voiding the tamper-evident guarantee. These three keys are therefore
+      # required, not optional.
+      STRATHON_REQUIRE_SECURITY_KEYS: "true"
       STRATHON_AUDIT_HMAC_KEY: ${STRATHON_AUDIT_HMAC_KEY:-}
       STRATHON_ENCRYPTION_KEY: ${STRATHON_ENCRYPTION_KEY:-}
       STRATHON_PASSWORD_PEPPER: ${STRATHON_PASSWORD_PEPPER:-}
+      # Instance-level admin credential for cross-tenant operations (the audit
+      # anchor chain). Optional: if unset, those endpoints fail closed (503)
+      # rather than falling back to per-project auth. Set to enable them.
+      STRATHON_ADMIN_API_KEY: ${STRATHON_ADMIN_API_KEY:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
