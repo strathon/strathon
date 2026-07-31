@@ -30,6 +30,7 @@ import logging_config
 import metrics as metrics_mod
 import retention
 import sampling
+from bootstrap_identity import DEFAULT_PROJECT_SLUG
 
 
 # Set up logging FIRST so any subsequent module-level logger.info()s use our format
@@ -38,9 +39,6 @@ _active_log_format = logging_config.configure_logging()
 logger = logging.getLogger("strathon.receiver")
 logger.info("Logging configured: format=%s", _active_log_format)
 
-
-# Default project slug used when seeding a fresh deployment
-DEFAULT_PROJECT_SLUG = "default"
 
 # Well-known UUID of the dev key seeded by migration 003. If this row is
 # present and non-revoked, we print a quickstart banner at startup so new

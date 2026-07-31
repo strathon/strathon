@@ -55,20 +55,28 @@ async def ensure_default_project(session: AsyncSession, slug: str) -> UUID:
     """
     from models import Organization
 
-    # Fixed default-org id; must match migration 026's DEFAULT_ORG_ID so the
-    # migration backfill and this bootstrap agree without a lookup.
-    default_org_id = uuid_pkg.UUID("00000000-0000-0000-0000-0000000000aa")
+    from bootstrap_identity import (
+        DEFAULT_ORG_ID,
+        DEFAULT_ORG_NAME,
+        DEFAULT_ORG_SLUG,
+        DEFAULT_PROJECT_NAME,
+    )
+
+    # Single source of truth for the default-org identity (see
+    # bootstrap_identity). Frozen to match migration 026 so the migration
+    # backfill and this runtime bootstrap agree without a lookup.
+    default_org_id = uuid_pkg.UUID(DEFAULT_ORG_ID)
 
     org_stmt = (
         pg_insert(Organization)
-        .values(id=default_org_id, name="Default", slug="default")
+        .values(id=default_org_id, name=DEFAULT_ORG_NAME, slug=DEFAULT_ORG_SLUG)
         .on_conflict_do_nothing(index_elements=[Organization.id])
     )
     await session.execute(org_stmt)
 
     stmt = (
         pg_insert(Project)
-        .values(name="Default", slug=slug, org_id=default_org_id)
+        .values(name=DEFAULT_PROJECT_NAME, slug=slug, org_id=default_org_id)
         .on_conflict_do_update(
             index_elements=[Project.org_id, Project.slug],
             index_where=text("deleted_at IS NULL"),
