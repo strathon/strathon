@@ -46,7 +46,7 @@ and nobody notices, what does an attacker get?*
 |---|---|---|---|
 | [SDK policy enforcer](intervention.md) | Receiver unreachable on refresh | Fail static, then fail open | Yes — `fail_closed` |
 | [SDK halt enforcer](intervention.md) | Receiver unreachable on refresh | Fail static, then fail open | Yes — `fail_closed` |
-| Policy evaluation, any surface | Every policy fails to evaluate | Raises rather than returning no-match | No |
+| Policy evaluation, any surface | An enforcing policy cannot be evaluated (or every policy fails) | Raises rather than returning no-match | No |
 | [Egress proxy](egress.md) | Evaluation raises, CEL engine absent | Fail closed — block, record | No |
 | [MCP gateway](mcp.md) | Evaluation raises, CEL engine absent | Fail closed — reject the `tools/call` | No |
 | Span ingest | Evaluation raises | Fail open — record the span unmatched | No |
@@ -59,17 +59,29 @@ Two rows deserve expanding.
 
 ### Policy evaluation raising
 
-The evaluator returns the policies that matched a call. An empty result used to
-mean two different things — nothing matched, or nothing could be evaluated — and
-an enforcement surface reading the second as the first would allow the call. A
-proxy running without the CEL engine installed passed all traffic while
-appearing healthy.
+The evaluator returns the policies that matched a call. Evaluating a policy has
+three outcomes, not two: it matched, it did not match, or it could not be
+evaluated at all — a compile error, or the common case of a runtime error such
+as a referenced attribute being absent from the span. Collapsing that third
+outcome into "did not match" is what let an unevaluable policy read as an allow:
+a proxy running without the CEL engine installed passed all traffic while
+appearing healthy, and a policy whose expression referenced a missing attribute
+silently stopped enforcing.
 
-Evaluation failure is now distinct from no-match: when every policy that was
-actually evaluated fails, the evaluator raises rather than returning an empty
-list. A single malformed expression is still swallowed and logged, so one bad
-policy cannot stop the rest from being evaluated — only a total failure
-escalates.
+An evaluation error is now distinct from a no-match, and how it is handled
+depends on what the policy would have done. If a policy that *enforces* — block,
+require_approval, or throttle — cannot be evaluated, the evaluator raises: that
+policy might have been the decisive block, so the call must fail closed rather
+than be allowed on the assumption it did not match. An error on a policy that
+cannot turn an allow into a block — log, alert, steer — is logged and skipped, so
+one malformed non-enforcing policy does not fail the whole call closed. A total
+failure, where every candidate policy errors, also raises, because evaluation is
+then broken rather than simply unmatched.
+
+Evaluation runs against the full tool arguments. The arguments are truncated
+only in the copy written to a span for storage, never in the value a policy sees,
+so an oversized payload cannot push malicious content past a length limit and out
+of a content policy's view.
 
 Each caller then does what its role requires. The egress proxy and MCP gateway
 let it reach their fail-closed handlers and block. Span ingest catches it and

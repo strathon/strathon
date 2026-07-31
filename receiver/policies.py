@@ -16,11 +16,11 @@ keep working without churn.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # Re-export so back-compat imports from main.py and elsewhere keep working
 from policies_eval import PolicyExpressionError  # noqa: F401
-from policies_eval import evaluate as _evaluate
+from policies_eval import MatchResult, evaluate_tristate
 
 logger = logging.getLogger("strathon.receiver.policies")
 
@@ -29,6 +29,12 @@ logger = logging.getLogger("strathon.receiver.policies")
 # Kept in sync with it so a caller importing from here cannot get a narrower
 # (stale) set that would wrongly reject throttle / require_approval policies.
 VALID_ACTIONS = {"log", "alert", "block", "steer", "throttle", "allow", "require_approval"}
+
+# Actions that stop or gate a tool call. If a policy with one of these cannot be
+# evaluated, the span must fail closed (an unevaluable block might have been the
+# decisive one). steer/log/alert/allow cannot turn an allow into a block, so an
+# error on those is logged and skipped rather than failing the span closed.
+_ENFORCING_ACTIONS = {"block", "require_approval", "throttle"}
 
 
 # ---- Ingest-time evaluation (pure) --------------------------------------
@@ -80,7 +86,7 @@ def _segment_path_match(name: str, token: str) -> bool:
 
 
 class PolicyEvaluationUnavailable(RuntimeError):
-    """Every candidate policy failed to evaluate.
+    """A policy that had to be evaluated could not be.
 
     An empty result from ``evaluate_for_span`` used to mean two different
     things: no policy matched, or evaluation could not run at all. On a
@@ -91,10 +97,20 @@ class PolicyEvaluationUnavailable(RuntimeError):
     matched". Raising here makes that case reach a fail-closed handler
     instead of being mistaken for a clean pass.
 
-    Only raised when *every* evaluable policy failed. A single malformed
-    expression is still swallowed and logged, so one bad policy cannot stop
-    the rest from being evaluated.
+    Raised when an enforcing policy (block, require_approval, throttle) could
+    not be evaluated -- its decision cannot be confirmed, so an enforcement
+    surface must fail closed -- or when every evaluable policy failed. An error
+    in a non-enforcing policy is still swallowed and logged.
+
+    ``matches`` carries the policies that DID evaluate to a match before the
+    failure. Enforcement surfaces ignore it and fail closed; the recording path
+    records these so one unevaluable policy does not erase another policy's
+    legitimate match on the same span.
     """
+
+    def __init__(self, *args: object, matches: "List[Dict[str, Any]] | None" = None):
+        super().__init__(*args)
+        self.matches: List[Dict[str, Any]] = matches or []
 
 
 def evaluate_for_span(
@@ -109,10 +125,17 @@ def evaluate_for_span(
     this span. A crash inside an individual policy is swallowed and logged so
     one bad policy can't poison the rest of ingest.
 
-    Raises PolicyEvaluationUnavailable if every policy that was actually
-    evaluated crashed, which means evaluation is broken rather than simply
-    unmatched. Callers that enforce must let that propagate to their
-    fail-closed path; callers that only record may catch it and carry on.
+    Raises PolicyEvaluationUnavailable when a policy cannot be evaluated and
+    treating it as no-match would be unsafe:
+      - a policy whose action ENFORCES (block, require_approval, throttle)
+        errors during evaluation -- it might have been the decisive block, so
+        the span must fail closed rather than silently allow; or
+      - every candidate policy failed to evaluate, so evaluation is broken
+        rather than simply unmatched.
+    An error on a non-enforcing policy (log, alert, steer, allow) is logged and
+    skipped -- it cannot turn an allow into a block, so it must not fail the
+    whole span closed. Callers that enforce must let the exception propagate to
+    their fail-closed path; callers that only record catch it and carry on.
     """
     if not policies:
         return []
@@ -120,24 +143,48 @@ def evaluate_for_span(
     matched: List[Dict[str, Any]] = []
     evaluated = 0
     failed = 0
+    enforcing_failure: Optional[Dict[str, Any]] = None
     for policy in policies:
         if not policy.get("enabled", True):
             continue
         if not _span_matches_applies_to(span_name, policy.get("applies_to") or []):
             continue
         evaluated += 1
-        try:
-            if _evaluate(policy["match_expression"], span_ctx):
-                matched.append(policy)
-        except Exception:
+        result = evaluate_tristate(policy["match_expression"], span_ctx)
+        if result is MatchResult.MATCH:
+            matched.append(policy)
+        elif result is MatchResult.ERROR:
             failed += 1
-            logger.exception(
-                "policy evaluation crashed for policy %s", policy.get("id")
+            logger.warning(
+                "policy %s could not be evaluated for span %s (action=%s)",
+                policy.get("id"), span_name, policy.get("action"),
             )
+            # Record the first enforcing policy that failed, but keep evaluating
+            # the rest. The loop must finish so `matched` holds every policy that
+            # did match; raising here would drop the matches of policies later in
+            # the priority order, which the recording path needs to keep. The
+            # decision to fail closed is made after the loop.
+            if enforcing_failure is None and policy.get("action") in _ENFORCING_ACTIONS:
+                enforcing_failure = policy
+        # NO_MATCH: policy did not apply; skip.
+
+    if enforcing_failure is not None:
+        # An enforcing policy could not be evaluated: we cannot confirm the call
+        # is allowed, so the span must fail closed. Carry every match found so an
+        # enforcement surface ignores them and blocks, while the recording path
+        # keeps them. This is the case that was previously swallowed to a silent
+        # allow.
+        raise PolicyEvaluationUnavailable(
+            f"enforcing policy {enforcing_failure.get('id')!r} (action "
+            f"{enforcing_failure.get('action')!r}) could not be evaluated for span "
+            f"{span_name!r}; failing closed rather than treating as no-match",
+            matches=matched,
+        )
     if evaluated and failed == evaluated:
         raise PolicyEvaluationUnavailable(
             f"all {evaluated} candidate policies failed to evaluate for span "
-            f"{span_name!r}; treating as evaluation failure, not as no-match"
+            f"{span_name!r}; treating as evaluation failure, not as no-match",
+            matches=matched,
         )
     return matched
 

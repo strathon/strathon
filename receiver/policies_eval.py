@@ -39,12 +39,25 @@ exposed for tests but treated as internal.
 
 from __future__ import annotations
 
+import enum
 import logging
 import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 _logger = logging.getLogger("strathon.receiver.policies_eval")
+
+
+class MatchResult(enum.Enum):
+    """Three-valued result of evaluating a CEL policy expression.
+
+    ERROR is deliberately distinct from NO_MATCH so enforcement can fail closed
+    on an unevaluable policy rather than treating it as "did not match" (allow).
+    """
+
+    MATCH = "match"
+    NO_MATCH = "no_match"
+    ERROR = "error"
 
 
 class PolicyExpressionError(ValueError):
@@ -98,27 +111,46 @@ def evaluate(
     span_context shape:
         {"name": "<span name>", "attrs": {<flat attribute map>}}
 
-    The ``now`` parameter pins the timestamp bound to the CEL ``now``
-    variable. Tests pass a deterministic value; production callers omit
-    it and get the current UTC time. Naive ``datetime``s are promoted to
-    UTC so the policy sees what the caller almost certainly meant — a
-    Python-local-time interpretation would break getDayOfWeek/getHours
-    in subtle ways.
+    Returns True/False. An evaluation ERROR (compile failure, or a runtime
+    error such as a referenced attribute being absent) collapses to False here
+    -- appropriate only for callers that genuinely want a boolean and treat an
+    unevaluable policy as "did not match". Enforcement code MUST NOT use this:
+    it hides the ERROR case that has to fail closed. Use ``evaluate_tristate``
+    and handle ERROR explicitly.
+    """
+    return evaluate_tristate(expression, span_context, now) is MatchResult.MATCH
 
-    Returns False on missing expression, compile error, or runtime error.
-    Logs runtime crashes; compile errors are logged at warning level since
-    they indicate a user mistake (bad CEL string saved to DB somehow).
 
-    Never raises — the ingest hot path must not crash on a bad policy
-    string.
+def evaluate_tristate(
+    expression: Optional[str],
+    span_context: Dict[str, Any],
+    now: Optional[datetime] = None,
+) -> "MatchResult":
+    """Evaluate a CEL expression to a three-valued result.
+
+    MATCH     -- the expression evaluated to true.
+    NO_MATCH  -- the expression evaluated to false.
+    ERROR     -- the expression could not be evaluated: an empty/missing
+                 expression, a compile failure, or a runtime error. The most
+                 common runtime error is a referenced attribute being absent
+                 on the span (celpy raises CELEvalError, "no such key"), and
+                 CEL propagates it precisely when the first conjunct already
+                 matched -- i.e. exactly the case a guardrail cares about. This
+                 is a DISTINCT value, not a falsy one, so enforcement surfaces
+                 can fail closed on it instead of silently allowing. This is
+                 the OPA/Rego and Envoy RBAC model: an error is not "false".
+
+    Never raises -- the ingest hot path must not crash on a bad policy string.
+    Callers decide what an ERROR means: recording treats it as no-match; an
+    enforcement surface treats an ERROR on an enforcing policy as block.
     """
     if not expression:
-        return False
+        return MatchResult.ERROR
     try:
         program = _compile_cached(expression)
     except PolicyExpressionError as exc:
         _logger.warning("invalid policy expression %r: %s", expression, exc)
-        return False
+        return MatchResult.ERROR
     try:
         import celpy
         if now is None:
@@ -133,8 +165,27 @@ def evaluate(
         result = program.evaluate(activation)
     except Exception:
         _logger.exception("CEL evaluation crashed for %r", expression)
-        return False
-    return bool(result)
+        return MatchResult.ERROR
+
+    # A match expression must evaluate to a boolean. celpy cannot infer the
+    # result type at compile time, so a malformed policy that returns a
+    # non-bool -- e.g. `attrs["gen_ai.tool.name"]` with the `== "x"` comparison
+    # left off -- reaches here. Coercing it with bool() would silently match or
+    # not match on the value's truthiness (a non-empty string matches
+    # everything, a zero/empty value matches nothing), which is exactly the
+    # kind of silent misbehavior that hides a broken policy. Treat it as an
+    # error instead, so an enforcing policy fails closed and the operator sees
+    # the expression is wrong rather than getting quiet, surprising behavior.
+    if not isinstance(result, celpy.celtypes.BoolType) and not isinstance(
+        result, bool
+    ):
+        _logger.warning(
+            "CEL expression %r evaluated to a non-boolean (%s); treating as an "
+            "evaluation error. A match expression must return true/false.",
+            expression, type(result).__name__,
+        )
+        return MatchResult.ERROR
+    return MatchResult.MATCH if bool(result) else MatchResult.NO_MATCH
 
 
 def validate_expression(expression: Any) -> None:

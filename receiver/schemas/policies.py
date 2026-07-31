@@ -9,6 +9,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
+
 VALID_ACTIONS = {"log", "alert", "block", "steer", "throttle", "allow", "require_approval"}
 
 # Scope values accepted in a throttle action_config. Determines what the
@@ -92,7 +93,7 @@ class PolicyCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=200)
-    match_expression: str = Field(min_length=1)
+    match_expression: str = Field(min_length=1, max_length=2000)
     action: str = Field(pattern="^(log|alert|block|steer|throttle|allow|require_approval)$")
     description: Optional[str] = None
     action_config: dict[str, Any] = Field(default_factory=dict)
@@ -108,7 +109,7 @@ class PolicyUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: Optional[str] = Field(default=None, min_length=1, max_length=200)
-    match_expression: Optional[str] = Field(default=None, min_length=1)
+    match_expression: Optional[str] = Field(default=None, min_length=1, max_length=2000)
     action: Optional[str] = Field(
         default=None, pattern="^(log|alert|block|steer|throttle|allow|require_approval)$",
     )
