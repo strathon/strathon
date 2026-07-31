@@ -108,6 +108,38 @@ jobs:
           /tmp/sdk-noextras/bin/pytest tests/ -q
 
   # ============================================================
+  # CLI tests — the strathon-cli package. Pure unit tests (no
+  # network or database), run across every supported Python.
+  # ============================================================
+  cli-tests:
+    name: CLI tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: cli/pyproject.toml
+
+      - name: Install CLI and test deps
+        working-directory: cli
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest
+
+      - name: Run CLI tests
+        working-directory: cli
+        run: pytest tests/ -v
+
+  # ============================================================
   # Receiver tests — needs Postgres for the retention DB tests.
   # Python 3.12 only because the receiver requires >= 3.12.
   # ============================================================
@@ -294,7 +326,7 @@ jobs:
   # Dashboard build — type-check, lint, and build the Next.js
   # dashboard on every push. The dashboard image is otherwise only
   # built on a release tag, so a broken build would not surface until
-  # tagging. next build runs the type-check and the lint, so this is
+  # tagging. Next 16 no longer lints during `next build`, so this runs
   # the full validation.
   # ============================================================
   dashboard-build:
@@ -314,8 +346,9 @@ jobs:
       - name: Install and build
         working-directory: dashboard
         run: |
-          npm ci
-          npm run build
+            npm ci
+            npm run lint
+            npm run build
 
   # ============================================================
   # Lint — fast, runs in parallel with everything. Catches obvious
