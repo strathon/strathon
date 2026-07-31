@@ -19,10 +19,11 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import insert, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from uuid import UUID
 
 import auth as auth_mod
 from database import get_db_session
@@ -34,6 +35,25 @@ from ._deps import require_scope
 
 
 router = APIRouter(prefix="/v1/projects", tags=["projects"])
+
+
+async def _caller_org_id(session: AsyncSession, ctx: "auth_mod.ApiKeyContext") -> UUID:
+    """Resolve the organization the caller belongs to, from their current
+    project. On self-host that is the single default organization. Every
+    project read/write in this router scopes to this org so a projects:manage
+    credential cannot reach, rename, or delete another tenant's projects.
+    (Cloud will resolve org from org-scoped auth when that lands.)
+    """
+    org_row = await session.execute(
+        select(Project.org_id).where(Project.id == ctx.project_id)
+    )
+    org_id = org_row.scalar_one_or_none()
+    if org_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="could not resolve organization for the calling project",
+        )
+    return org_id
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9\-]{1,62}[a-z0-9]$")
 
@@ -147,8 +167,9 @@ async def list_projects(
     ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    """List all projects."""
-    stmt = select(Project).order_by(Project.name)
+    """List the projects in the caller's organization."""
+    org_id = await _caller_org_id(session, ctx)
+    stmt = select(Project).where(Project.org_id == org_id).order_by(Project.name)
     if not include_deleted:
         stmt = stmt.where(Project.deleted_at.is_(None))
     result = await session.execute(stmt)
@@ -176,9 +197,11 @@ async def get_project(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Get a project by slug."""
+    org_id = await _caller_org_id(session, ctx)
     result = await session.execute(
         select(Project).where(
             Project.slug == slug,
+            Project.org_id == org_id,
             Project.deleted_at.is_(None),
         )
     )
@@ -217,9 +240,14 @@ async def update_project(
     if body.name is None:
         raise HTTPException(status_code=400, detail="nothing to update")
 
+    org_id = await _caller_org_id(session, ctx)
     result = await session.execute(
         update(Project)
-        .where(Project.slug == slug, Project.deleted_at.is_(None))
+        .where(
+            Project.slug == slug,
+            Project.org_id == org_id,
+            Project.deleted_at.is_(None),
+        )
         .values(name=body.name)
         .returning(Project)
     )
@@ -236,19 +264,26 @@ async def update_project(
 @router.delete("/{slug}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(
     slug: str,
+    request: Request,
     ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_PROJECTS_MANAGE)
     ),
     session: AsyncSession = Depends(get_db_session),
 ):
     """Soft-delete a project."""
+    # Deleting a project is destructive; a stolen session cookie alone must not
+    # be able to do it.
+    from ._deps import enforce_reauth
+    await enforce_reauth(request, ctx, session)
+
     from sqlalchemy import func, select
-    # Refuse to delete the last remaining project — an instance with zero
-    # projects has no usable context. The caller must always have at least one.
+    org_id = await _caller_org_id(session, ctx)
+    # Refuse to delete the last remaining project in the org -- an instance with
+    # zero projects has no usable context. The caller must always have at least one.
     remaining = await session.execute(
         select(func.count())
         .select_from(Project)
-        .where(Project.deleted_at.is_(None))
+        .where(Project.org_id == org_id, Project.deleted_at.is_(None))
     )
     if (remaining.scalar() or 0) <= 1:
         raise HTTPException(
@@ -257,7 +292,11 @@ async def delete_project(
         )
     result = await session.execute(
         update(Project)
-        .where(Project.slug == slug, Project.deleted_at.is_(None))
+        .where(
+            Project.slug == slug,
+            Project.org_id == org_id,
+            Project.deleted_at.is_(None),
+        )
         .values(deleted_at=func.now())
         .returning(Project.id)
     )

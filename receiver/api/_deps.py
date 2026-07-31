@@ -175,6 +175,134 @@ def require_scope(scope: str):
     return _checker
 
 
+def require_instance_admin():
+    """Build a dependency that requires the instance-level admin credential.
+
+    For operations that span every tenant on the instance rather than a single
+    project -- currently the audit anchor chain, which is one instance-wide
+    Merkle chain over all events (audit.anchors has no project_id column, so it
+    cannot be scoped per-project). Exposing it under a per-project scope leaked
+    every tenant's anchor timing and volume to any project's audit:read key.
+
+    Modeled on the instance-admin key pattern used by mature multi-tenant
+    observability platforms (a single instance credential, distinct from any
+    project/org key, constant-time compared). Behavior:
+      - Presented as ``Authorization: Bearer <STRATHON_ADMIN_API_KEY>``.
+      - Fails CLOSED: if the key is unset the endpoint returns 503, never
+        falling back to per-project auth or allowing the request. This matters
+        because the endpoint guards cross-tenant data -- a missing key must
+        deny, not open.
+      - Constant-time comparison via ``hmac.compare_digest``.
+
+    Why 503 when unset (not 403): the credential isn't wrong, the capability is
+    unconfigured on this instance, so the operator must set the key. Why 401 on
+    a bad/absent token: the credential is invalid.
+    """
+    async def _checker(
+        authorization: str | None = Header(default=None),
+    ) -> None:
+        await _instance_admin_check(authorization)
+
+    return _checker
+
+
+async def _instance_admin_check(authorization: str | None) -> None:
+    """Validate the instance-admin credential, failing closed when unset.
+
+    Shared by ``require_instance_admin`` and ``require_anchor_list_access`` so
+    the admin-key semantics live in one place.
+    """
+    import hmac
+
+    from config import get_settings
+
+    admin_key = get_settings().admin_api_key
+    if not admin_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "instance-admin operations are unavailable: "
+                "STRATHON_ADMIN_API_KEY is not configured"
+            ),
+        )
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme != "Bearer" or not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="instance-admin credential required",
+        )
+    if not hmac.compare_digest(token.encode(), admin_key.encode()):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid instance-admin credential",
+        )
+
+
+async def require_anchor_list_access(
+    request: "Request",
+    authorization: str | None = Header(default=None),
+    x_project_id: str | None = Header(default=None, alias="X-Project-Id"),
+    session: "AsyncSession" = Depends(get_db_session),
+) -> None:
+    """Gate the full audit anchor chain listing, correctly for each mode.
+
+    The anchor chain is one instance-wide Merkle chain over every event
+    (audit.anchors has no project_id column). What guarding it requires depends
+    on whether the instance is multi-tenant:
+
+      - self-hosted (single tenant): the whole instance is one organization, so
+        the chain only ever covers that organization's events. There is no
+        cross-tenant data to protect, so a normal ``audit:read`` key is
+        sufficient -- the scope the endpoint used before. Requiring a separate
+        admin key here would lock a single operator out of their own integrity
+        chain for no security gain.
+      - cloud (multi-tenant): the chain spans every tenant, so a project's
+        ``audit:read`` key must not see it. It requires the instance-admin
+        credential (STRATHON_ADMIN_API_KEY), failing closed when unset.
+
+    The per-project ``/anchors/status`` endpoint stays on ``audit:read`` in both
+    modes; only this full-chain listing is mode-gated.
+
+    This is a plain request-time dependency, not a factory. Choosing the mode
+    here (rather than in a factory used inside ``Depends(...)``) keeps the
+    decision at request time; doing it at import time would call get_settings()
+    -- and so require DATABASE_URL -- merely to import the module, breaking
+    ``import main`` in any environment without a configured database.
+    """
+    from config import get_settings
+
+    if get_settings().is_cloud:
+        await _instance_admin_check(authorization)
+        return
+    # Self-hosted: single tenant, so audit:read is the correct scope.
+    ctx = await _authenticated(request, session, authorization, x_project_id)
+    if not auth.key_has_scope(ctx.scopes, auth.SCOPE_AUDIT_READ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"missing required scope: {auth.SCOPE_AUDIT_READ}",
+        )
+
+
+async def enforce_reauth(request: "Request", ctx: "auth.ApiKeyContext", session) -> None:
+    """Enforce step-up re-authentication for a high-impact operation.
+
+    Call this at the top of endpoints where a stolen session cookie must not be
+    sufficient on its own: creating API keys, deleting projects, disabling MFA,
+    changing the password. The user must re-confirm with their current password
+    (X-Confirm-Password header) or a fresh MFA code (X-Confirm-MFA). Modeled on
+    OWASP ASVS V3.3.4 (re-authentication before sensitive transactions).
+
+    No-op for API-key auth (already capability-scoped); only session (dashboard)
+    auth is challenged. Raises 403 if the confirmation is missing or wrong.
+    """
+    await auth.require_reauth(
+        ctx,
+        session,
+        confirm_password=request.headers.get("X-Confirm-Password"),
+        confirm_mfa=request.headers.get("X-Confirm-MFA"),
+    )
+
+
 def coerce_project_id(
     request: Request,
     value: str | None,

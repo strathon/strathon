@@ -23,12 +23,9 @@ argon2 are for low-entropy passwords where slow hashing matters. With 256
 bits of entropy in the key itself, a fast hash + indexed prefix lookup is
 both secure and fast.
 
-Security audit (May 2026): all secret comparisons use hmac.compare_digest:
-  - repositories/auth.py:183  API key hash verification
-  - audit/hash_chain.py:122   Audit row hash verification
-  - api/health.py:134         /metrics auth token
-  - repositories/sessions.py:86 is a SQLAlchemy WHERE clause (DB-side)
-No Python-side == on secrets anywhere in the codebase.
+Secret comparisons use ``hmac.compare_digest`` throughout (API key hash
+verification, audit-row hash verification, the /metrics auth token); no
+Python-side ``==`` is used on secrets anywhere, to avoid timing side channels.
 
 Scopes:
     The KNOWN_SCOPES set below is the source of truth for what scopes
@@ -402,7 +399,7 @@ async def require_reauth(
             raise HTTPException(status_code=403, detail="User not found")
 
         from password import verify_password
-        if not verify_password(confirm_password, row[0]):
+        if not verify_password(row[0], confirm_password):
             raise HTTPException(
                 status_code=403, detail="Invalid password for re-authentication"
             )
@@ -421,9 +418,12 @@ async def require_reauth(
                 detail="MFA not enabled; use X-Confirm-Password instead",
             )
 
-        import pyotp
-        totp = pyotp.TOTP(row[0])
-        if not totp.verify(confirm_mfa, valid_window=1):
+        from repositories import mfa as mfa_repo
+
+        # The stored totp_secret is encrypted (enc: prefix). Decrypt-and-verify
+        # via the canonical helper; passing the ciphertext straight to
+        # pyotp.TOTP made X-Confirm-MFA never succeed.
+        if not mfa_repo.verify_totp_code(row[0], confirm_mfa):
             raise HTTPException(
                 status_code=403, detail="Invalid MFA code for re-authentication"
             )

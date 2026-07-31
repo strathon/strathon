@@ -71,6 +71,10 @@ async def create_api_key_endpoint(
     ),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
+    # A stolen session cookie must not be enough to mint a new API key.
+    from ._deps import enforce_reauth
+    await enforce_reauth(request, ctx, session)
+
     name = payload.name
 
     # Validate scopes if the caller provided them. Unknown scope strings

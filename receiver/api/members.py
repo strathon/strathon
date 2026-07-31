@@ -49,11 +49,32 @@ class UpdateMemberRequest(BaseModel):
 
 # ---- Helpers -------------------------------------------------------------
 
-async def _resolve_project(session, slug: str) -> Project:
-    """Resolve a project slug to its model. Raises 404 if not found."""
+async def _resolve_project(
+    session, slug: str, ctx: "auth_mod.ApiKeyContext"
+) -> Project:
+    """Resolve a project slug to its model, scoped to the caller's organization.
+
+    Membership endpoints authorize the caller's role against their own
+    X-Project-Id, but the object they act on is addressed by slug. Without this
+    org check the two never meet: an owner/admin of one project could read or
+    write membership on any other project on the instance (confused-deputy /
+    IDOR). Resolving only within the caller's org closes that. Raises 404 if the
+    slug does not exist in the caller's org (a 404, not 403, so the endpoint does
+    not confirm the existence of projects in other tenants).
+    """
+    org_row = await session.execute(
+        select(Project.org_id).where(Project.id == ctx.project_id)
+    )
+    caller_org_id = org_row.scalar_one_or_none()
+    if caller_org_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="could not resolve organization for the calling project",
+        )
     stmt = (
         select(Project)
         .where(Project.slug == slug)
+        .where(Project.org_id == caller_org_id)
         .where(Project.deleted_at.is_(None))
     )
     result = await session.execute(stmt)
@@ -83,7 +104,7 @@ async def list_members(
     the member list. This is intentionally permissive — knowing who
     has access is a transparency feature, not a secret.
     """
-    project = await _resolve_project(session, slug)
+    project = await _resolve_project(session, slug, ctx)
     members = await members_repo.list_members(session, project.id)
     return {"members": members, "count": len(members)}
 
@@ -102,7 +123,7 @@ async def add_member(
     The user must already have a registered account. Role hierarchy is
     enforced: you can only assign roles below your own rank.
     """
-    project = await _resolve_project(session, slug)
+    project = await _resolve_project(session, slug, ctx)
 
     if body.role not in VALID_ROLES:
         raise HTTPException(
@@ -176,7 +197,7 @@ async def update_member_role(
     Role hierarchy enforced: cannot promote someone to or above your
     own rank. Cannot change an owner's role (use ownership transfer).
     """
-    project = await _resolve_project(session, slug)
+    project = await _resolve_project(session, slug, ctx)
 
     if body.role not in VALID_ROLES:
         raise HTTPException(
@@ -248,7 +269,7 @@ async def remove_member(
     Cannot remove the last owner. Cannot remove yourself (leave
     the project instead). Role hierarchy enforced.
     """
-    project = await _resolve_project(session, slug)
+    project = await _resolve_project(session, slug, ctx)
 
     # Fetch the target member
     target = await members_repo.get_member(session, project.id, user_id)

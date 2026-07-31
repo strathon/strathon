@@ -178,3 +178,39 @@ def test_require_reauth_function():
         )
     assert exc_info.value.status_code == 403
     assert "re-authentication" in exc_info.value.detail.lower()
+
+    # Session auth with the CORRECT password succeeds (must not raise). This
+    # guards the success path: reauth verifies the supplied password against the
+    # stored hash, and the argument order matters. Passing the plaintext where a
+    # hash is expected raises inside Argon2, which surfaces as a 500 and locks
+    # every user out of the guarded operations even with the right password.
+    from password import hash_password
+
+    stored_hash = hash_password("s3cret-pw")
+    # session.execute is awaited; the result object's .first() is sync. Build a
+    # plain result whose .first() returns the stored-hash row, and an async
+    # execute that returns it.
+    from unittest.mock import MagicMock
+
+    result_ok = MagicMock()
+    result_ok.first.return_value = (stored_hash,)
+    session_ok = AsyncMock()
+    session_ok.execute.return_value = result_ok
+    ctx_ok = ApiKeyContext(
+        key_id=uuid.uuid4(),
+        project_id=uuid.uuid4(),
+        key_prefix="session",
+        scopes=("*",),
+        user_id=uuid.uuid4(),
+        role="admin",
+        auth_method="session",
+    )
+    # Correct password returns None without raising.
+    asyncio.run(require_reauth(ctx_ok, session_ok, confirm_password="s3cret-pw"))
+
+    # Wrong password against the same hash is a 403, not a 500.
+    with pytest.raises(HTTPException) as exc_wrong:
+        asyncio.run(
+            require_reauth(ctx_ok, session_ok, confirm_password="wrong-pw")
+        )
+    assert exc_wrong.value.status_code == 403
