@@ -49,7 +49,7 @@ from audit.actions import (
     WEBHOOK_SIGNING_KEY_REVOKE,
 )
 from database import get_db_session
-from webhooks.keystore import forget_secret_by_id, remember_secret
+from webhooks import keystore
 
 from ._deps import build_audit_context, coerce_project_id, require_scope
 
@@ -109,9 +109,14 @@ async def create_webhook_signing_key(
     result = await keys_repo.create_key(session, pid)
 
     # Push the plaintext into the in-process keystore so the next
-    # delivery picks it up. Keyed by row id so DELETE can drop just
+    # delivery picks it up, but only once the row commits -- otherwise a
+    # later rollback in this request would leave a secret in memory for a
+    # key that was never persisted. Keyed by row id so DELETE can drop just
     # this entry cleanly without affecting other active keys.
-    remember_secret(pid, result.plaintext, key_id=result.row.id)
+    _pid, _plaintext, _kid = pid, result.plaintext, result.row.id
+    keystore.run_after_commit(
+        session, lambda: keystore.remember_secret(_pid, _plaintext, key_id=_kid)
+    )
 
     response = result.row.to_json()
     # Audit: never log the plaintext secret. We record the id + prefix
@@ -174,10 +179,16 @@ async def revoke_webhook_signing_key(
         )
 
     # Drop the plaintext from the keystore so the very next delivery
-    # does NOT sign with this key. Other active keys for the project
-    # remain untouched, so a rotation cutover (new key was created
-    # first, this old key is being retired) keeps signing seamlessly.
-    forget_secret_by_id(pid, kid_uuid)
+    # does NOT sign with this key, but only once the revoke commits --
+    # otherwise a later rollback would leave a still-active key with no
+    # secret in memory and signing would silently fail for it. Other
+    # active keys for the project remain untouched, so a rotation cutover
+    # (new key was created first, this old key is being retired) keeps
+    # signing seamlessly.
+    _pid, _kid = pid, kid_uuid
+    keystore.run_after_commit(
+        session, lambda: keystore.forget_secret_by_id(_pid, _kid)
+    )
 
     await audit_repo.emit(
         session,

@@ -139,3 +139,44 @@ def test_key_id_generated_when_omitted():
     got = get_active_secrets(p)
     assert "whsec_one" in got
     assert "whsec_two" in got
+
+
+@pytest.mark.asyncio
+async def test_run_after_commit_applies_on_commit_and_skips_on_rollback(async_engine):
+    """A keystore mutation bound to a session must apply only when the
+    transaction commits, and must not leak when it rolls back.
+
+    Regression: create/revoke mutated the in-memory keystore inline, before the
+    endpoint's transaction committed. A rollback then desynced memory from the
+    database -- a created secret lingered for a row that was never persisted,
+    or a revoked key's secret was gone while the row stayed active.
+
+    Uses the shared async_engine fixture (correct driver) rather than building
+    its own, and opens two independent sessions: one that commits and one that
+    rolls back.
+    """
+    import uuid
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from webhooks import keystore
+
+    pid_ok, kid_ok = uuid.uuid4(), uuid.uuid4()
+    async with AsyncSession(bind=async_engine) as s:
+        keystore.run_after_commit(
+            s, lambda: keystore.remember_secret(pid_ok, "s", key_id=kid_ok)
+        )
+        await s.execute(text("SELECT 1"))
+        assert keystore.get_active_secrets(pid_ok) == []  # not yet
+        await s.commit()
+    assert keystore.get_active_secrets(pid_ok) == ["s"]  # applied on commit
+
+    pid_rb, kid_rb = uuid.uuid4(), uuid.uuid4()
+    async with AsyncSession(bind=async_engine) as s:
+        keystore.run_after_commit(
+            s, lambda: keystore.remember_secret(pid_rb, "x", key_id=kid_rb)
+        )
+        await s.execute(text("SELECT 1"))
+        await s.rollback()
+    assert keystore.get_active_secrets(pid_rb) == []  # never applied

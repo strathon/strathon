@@ -129,6 +129,35 @@ def get_active_secrets(project_id: uuid.UUID) -> List[str]:
         return list(bucket.values())
 
 
+def run_after_commit(session, fn) -> None:
+    """Run a keystore mutation only once ``session`` commits.
+
+    The keystore lives in memory; the key rows live in the database. An endpoint
+    that mutated the keystore inline would desync the two on rollback: a created
+    secret would linger for a row that was never persisted, and a revoked key's
+    secret would be gone while the row stayed active, so signing would silently
+    fail for a still-valid key. Binding the mutation to the session's after-commit
+    event keeps memory and database in step -- it runs when the row change is
+    durable and never runs on rollback. Falls back to running inline if the event
+    cannot be bound.
+    """
+    from sqlalchemy import event
+
+    def _run(_session) -> None:
+        try:
+            fn()
+        except Exception:  # pragma: no cover - keystore mutation must not break commit
+            logger.exception("keystore after-commit mutation failed")
+
+    try:
+        event.listen(session.sync_session, "after_commit", _run, once=True)
+    except Exception:
+        try:
+            fn()
+        except Exception:  # pragma: no cover
+            logger.exception("keystore inline mutation failed")
+
+
 def reset_for_testing() -> None:
     """Wipe the keystore. Tests use this between cases."""
     with _lock:
@@ -140,4 +169,5 @@ __all__ = [
     "get_active_secrets",
     "remember_secret",
     "reset_for_testing",
+    "run_after_commit",
 ]
