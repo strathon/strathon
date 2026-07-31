@@ -44,12 +44,30 @@ def test_credential_in_request_body_is_blocked():
 
 def test_clean_request_with_no_policies_passes():
     addon = _addon()
-    addon._policies = []  # no policies loaded
+    addon._policies = []
+    addon._policies_loaded = True  # a refresh succeeded and returned no policies
     f = _request_flow(body="just a normal request payload, nothing secret")
     with taddons.context(addon):
         addon.request(f)
-    # No response set means the request was allowed to proceed upstream.
+    # Policies loaded, none present, default action allow: proceed upstream.
     assert f.response is None
+
+
+def test_request_before_policies_load_fails_closed():
+    """Until a refresh succeeds, the proxy cannot know the project's posture.
+
+    The constructor's default action is allow, so honoring it before any refresh
+    would admit traffic for a project that is actually default-deny. A fresh
+    addon (never loaded) must block rather than pass, regardless of the default.
+    """
+    addon = _addon()
+    addon._policies = []
+    assert addon._policies_loaded is False  # nothing has loaded yet
+    f = _request_flow(body="a normal request that arrives before startup refresh")
+    with taddons.context(addon):
+        addon.request(f)
+    assert f.response is not None
+    assert f.response.status_code == 403
 
 
 def test_policy_block_via_pulled_policies():
