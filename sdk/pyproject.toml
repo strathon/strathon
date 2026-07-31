@@ -106,3 +106,15 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "strathon.instrumentation.*"
 disable_error_code = ["method-assign"]
+
+# numpy arrives only through optional framework extras, never through the SDK's
+# own code or core dependencies. Its published stubs use PEP 695 `type`
+# statements, which are 3.12+ syntax; under the SDK's 3.11 mypy target those
+# stubs fail to parse and abort the whole run. CI sidesteps this by type-checking
+# with only the SDK's core dependencies installed, but a contributor with the
+# extras present would hit it locally. Skip numpy so the result is the same
+# either way -- the SDK does not import numpy, so nothing of ours goes unchecked.
+[[tool.mypy.overrides]]
+module = "numpy.*"
+follow_imports = "skip"
+follow_imports_for_stubs = true
