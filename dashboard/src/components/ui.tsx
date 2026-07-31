@@ -29,6 +29,7 @@ export function Kbd({ children }: { children: React.ReactNode }) {
 export function useCountUp(target: number, duration = 900) {
   const [value, setValue] = useState(0);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- drives the count-up animation frame state
     if (prefersReducedMotion()) { setValue(target); return; }
     let raf: number;
     const start = performance.now();
@@ -745,15 +746,8 @@ export function CopyableCode({ children, language = "", filename, defaultWrap = 
 }
 
 /* ════════════ ShortcutHelp ════════════ */
-export function ShortcutHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-  if (!open) return null;
-  const Group = ({ title, items }: { title: React.ReactNode; items: [string[], string][] }) => (
+function ShortcutGroup({ title, items }: { title: React.ReactNode; items: [string[], string][] }) {
+  return (
     <div>
       <div className="shortcut-group-title">{title}</div>
       {items.map(([keys, label]) => (
@@ -764,6 +758,16 @@ export function ShortcutHelp({ open, onClose }: { open: boolean; onClose: () => 
       ))}
     </div>
   );
+}
+
+export function ShortcutHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+  if (!open) return null;
   return (
     <div className="sheet-backdrop" onClick={onClose} style={{ display: "grid", placeItems: "center" }}>
       <div onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Keyboard shortcuts"
@@ -774,10 +778,10 @@ export function ShortcutHelp({ open, onClose }: { open: boolean; onClose: () => 
           <button className="btn icon ghost" onClick={onClose} aria-label="Close"><Icons.X size={15} /></button>
         </div>
         <div className="shortcuts-grid">
-          <Group title={<><Icons.Search size={11} /> Global</>} items={[[["⌘", "K"], "Open command palette"], [["/"], "Focus search on this page"], [["?"], "Show this overlay"], [["Esc"], "Close any modal/sheet/palette"]]} />
-          <Group title={<><Icons.PanelLeft size={11} /> Layout</>} items={[[["⌘", "."], "Toggle sidebar"], [["["], "Toggle sidebar (no modifier)"]]} />
-          <Group title={<><Icons.GitBranch size={11} /> Navigate</>} items={[[["G", "O"], "Go to Overview"], [["G", "P"], "Go to Policies"], [["G", "T"], "Go to Traces"], [["G", "S"], "Go to Spans"], [["G", "A"], "Go to Approvals"], [["G", "N"], "Go to Agents"], [["G", "U"], "Go to Audit"], [["G", "B"], "Go to Budgets"], [["G", "C"], "Go to Compliance"]]} />
-          <Group title={<><Icons.Zap size={11} /> Detail pages</>} items={[[["⌘", "S"], "Save current policy"], [["P"], "Pin selected span in waterfall"], [["↑", "↓"], "Navigate list / palette"], [["↵"], "Open / activate selection"]]} />
+          <ShortcutGroup title={<><Icons.Search size={11} /> Global</>} items={[[["⌘", "K"], "Open command palette"], [["⌘", ","], "Open settings"], [["/"], "Focus search on this page"], [["?"], "Show this overlay"], [["Esc"], "Close any modal/sheet/palette"]]} />
+          <ShortcutGroup title={<><Icons.PanelLeft size={11} /> Layout</>} items={[[["⌘", "B"], "Toggle sidebar"]]} />
+          <ShortcutGroup title={<><Icons.GitBranch size={11} /> Navigate</>} items={[[["G", "O"], "Go to Overview"], [["G", "P"], "Go to Policies"], [["G", "T"], "Go to Traces"], [["G", "S"], "Go to Spans"], [["G", "A"], "Go to Approvals"], [["G", "N"], "Go to Agents"], [["G", "U"], "Go to Audit"], [["G", "B"], "Go to Budgets"], [["G", "C"], "Go to Compliance"]]} />
+          <ShortcutGroup title={<><Icons.Zap size={11} /> Detail pages</>} items={[[["⌘", "S"], "Save current policy"], [["P"], "Pin selected span in waterfall"], [["↑", "↓"], "Navigate list / palette"], [["↵"], "Open / activate selection"]]} />
         </div>
       </div>
     </div>

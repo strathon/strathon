@@ -8,7 +8,7 @@ import { Icons } from "@/components/icons";
 import { useApi, api } from "@/lib/api-client";
 import { UserProvider, useUser } from "@/lib/user-context";
 import { usePermissions } from "@/lib/permissions";
-import { setTheme, getStoredTheme, watchSystemTheme } from "@/lib/theme";
+import { setTheme, watchSystemTheme } from "@/lib/theme";
 
 const DASHBOARD_VERSION = "1.3.0";
 
@@ -70,7 +70,7 @@ function NoProjectScreen() {
  * project. All hooks run unconditionally (rules of hooks); the render
  * branches on auth/membership state at the end.
  */
-function AuthedShell({ children, mode }: { children: React.ReactNode; mode: "self-hosted" | "cloud" }) {
+function AuthedShell({ children }: { children: React.ReactNode }) {
   const { user, loading } = useUser();
   const pathname = usePathname();
   const router = useRouter();
@@ -108,6 +108,7 @@ function AuthedShell({ children, mode }: { children: React.ReactNode; mode: "sel
   }, []);
 
   // Close drawer + scroll top on route change
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- route-change reset of transient UI state; must run after navigation
   useEffect(() => { setMobileOpen(false); setUserMenuOpen(false); window.scrollTo(0, 0); }, [pathname]);
 
   // Body scroll lock while mobile drawer open
@@ -134,9 +135,8 @@ function AuthedShell({ children, mode }: { children: React.ReactNode; mode: "sel
     const onKey = (e: KeyboardEvent) => {
       const inField = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName ?? "");
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setCmdOpen(true); return; }
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === ",") { e.preventDefault(); router.push("/settings"); return; }
-      if ((e.metaKey || e.ctrlKey) && e.key === ".") { e.preventDefault(); e.stopPropagation(); setCollapsed((c) => !c); return; }
-      if (e.key === "[" && !inField && !e.metaKey && !e.ctrlKey) { e.preventDefault(); setCollapsed((c) => !c); return; }
+      if ((e.metaKey || e.ctrlKey) && e.key === ",") { e.preventDefault(); router.push("/settings"); return; }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") { e.preventDefault(); e.stopPropagation(); setCollapsed((c) => !c); return; }
       if (e.key === "?" && !inField) { e.preventDefault(); setShortcutsOpen((o) => !o); return; }
       if (e.key === "/" && !inField && !e.metaKey && !e.ctrlKey) {
         const target = document.querySelector<HTMLInputElement>('input.search, input[placeholder*="Search" i], input[placeholder*="Highlight" i]');
@@ -209,7 +209,7 @@ function DashboardShellInner({ children, mode = "self-hosted" }: { children: Rea
   return (
     <UserProvider mode={mode}>
       <ToastProvider>
-        <AuthedShell mode={mode}>{children}</AuthedShell>
+        <AuthedShell>{children}</AuthedShell>
       </ToastProvider>
     </UserProvider>
   );

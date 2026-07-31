@@ -7,6 +7,7 @@ import { Badge, Kbd, Highlight } from "./ui";
 import { StrathonLogo } from "./logo";
 import { useUser } from "@/lib/user-context";
 import { ProjectSwitcher } from "./project-switcher";
+import type { ApprovalRow } from "@/lib/types";
 
 const COMMAND_ITEMS = [
   { section: "Navigation", icon: "Grid", label: "Go to Overview", to: "overview", kbd: "G O" },
@@ -68,6 +69,7 @@ export function Sidebar({ collapsed, setCollapsed, pendingCount, isMobile, setMo
   // Default true to match the server's dark-theme assumption; corrected after mount.
   const [isDark, setIsDark] = useState(true);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reads localStorage (client-only) on mount
     try { const s = parseInt(localStorage.getItem("strathon-avatar-idx") || "0", 10); if (s >= 0 && s < SIDEBAR_BGS.length) setAvatarIdx(s); } catch {}
     setIsDark(document.documentElement.dataset.theme !== "light");
     const handler = (e: Event) => setAvatarIdx((e as CustomEvent).detail);
@@ -92,7 +94,7 @@ export function Sidebar({ collapsed, setCollapsed, pendingCount, isMobile, setMo
           className="brand"
           onClick={() => { if (collapsed && !isMobile) setCollapsed(false); }}
           style={collapsed && !isMobile ? { cursor: "pointer" } : undefined}
-          title={collapsed && !isMobile ? "Open sidebar  ⌘." : undefined}
+          title={collapsed && !isMobile ? "Open sidebar  ⌘B" : undefined}
           aria-label={collapsed && !isMobile ? "Open sidebar" : undefined}
         >
           <div className="brand-mark">
@@ -101,9 +103,9 @@ export function Sidebar({ collapsed, setCollapsed, pendingCount, isMobile, setMo
           <span className="brand-name">Strathon</span>
         </div>
         {/* Toggle button — visible only when expanded (hidden by CSS when collapsed) */}
-        <button className="sidebar-toggle" data-tooltip="Close sidebar  ⌘."
+        <button className="sidebar-toggle" data-tooltip="Close sidebar  ⌘B"
           onClick={() => isMobile ? setMobileOpen(false) : setCollapsed(!collapsed)}
-          title={isMobile ? "Close sidebar" : "Close sidebar  ⌘."} aria-label="Toggle sidebar">
+          title={isMobile ? "Close sidebar" : "Close sidebar  ⌘B"} aria-label="Toggle sidebar">
           <Icons.PanelLeft size={17} />
         </button>
       </div>
@@ -152,7 +154,7 @@ export function Header({ breadcrumbs, onOpenCmd, cmdOpen, mobileOpen, setMobileO
       .then(r => r.ok ? r.json() : { data: [] })
       .then(d => {
         const items = (d?.data || []).slice(0, 8);
-        setNotifs(items.map((a: any, i: number) => ({
+        setNotifs(items.map((a: ApprovalRow, i: number) => ({
           id: a.id || i,
           kind: "approval",
           title: "Approval needed",
@@ -190,7 +192,7 @@ export function Header({ breadcrumbs, onOpenCmd, cmdOpen, mobileOpen, setMobileO
   return (
     <header className="header">
       <button className="header-mobile-trigger" onClick={() => { if (!isMobile && collapsed) setCollapsed(false); else setMobileOpen(!mobileOpen); }}
-        aria-label="Open sidebar" title="Open sidebar  ⌘.">
+        aria-label="Open sidebar" title="Open sidebar  ⌘B">
         <Icons.PanelLeft size={18} />
       </button>
       <div className="breadcrumbs">
@@ -300,6 +302,7 @@ export function CommandPalette({ open, onClose, onAction, toggleTheme }: { open:
 
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resets palette state when it opens
       setQ(""); setActive(0);
       try { setRecents(JSON.parse(localStorage.getItem("strathon-recents") || "[]")); } catch { setRecents([]); }
       setTimeout(() => inputRef.current?.focus(), 30);
@@ -316,13 +319,13 @@ export function CommandPalette({ open, onClose, onAction, toggleTheme }: { open:
     return { flat, bySection };
   }, [q, recents]);
 
-  const pushRecent = (it: { label: string; icon?: string; to?: string }) => {
+  const pushRecent = useCallback((it: { label: string; icon?: string; to?: string }) => {
     try {
       const next = [{ label: it.label, icon: it.icon, to: it.to }, ...recents.filter((r) => r.label !== it.label)].slice(0, 5);
       localStorage.setItem("strathon-recents", JSON.stringify(next));
       setRecents(next);
     } catch {}
-  };
+  }, [recents]);
 
   const handle = useCallback((it: { section?: string; to?: string; action?: string; label: string; icon?: string } | undefined) => {
     if (!it) return;
@@ -335,7 +338,7 @@ export function CommandPalette({ open, onClose, onAction, toggleTheme }: { open:
     else if (it.action === "show-shortcuts") onAction?.("show-shortcuts");
     else if (it.to) router.push(`/${it.to}`);
     onClose();
-  }, [router, onAction, onClose, toggleTheme, recents]);
+  }, [router, onAction, onClose, toggleTheme, pushRecent]);
 
   useEffect(() => {
     if (!open) return;
