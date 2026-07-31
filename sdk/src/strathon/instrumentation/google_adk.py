@@ -51,6 +51,8 @@ from typing import Any, Dict, Optional
 
 from opentelemetry.trace import Status, StatusCode
 
+from strathon.instrumentation._span_tree import SpanTree
+
 logger = logging.getLogger(__name__)
 
 _MAX_ATTR_LEN = 2000
@@ -200,6 +202,70 @@ def _build_plugin_class():
             self._active_model_spans: Dict[int, Any] = {}
             # Track tool start times by (tool_name, id(tool_context)).
             self._tool_start_times: Dict[tuple, float] = {}
+            # One span per ADK invocation, keyed by invocation_id, so every tool
+            # and model span in the invocation nests under it instead of starting
+            # its own root trace (which shows one agent run as several agents).
+            # Created lazily: the plugin can be constructed with client=None.
+            self._invocations = None
+
+        def _inv_tree(self):
+            if self._invocations is None and self.client is not None:
+                self._invocations = SpanTree(self.client.tracer)
+            return self._invocations
+
+        # ---- Invocation span: the parent for everything in one ADK run ----
+
+        async def before_run_callback(self, *, invocation_context):
+            """Open the invocation span that tool and model spans nest under."""
+            if self.client is None:
+                return None
+            try:
+                invocation_id = getattr(invocation_context, "invocation_id", None)
+                if not invocation_id:
+                    return None
+                agent = getattr(invocation_context, "agent", None)
+                agent_name = getattr(agent, "name", None)
+                attrs = {
+                    "strathon.framework": "google_adk",
+                    "gen_ai.operation.name": "invoke_agent",
+                }
+                if agent_name:
+                    attrs["strathon.agent.name"] = str(agent_name)
+                self._inv_tree().start(
+                    str(invocation_id),
+                    name=f"adk.invocation.{agent_name or 'agent'}",
+                    attributes=attrs,
+                )
+            except Exception:
+                logger.exception("before_run_callback failed")
+            return None
+
+        async def after_run_callback(self, *, invocation_context):
+            """Close the invocation span."""
+            if self.client is None:
+                return None
+            try:
+                invocation_id = getattr(invocation_context, "invocation_id", None)
+                if invocation_id and self._invocations is not None:
+                    self._invocations.end(str(invocation_id))
+            except Exception:
+                logger.exception("after_run_callback failed")
+            return None
+
+        def _parent_ctx(self, context):
+            """OTel context parented at the invocation span for this callback.
+
+            ``context`` is an ADK tool or callback context, which reaches the
+            current ``invocation_id`` via ReadonlyContext. Returns None when the
+            invocation span is absent (e.g. before_run_callback did not fire), so
+            the span falls back to a root rather than erroring.
+            """
+            if self._invocations is None:
+                return None
+            invocation_id = getattr(context, "invocation_id", None)
+            if not invocation_id:
+                return None
+            return self._invocations.context_for(str(invocation_id))
 
         # ---- Tool hooks: policy enforcement + observability ----
 
@@ -369,6 +435,7 @@ def _build_plugin_class():
             span = tracer.start_span(
                 name=f"google_adk.tool.{tool_name}",
                 attributes=span_attrs,
+                context=self._parent_ctx(tool_context),
             )
             span.set_status(Status(StatusCode.OK))
             span.end()
@@ -403,6 +470,7 @@ def _build_plugin_class():
             span = tracer.start_span(
                 name=f"google_adk.tool.{tool_name}",
                 attributes=span_attrs,
+                context=self._parent_ctx(tool_context),
             )
             span.set_status(Status(StatusCode.ERROR, str(error)))
             span.end()
@@ -429,6 +497,7 @@ def _build_plugin_class():
             span = tracer.start_span(
                 name=f"google_adk.model.{model_name}",
                 attributes=span_attrs,
+                context=self._parent_ctx(callback_context),
             )
             self._active_model_spans[id(callback_context)] = span
 

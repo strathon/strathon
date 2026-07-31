@@ -33,6 +33,8 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
+from opentelemetry import context as otel_context
+from opentelemetry import trace as otel_trace
 from opentelemetry.trace import Status, StatusCode
 
 logger = logging.getLogger(__name__)
@@ -103,12 +105,21 @@ def _wrap_on_messages(original, tracer):
             name=f"autogen.agent.{agent_name}",
             attributes=span_attrs,
         )
+        # Attach the span to the OpenTelemetry context for the duration of the
+        # agent call. AutoGen runs tool calls in a separate asyncio task, and a
+        # task copies the current context when it is created, so a tool span
+        # started while this span is current parents under it instead of
+        # starting its own root trace. Detaching in finally keeps the context
+        # clean and keeps concurrent agents in a team from cross-parenting.
+        token = otel_context.attach(otel_trace.set_span_in_context(span))
         try:
             response = await original(self, messages, cancellation_token)
         except Exception as exc:
             span.set_status(Status(StatusCode.ERROR, str(exc)))
             span.end()
             raise
+        finally:
+            otel_context.detach(token)
 
         # Extract response content and usage.
         chat_msg = getattr(response, "chat_message", None)
@@ -152,12 +163,17 @@ def _wrap_team_run(original, tracer):
             name=f"autogen.team.{team_name}",
             attributes=span_attrs,
         )
+        # Attach the team span so the agent spans it runs (and the tool spans
+        # under those) nest into one trace rather than each starting a root.
+        token = otel_context.attach(otel_trace.set_span_in_context(span))
         try:
             result = await original(self, *args, **kwargs)
         except Exception as exc:
             span.set_status(Status(StatusCode.ERROR, str(exc)))
             span.end()
             raise
+        finally:
+            otel_context.detach(token)
 
         # Extract final message from TaskResult.
         messages = getattr(result, "messages", None)

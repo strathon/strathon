@@ -45,6 +45,8 @@ from typing import Any, Dict, Optional
 
 from opentelemetry.trace import Status, StatusCode
 
+from strathon.instrumentation._span_tree import SpanTree
+
 logger = logging.getLogger(__name__)
 
 _MAX_ATTR_LEN = 2000
@@ -233,10 +235,70 @@ def _build_firewall_class():
         _active_model_spans: Dict[int, Any] = field(
             default_factory=dict, init=False, repr=False,
         )
+        # Internal: one span per run, keyed by RunContext.run_id, so tool and
+        # model spans nest under it. for_run defaults to returning self, so a
+        # single capability instance serves every (possibly concurrent) run --
+        # keying by run_id keeps their spans from cross-parenting.
+        _runs: Any = field(default=None, init=False, repr=False)
 
         def get_ordering(self) -> CapabilityOrdering:
             """Outermost: firewall sees raw input before other capabilities."""
             return CapabilityOrdering(position="outermost")
+
+        # ---- Run span: the parent for a whole agent run ----
+
+        def _run_tree(self):
+            # Lazily create the shared SpanTree (dataclass field can't hold a
+            # tracer-bound object at class-definition time).
+            if self._runs is None:
+                object.__setattr__(self, "_runs", SpanTree(self.client.tracer))
+            return self._runs
+
+        def _run_key(self, ctx) -> Optional[str]:
+            run_id = getattr(ctx, "run_id", None)
+            return str(run_id) if run_id else None
+
+        def _parent_ctx(self, ctx):
+            """OTel context parented at this run's span, or None (root fallback)."""
+            key = self._run_key(ctx)
+            if key is None:
+                return None
+            return self._run_tree().context_for(key)
+
+        async def before_run(self, ctx):
+            """Open the run span that tool and model spans nest under."""
+            if self.client is None:
+                return
+            try:
+                key = self._run_key(ctx)
+                if key is None:
+                    return
+                agent = getattr(ctx, "agent", None)
+                agent_name = getattr(agent, "name", None)
+                attrs = {
+                    "strathon.framework": "pydantic_ai",
+                    "gen_ai.operation.name": "invoke_agent",
+                }
+                if agent_name:
+                    attrs["strathon.agent.name"] = str(agent_name)
+                self._run_tree().start(
+                    key,
+                    name=f"pydantic_ai.run.{agent_name or 'agent'}",
+                    attributes=attrs,
+                )
+            except Exception:
+                logger.exception("before_run failed")
+
+        async def after_run(self, ctx):
+            """Close the run span."""
+            if self.client is None:
+                return
+            try:
+                key = self._run_key(ctx)
+                if key is not None:
+                    self._run_tree().end(key)
+            except Exception:
+                logger.exception("after_run failed")
 
         # ---- Tool hooks: policy enforcement + observability ----
 
@@ -376,6 +438,7 @@ def _build_firewall_class():
             span = tracer.start_span(
                 name=f"pydantic_ai.tool.{tool_name}",
                 attributes=span_attrs,
+                context=self._parent_ctx(ctx),
             )
             start = time.monotonic()
             try:
@@ -412,6 +475,7 @@ def _build_firewall_class():
             span = tracer.start_span(
                 name=f"pydantic_ai.model.{model_name or 'unknown'}",
                 attributes=span_attrs,
+                context=self._parent_ctx(ctx),
             )
             # Stash the span so after_model_request can finalize it.
             self._active_model_spans[id(request_context)] = span

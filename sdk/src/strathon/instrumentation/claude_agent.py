@@ -50,10 +50,26 @@ from typing import Any, Dict
 
 from opentelemetry.trace import Status, StatusCode
 
+from strathon.instrumentation._span_tree import SpanTree
+
 logger = logging.getLogger(__name__)
 
 _MAX_ATTR_LEN = 2000
 _PATCHED = False
+
+# Session spans for the ClaudeSDKClient path, keyed by session_id, shared between
+# the query wrap (which opens them) and the tool hooks (which parent tool spans
+# under them and close them on Stop). One tree per process; the tracer is bound on
+# first use. session_id is available as a query() argument and on every hook
+# input, so it is the durable key that bridges the two mechanisms.
+_SESSION_TREE: Any = None
+
+
+def _session_tree(tracer) -> SpanTree:
+    global _SESSION_TREE
+    if _SESSION_TREE is None:
+        _SESSION_TREE = SpanTree(tracer)
+    return _SESSION_TREE
 
 
 def _truncate(value: Any, max_len: int = _MAX_ATTR_LEN) -> str:
@@ -101,7 +117,14 @@ def _extract_messages(result) -> str:
 
 
 def _wrap_query(original, tracer):
-    """Wrap the module-level query() function."""
+    """Wrap the module-level query() function.
+
+    query() is an async generator that yields messages, so the wrapper is itself
+    an async generator: it opens a span, iterates the underlying stream and
+    re-yields each message, records the session id and completion as they appear,
+    and ends the span when the stream is exhausted. Awaiting query() (as an
+    earlier version did) is wrong -- an async generator cannot be awaited.
+    """
 
     @functools.wraps(original)
     async def wrapper(*args, **kwargs):
@@ -126,34 +149,54 @@ def _wrap_query(original, tracer):
             name="claude_agent.query",
             attributes=span_attrs,
         )
+        completion_parts: list = []
+        session_recorded = False
         try:
-            result = await original(*args, **kwargs)
+            async for message in original(*args, **kwargs):
+                if not session_recorded:
+                    session_id = getattr(message, "session_id", None)
+                    if session_id:
+                        span.set_attribute(
+                            "gen_ai.conversation.id", str(session_id)
+                        )
+                        session_recorded = True
+                text = _extract_messages(message)
+                if text:
+                    completion_parts.append(text)
+                yield message
         except Exception as exc:
             span.set_status(Status(StatusCode.ERROR, str(exc)))
-            span.end()
             raise
-
-        response_text = _extract_messages(result)
-        if response_text:
-            span.set_attribute("gen_ai.completion", response_text)
-
-        session_id = getattr(result, "session_id", None)
-        if session_id:
-            span.set_attribute("gen_ai.conversation.id", str(session_id))
-
-        span.set_status(Status(StatusCode.OK))
-        span.end()
-        return result
+        else:
+            if completion_parts:
+                span.set_attribute(
+                    "gen_ai.completion", _truncate(" ".join(completion_parts))
+                )
+            span.set_status(Status(StatusCode.OK))
+        finally:
+            span.end()
 
     return wrapper
 
 
 def _wrap_client_query(original, tracer):
-    """Wrap ClaudeSDKClient.query()."""
+    """Wrap ClaudeSDKClient.query().
+
+    query() sends the prompt and returns None (responses are read separately via
+    receive_response); it takes session_id as an argument. So the wrapper reads
+    session_id from the call, opens a session span keyed by it in the shared
+    session tree -- which the PostToolUse hook parents tool spans under and the
+    Stop hook closes -- and does not try to read a result that is always None.
+    """
 
     @functools.wraps(original)
     async def wrapper(self, *args, **kwargs):
         prompt = args[0] if args else kwargs.get("prompt", "")
+        session_id = kwargs.get("session_id")
+        if session_id is None and len(args) > 1:
+            session_id = args[1]
+        if session_id is None:
+            session_id = "default"
         client_name = getattr(self, "name", None) or "claude_agent"
         span_attrs: Dict[str, Any] = {
             "strathon.framework": "claude_agent_sdk",
@@ -161,28 +204,25 @@ def _wrap_client_query(original, tracer):
             "gen_ai.operation.name": "client_query",
             "gen_ai.agent.name": str(client_name),
             "strathon.agent.name": str(client_name),
+            "gen_ai.conversation.id": str(session_id),
         }
         if prompt:
             span_attrs["gen_ai.prompt"] = _truncate(str(prompt))
 
-        span = tracer.start_span(
-            name=f"claude_agent.client.{client_name}",
-            attributes=span_attrs,
-        )
+        tree = _session_tree(tracer)
+        # A prior span for this session (a second query() on the same client)
+        # is closed before the new one opens, so the key always points at the
+        # current turn.
+        tree.discard(str(session_id))
+        tree.start(str(session_id), name=f"claude_agent.client.{client_name}", attributes=span_attrs)
         try:
-            result = await original(self, *args, **kwargs)
+            return await original(self, *args, **kwargs)
         except Exception as exc:
-            span.set_status(Status(StatusCode.ERROR, str(exc)))
-            span.end()
+            tree.end(
+                str(session_id),
+                status=Status(StatusCode.ERROR, str(exc)),
+            )
             raise
-
-        response_text = _extract_messages(result)
-        if response_text:
-            span.set_attribute("gen_ai.completion", response_text)
-
-        span.set_status(Status(StatusCode.OK))
-        span.end()
-        return result
 
     return wrapper
 
@@ -359,9 +399,16 @@ def _build_post_tool_use_hook(client):
             )
 
         tracer = client.tracer
+        session_id = input_data.get("session_id")
+        parent_ctx = (
+            _session_tree(tracer).context_for(str(session_id))
+            if session_id
+            else None
+        )
         span = tracer.start_span(
             name=f"claude_agent.tool.{tool_name}",
             attributes=span_attrs,
+            context=parent_ctx,
         )
         span.set_status(Status(StatusCode.OK))
         span.end()
@@ -369,6 +416,21 @@ def _build_post_tool_use_hook(client):
         return {}
 
     return strathon_post_tool_use
+
+
+def _build_stop_hook(client):
+    """Build a Stop hook that closes the session span for its session_id."""
+
+    async def strathon_stop(input_data, tool_use_id, context):
+        try:
+            session_id = input_data.get("session_id")
+            if session_id:
+                _session_tree(client.tracer).end(str(session_id))
+        except Exception:
+            logger.exception("Strathon stop hook failed")
+        return {}
+
+    return strathon_stop
 
 
 def create_strathon_hooks(client) -> Dict[str, Any]:
@@ -402,6 +464,9 @@ def create_strathon_hooks(client) -> Dict[str, Any]:
             "PostToolUse": [
                 {"hooks": [_build_post_tool_use_hook(client)]}
             ],
+            "Stop": [
+                {"hooks": [_build_stop_hook(client)]}
+            ],
         }
 
     return {
@@ -410,6 +475,9 @@ def create_strathon_hooks(client) -> Dict[str, Any]:
         ],
         "PostToolUse": [
             HookMatcher(hooks=[_build_post_tool_use_hook(client)])
+        ],
+        "Stop": [
+            HookMatcher(hooks=[_build_stop_hook(client)])
         ],
     }
 
