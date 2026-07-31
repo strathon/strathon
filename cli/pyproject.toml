@@ -28,7 +28,7 @@ classifiers = [
 dependencies = [
     "click>=8.4.2",
     "httpx>=0.28.1",
-    "rich>=15.0.0",
+    "rich>=13.7.0",
     "pyyaml>=6.0.3",
 ]
 
