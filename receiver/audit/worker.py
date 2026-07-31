@@ -105,7 +105,12 @@ async def partition_maintenance_loop(
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001
-            logger.exception("audit partition maintenance sweep failed")
+            logger.exception(
+                "PARTITION_MAINTENANCE_FAILED: audit partition maintenance "
+                "sweep failed. If this persists, future audit partitions will be "
+                "missing and audit-event writes will fail once the current "
+                "partition fills. Alert on this and investigate the database."
+            )
 
         try:
             await asyncio.wait_for(

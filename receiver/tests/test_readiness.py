@@ -234,6 +234,7 @@ def test_ready_returns_200_when_all_healthy(client):
         "budget_monitor_task",
         "audit_partition_task",
         "spans_partition_task",
+        "regex_engine",
     }
     for name, check in body["checks"].items():
         assert check["status"] == "ok", f"{name} failed: {check}"
@@ -290,6 +291,7 @@ def test_ready_returns_503_when_background_task_is_dead(client):
             "budget_monitor_task",
             "audit_partition_task",
             "spans_partition_task",
+            "regex_engine",
         }
         # The dead one is flagged; the others are still ok.
         assert body["checks"]["budget_monitor_task"]["status"] == "failed"

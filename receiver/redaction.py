@@ -83,10 +83,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Mapping, Tuple
 
-try:
-    import re2 as _re_engine  # Linear-time regex (no backtracking).
-except ImportError:
-    import re as _re_engine  # type: ignore[assignment]  # Fallback.
+from regex_engine import engine as _re_engine  # linear-time re2, loud fallback
 
 logger = logging.getLogger("strathon.receiver.redaction")
 
@@ -437,11 +434,11 @@ def _base64_decode_rescan(
     """
     import base64 as b64_mod
 
-    # Match potential base64 chunks: 20+ chars of [A-Za-z0-9+/=].
-    try:
-        import re2 as re_engine
-    except ImportError:
-        import re as re_engine
+    # Match potential base64 chunks: 20+ chars of [A-Za-z0-9+/=]. Use the same
+    # centralized linear-time engine as the rest of redaction so this path is
+    # covered by the loud-fallback + /ready signal rather than its own silent
+    # try/except.
+    re_engine = _re_engine
 
     b64_pattern = re_engine.compile(r'[A-Za-z0-9+/]{20,}={0,2}')
     matches = list(b64_pattern.finditer(text))
@@ -490,14 +487,26 @@ def redact_string(
         return text
     strategy = strategy or {}
 
+    # Upper size cap. Redaction runs several passes (base64 decode-rescan, ~70
+    # credential patterns, per-entity PII passes) over each value. re2 keeps each
+    # pass linear, but the base64 decode-rescan in particular stacks work, so an
+    # unbounded value still lets a single huge attribute burn disproportionate
+    # CPU on one worker. Above this bound we skip the compounding decode-rescan
+    # and run only the direct credential/PII passes -- a real secret or PII datum
+    # is never hundreds of KB, so nothing meaningful is missed.
+    _REDACT_FULL_LIMIT = 256 * 1024
+    heavy_ok = len(text) <= _REDACT_FULL_LIMIT
+
     # Normalize before scanning: NFKC + strip control characters.
     # Prevents Unicode-based evasion (homoglyphs, zero-width joiners).
     out = _normalize_text(text)
 
     # Base64 decode-rescan: detect PII hidden in base64-encoded substrings.
     # If a base64 chunk decodes to text containing PII patterns, redact
-    # the ENCODED chunk in the original string.
-    out = _base64_decode_rescan(out, strategy, entities)
+    # the ENCODED chunk in the original string. Skipped for very large values
+    # (see the size cap above) since it is the most compounding pass.
+    if heavy_ok:
+        out = _base64_decode_rescan(out, strategy, entities)
 
     # Built-in credential pattern scanning (70+ patterns for API keys,
     # cloud credentials, private keys, database URIs, tokens).
@@ -547,6 +556,19 @@ def redact_attributes(
       2. Key actions (delete/hash/redact/mask whole values).
       3. Value pattern scan on remaining string attributes.
     """
+    # NUL bytes cannot be stored in Postgres text columns: a single \x00 in any
+    # attribute value or key raises DataError at commit and surfaces as an
+    # unhandled 500. This is a persistence-safety concern independent of
+    # redaction, so strip NULs unconditionally -- even when redaction is
+    # disabled -- before anything else. Cheap, and turns a crafted-input 500
+    # into a clean write.
+    def _strip_nul(v: Any) -> Any:
+        return v.replace("\x00", "") if isinstance(v, str) else v
+
+    attrs = {
+        _strip_nul(k): _strip_nul(v) for k, v in attrs.items()
+    }
+
     if not config.enabled:
         return attrs
 

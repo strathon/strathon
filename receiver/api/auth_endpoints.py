@@ -21,6 +21,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db_session
@@ -117,6 +118,18 @@ async def _rate_limit(request: Request, bucket: str, detail: str) -> None:
     """
     limiter = getattr(request.app.state, "login_rate_limiter", None)
     if limiter is None:
+        # The limiter is wired in the app lifespan, so a missing one on a live
+        # deployment means brute-force protection is silently OFF on the auth
+        # endpoints. Warn once so that is visible rather than a silent fail-open;
+        # tests that build a bare app without a limiter also hit this, hence a
+        # warning rather than a hard failure.
+        if not getattr(_rate_limit, "_warned_missing", False):
+            _rate_limit._warned_missing = True  # type: ignore[attr-defined]
+            logger.warning(
+                "login_rate_limiter is not configured; brute-force rate limiting "
+                "is INACTIVE on auth endpoints (bucket=%s). This is expected only "
+                "in tests, not in a deployed receiver.", bucket,
+            )
         return
     allowed, _remaining, retry_after = await limiter.consume(bucket)
     if not allowed:

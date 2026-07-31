@@ -21,12 +21,9 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-logger = logging.getLogger("strathon.credentials")
+from regex_engine import engine as _re  # linear-time re2, loud fallback
 
-try:
-    import re2 as _re
-except ImportError:
-    import re as _re
+logger = logging.getLogger("strathon.credentials")
 
 
 @dataclass(frozen=True)

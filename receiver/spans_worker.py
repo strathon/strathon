@@ -158,7 +158,16 @@ async def maintenance_loop(
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("spans partition maintenance sweep failed")
+            # Partition maintenance failing repeatedly is a latent outage: when
+            # the current month's partition fills and no future one exists,
+            # ingestion starts rejecting spans. Log at a level and with wording a
+            # log-based alert can key on (grep 'PARTITION_MAINTENANCE_FAILED').
+            logger.exception(
+                "PARTITION_MAINTENANCE_FAILED: spans partition maintenance sweep "
+                "failed. If this persists, future monthly partitions will be "
+                "missing and span ingestion will fail once the current partition "
+                "fills. Alert on this and investigate DB connectivity/permissions."
+            )
 
         try:
             await asyncio.wait_for(

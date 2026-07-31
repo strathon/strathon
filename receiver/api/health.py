@@ -97,6 +97,7 @@ async def ready(request: Request) -> Response:
     monitor_check = _check_background_task(state, "budget_monitor_task")
     audit_part_check = _check_background_task(state, "audit_partition_task")
     spans_part_check = _check_background_task(state, "spans_partition_task")
+    regex_engine_check = _check_regex_engine()
 
     checks = {
         "db": db_check,
@@ -108,6 +109,7 @@ async def ready(request: Request) -> Response:
         "budget_monitor_task": monitor_check,
         "audit_partition_task": audit_part_check,
         "spans_partition_task": spans_part_check,
+        "regex_engine": regex_engine_check,
     }
 
     all_ok = all(c["status"] == "ok" for c in checks.values())
@@ -375,4 +377,26 @@ def _check_background_task(state: Any, attr: str) -> dict[str, Any]:
     return {
         "status": "failed",
         "reason": f"task {attr} exited without an exception (background loops should run forever)",
+    }
+
+
+def _check_regex_engine() -> dict[str, Any]:
+    """Verify the linear-time regex engine (google-re2) is active.
+
+    Redaction and credential scanning run attacker-controlled span values
+    through regexes on the ingest path. If re2 is missing the code falls back to
+    stdlib ``re``, reintroducing catastrophic-backtracking (ReDoS) risk. re2 is a
+    declared dependency, so a missing engine means a broken deployment -- surface
+    it as not-ready rather than serving vulnerable.
+    """
+    from regex_engine import regex_engine_ok
+
+    if regex_engine_ok():
+        return {"status": "ok"}
+    return {
+        "status": "failed",
+        "reason": (
+            "linear-time regex engine (google-re2) unavailable; ingest is "
+            "exposed to ReDoS. Install google-re2."
+        ),
     }

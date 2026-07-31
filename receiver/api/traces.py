@@ -282,6 +282,24 @@ async def ingest_traces(
                 span_id = span.span_id
                 parent_span_id = span.parent_span_id if span.parent_span_id else None
 
+                # OTLP nano timestamps are uint64; Postgres BIGINT is signed
+                # 64-bit, so a value above 2**63-1 overflows the column and
+                # raises DataError at commit -> an unhandled 500 that also loses
+                # the rest of the batch. Reject just the offending span with a
+                # warning; a timestamp that large is not a real event time.
+                _MAX_BIGINT = 9223372036854775807
+                if (
+                    span.start_time_unix_nano > _MAX_BIGINT
+                    or span.end_time_unix_nano > _MAX_BIGINT
+                ):
+                    logger.warning(
+                        "dropping span %s: nano timestamp out of storable range "
+                        "(start=%s, end=%s)",
+                        span_id.hex() if span_id else "?",
+                        span.start_time_unix_nano, span.end_time_unix_nano,
+                    )
+                    continue
+
                 span_attrs = attrs_to_dict(span.attributes)
                 merged_attrs = {**resource_attrs, **span_attrs}
 
@@ -342,19 +360,21 @@ async def ingest_traces(
                     matched_policies = policy_mod.evaluate_for_span(
                         active_policies, span.name, merged_attrs
                     )
-                except policy_mod.PolicyEvaluationUnavailable:
-                    # Every policy failed to evaluate. This is the recording
-                    # path, not an enforcement surface: the enforcement
-                    # surfaces let this propagate to their fail-closed
-                    # handlers, but dropping the span here would lose
-                    # telemetry as well as enforcement. Record it unmatched
-                    # and let the logged exception carry the diagnosis.
+                except policy_mod.PolicyEvaluationUnavailable as exc:
+                    # An enforcing policy could not be evaluated (or every policy
+                    # failed). This is the recording path, not an enforcement
+                    # surface: the enforcement surfaces let this propagate to
+                    # their fail-closed handlers, but here we still record the
+                    # policies that DID match -- discarding them would lose a
+                    # legitimate match because an unrelated policy errored. The
+                    # logged exception carries the diagnosis for the failure.
                     logger.exception(
                         "policy evaluation unavailable for span %s; "
-                        "recording it without matches",
+                        "recording %d match(es) that did evaluate",
                         span.name,
+                        len(exc.matches),
                     )
-                    matched_policies = []
+                    matched_policies = exc.matches
                 if matched_policies:
                     matched_ids = [p["id"] for p in matched_policies]
                     matched_actions = sorted({p["action"] for p in matched_policies})
