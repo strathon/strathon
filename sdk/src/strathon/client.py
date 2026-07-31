@@ -194,7 +194,7 @@ class Client:
                 self._installed_global_provider = True
 
         # Named tracer for instrumentations and manual span emission
-        self._tracer = self._tracer_provider.get_tracer("strathon", "1.3.0")
+        self._tracer = self._tracer_provider.get_tracer("strathon", "1.4.0")
 
         # Runtime intervention: optional policy enforcer
         self._policy_enforcer = None

@@ -10,7 +10,7 @@ import { UserProvider, useUser } from "@/lib/user-context";
 import { usePermissions } from "@/lib/permissions";
 import { setTheme, watchSystemTheme } from "@/lib/theme";
 
-const DASHBOARD_VERSION = "1.3.0";
+const DASHBOARD_VERSION = "1.4.0";
 
 const LABELS: Record<string, string> = {
   overview: "Overview", policies: "Policies", traces: "Traces", spans: "Spans", approvals: "Approvals",

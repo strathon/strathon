@@ -11,6 +11,80 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+
+## [1.4.0] - 2026-07-31
+
+A hardening release: every enforcement surface now fails closed when it cannot
+confirm a call is allowed, and several ways a request could crash the receiver
+are closed. No breaking changes.
+
+### Added
+- The list tables (traces, spans, agents) can be sorted by column, and traces
+  and spans have a per-table menu to show or hide columns. Sorting is applied
+  by the receiver across the full result set, not just the loaded page, so it
+  stays correct as results paginate.
+- The SDK client accepts a custom span exporter. It still defaults to OTLP over
+  HTTP, but a deployment can now send spans over OTLP gRPC, to a console
+  exporter for local debugging, or to any other OpenTelemetry exporter.
+
+### Changed
+- The dashboard keyboard shortcuts follow common conventions: toggle sidebar is
+  `Cmd+B` and settings is `Cmd+,`.
+- The production compose file refuses to boot on the built-in development keys,
+  so a real deployment must supply its own HMAC key, encryption key, and
+  password pepper.
+- The published receiver image runs as a non-root user and installs from a
+  hash-pinned lockfile, so a substituted dependency fails the hash check. A
+  deployment that bind-mounts a data directory may need to adjust its ownership.
+
+### Fixed
+- A deleted policy lingered in the ingest cache until its TTL expired, because
+  the cache was dropped before the delete transaction committed. It is now
+  dropped after the commit, and never on a rollback.
+- A created or revoked webhook signing key desynced from the database when the
+  request rolled back: a created secret survived for a row that never
+  persisted, and a revoked key's secret vanished while its row stayed active.
+  Both changes now apply only after the transaction commits.
+- The `strathon` CLI read no results against populated data on several list
+  commands, and `audit list` called a route that does not exist. Every list
+  command now reads the response the same way, and the route is corrected.
+
+### Security
+- **An enforcing policy that could not be evaluated was treated as no-match.**
+  A `block`, `require_approval`, or `throttle` policy whose expression errored
+  (most often a missing attribute) returned no match, so the surface let the
+  call through. Evaluation failure on an enforcing policy now fails closed, and
+  the full policy set is evaluated before failing so one policy's error no
+  longer discards another policy's match on the same span. **If you rely on an
+  enforcing policy, verify that a call it should block returns blocked.**
+- **The MCP gateway and egress proxy could fail open.** The gateway honored a
+  caller-supplied flag that turned off its fail-closed behavior and did not
+  validate the upstream URL against the SSRF guard; the egress proxy started in
+  an allow posture and admitted traffic until its first policy refresh
+  succeeded. The gateway now always fails closed and validates the URL, and the
+  egress proxy blocks until a refresh has loaded the project's posture. **If you
+  run the egress proxy, verify that a known-blocked request returns 403.**
+- Every SDK adapter now fails closed on a receiver-unreachable error when
+  `fail_closed` is set, where previously only a policy block was re-raised, so a
+  receiver outage could silently drop enforcement. Policy evaluation also sees
+  the full tool arguments, so a padded argument can no longer push content past
+  a policy's view.
+- Project endpoints and project-scoped member operations crossed tenant
+  boundaries: several read or acted on projects outside the caller's
+  organization. They are now confined to the caller's organization, and
+  creating an API key or deleting a project requires re-authentication.
+- The audit anchor chain was forgeable by truncation, and its full listing was
+  readable by any project member. The chain now resists truncation, the full
+  listing is restricted to an instance admin, and a project reader sees only
+  per-project tamper-evidence status.
+- A NUL byte in a string field or an out-of-range integer reached Postgres as
+  an unhandled error that returned a 500 and dropped the request. Both are now
+  rejected or sanitized at the request boundary. Redaction and credential
+  scanning also require `google-re2`, so a missing engine reports not-ready
+  rather than silently falling back to a backtracking regex engine.
+- The four unbounded list endpoints (approvals, budgets, costs, halts) now cap
+  their page size, so a caller can no longer request an arbitrarily large page.
+
 ## [1.3.0] - 2026-07-25
 
 Drops Python 3.10 and removes the SDK `proxy` extra;
@@ -340,7 +414,8 @@ see **Removed** before upgrading.
 - Enterprise scaling guide (horizontal scaling, PgBouncer, read replicas)
 - Published to PyPI: `pip install strathon`
 
-[Unreleased]: https://github.com/strathon/strathon/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/strathon/strathon/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/strathon/strathon/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/strathon/strathon/compare/v1.2.3...v1.3.0
 [1.2.3]: https://github.com/strathon/strathon/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/strathon/strathon/compare/v1.2.1...v1.2.2

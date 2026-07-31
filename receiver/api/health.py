@@ -67,7 +67,7 @@ async def health() -> dict[str, str]:
     responsive." For "is the service ready to serve traffic," use
     ``/ready`` instead.
     """
-    return {"status": "ok", "service": "strathon-receiver", "version": "1.3.0"}
+    return {"status": "ok", "service": "strathon-receiver", "version": "1.4.0"}
 
 
 @router.get("/ready")
