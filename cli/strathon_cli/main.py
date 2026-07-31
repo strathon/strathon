@@ -35,6 +35,29 @@ from .client import api_delete, api_get, api_patch, api_post
 console = Console()
 
 
+def extract_list(result: Any, *keys: str) -> list:
+    """Pull a list of records out of a receiver list response.
+
+    The receiver's list endpoints are not consistent about their envelope:
+    some return {"data": [...]}, others a resource-named key like
+    {"halts": [...]} or {"api_keys": [...]}. Assuming "data" everywhere made
+    eight read commands silently print an empty-state message against
+    populated data (an operator-facing lie: "No API keys found" with 509 live).
+
+    Try each provided resource key in order, then "data", then -- if the whole
+    response is already a bare list -- the list itself. Returns [] only when the
+    response genuinely carries no list under any of those.
+    """
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict):
+        for key in (*keys, "data"):
+            value = result.get(key)
+            if isinstance(value, list):
+                return value
+    return []
+
+
 # ---- Root group --------------------------------------------------------------
 
 @click.group()
@@ -59,7 +82,7 @@ def policies():
 def policies_list(as_json: bool):
     """List all policies."""
     data = api_get("/v1/policies")
-    items = data if isinstance(data, list) else data.get("data", data)
+    items = extract_list(data, "policies")
 
     if as_json:
         click.echo(json_mod.dumps(items, indent=2))
@@ -577,7 +600,7 @@ def halts():
 def halts_list(as_json):
     """List active halts."""
     result = api_get("/v1/halts")
-    items = result.get("data", []) if isinstance(result, dict) else result
+    items = extract_list(result, "halts")
 
     if as_json:
         click.echo(json_mod.dumps(items, indent=2))
@@ -642,7 +665,7 @@ def templates():
 def templates_list(as_json):
     """List available policy templates."""
     result = api_get("/v1/policy-templates")
-    items = result.get("data", []) if isinstance(result, dict) else result
+    items = extract_list(result)
 
     if as_json:
         click.echo(json_mod.dumps(items, indent=2))
@@ -693,7 +716,7 @@ def agents():
 def agents_list(as_json):
     """List discovered agents with risk scores."""
     result = api_get("/v1/agents")
-    items = result.get("data", []) if isinstance(result, dict) else result
+    items = extract_list(result, "agents")
 
     if as_json:
         click.echo(json_mod.dumps(items, indent=2))
@@ -789,7 +812,7 @@ def budgets():
 def budgets_list(as_json):
     """List all budgets."""
     result = api_get("/v1/budgets")
-    items = result.get("data", []) if isinstance(result, dict) else result
+    items = extract_list(result, "budgets")
 
     if as_json:
         click.echo(json_mod.dumps(items, indent=2))
@@ -894,8 +917,8 @@ def audit_list(limit, action_filter, as_json):
     if action_filter:
         params["filter"] = f'action eq "{action_filter}"'
 
-    result = api_get("/v1/audit", params=params)
-    items = result.get("data", []) if isinstance(result, dict) else result
+    result = api_get("/v1/audit/events", params=params)
+    items = extract_list(result, "events")
 
     if as_json:
         click.echo(json_mod.dumps(items, indent=2))
@@ -935,7 +958,7 @@ def projects():
 def projects_list(as_json):
     """List all projects."""
     result = api_get("/v1/projects")
-    items = result.get("data", []) if isinstance(result, dict) else result
+    items = extract_list(result)
 
     if as_json:
         click.echo(json_mod.dumps(items, indent=2))
@@ -986,7 +1009,7 @@ def approvals():
 def approvals_list(status_filter, as_json):
     """List approval requests."""
     result = api_get("/v1/approvals", params={"status": status_filter})
-    items = result.get("data", []) if isinstance(result, dict) else result
+    items = extract_list(result, "approvals")
 
     if as_json:
         click.echo(json_mod.dumps(items, indent=2))
@@ -1047,7 +1070,7 @@ def notifications():
 def notifications_list(as_json):
     """List notification channels."""
     result = api_get("/v1/notification-channels")
-    items = result.get("data", []) if isinstance(result, dict) else result
+    items = extract_list(result, "channels")
 
     if as_json:
         click.echo(json_mod.dumps(items, indent=2))
@@ -1093,7 +1116,7 @@ def keys_list(as_json: bool):
     creation and never stored, so it cannot be displayed again.
     """
     data = api_get("/v1/api_keys")
-    items = data.get("data", []) if isinstance(data, dict) else (data or [])
+    items = extract_list(data, "api_keys")
 
     if as_json:
         click.echo(json_mod.dumps(items, indent=2))
