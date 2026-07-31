@@ -119,10 +119,14 @@ def test_all_policies_failing_to_evaluate_fails_closed(monkeypatch):
         "applies_to": [], "match_expression": "true", "priority": 1,
     }])
 
-    def boom(*a, **k):
-        raise RuntimeError("CEL engine unavailable")
-
-    monkeypatch.setattr("policies._evaluate", boom)
+    # Simulate the engine being unable to evaluate the block policy. An
+    # enforcing policy that returns ERROR makes evaluate_for_span raise
+    # PolicyEvaluationUnavailable, which lands in this surface's fail-closed
+    # branch.
+    from policies_eval import MatchResult
+    monkeypatch.setattr(
+        "policies.evaluate_tristate", lambda *a, **k: MatchResult.ERROR
+    )
 
     verdict = gw._evaluate("any_tool", {})
     assert verdict["action"] == "block"

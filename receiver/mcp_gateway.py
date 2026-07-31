@@ -265,6 +265,19 @@ class MCPSecurityGateway:
         return response
 
     async def _forward(self, request: dict) -> dict[str, Any]:
+        # Validate the upstream against SSRF here, at the point of actually
+        # forwarding: a call the policy set blocks never reaches this method, so
+        # the guard runs exactly when an outbound request would be made -- and
+        # every outbound request is guarded. The resolved-IP check also defeats
+        # DNS rebinding between validation and connect.
+        from webhooks.ssrf_guard import SSRFError, validate_upstream_url
+
+        try:
+            validate_upstream_url(self.upstream_url)
+        except SSRFError as e:
+            logger.warning("MCP upstream rejected by SSRF guard: %s", e)
+            return self._error(request.get("id"), _ERR_UPSTREAM,
+                               f"upstream_url rejected: {str(e)[:200]}")
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(

@@ -193,12 +193,22 @@ try:
             action, or allow if none match.
             """
             if not self._policies:
-                # No policies loaded. Honor the project's allow-list posture
-                # exactly as the no-match branch below does: in default-deny
-                # (allow-list) mode an ungoverned request falls closed, matching
-                # the SDK enforcer and MCP gateway so the egress surface never
-                # admits traffic the other two surfaces deny for the same
-                # project state.
+                # If policies were NEVER successfully loaded, the proxy cannot
+                # know the project's posture -- and the initial _default_action
+                # is the constructor's "allow", which would wrongly admit traffic
+                # for a project that is actually default-deny. Fail closed until a
+                # refresh succeeds. A refresh that fails AFTER a successful load
+                # keeps the last-known-good _default_action (not overwritten), so
+                # a transient receiver blip does not flip a default-deny project
+                # to allow.
+                if not getattr(self, "_policies_loaded", False):
+                    return {"action": "block", "policy_name": "_fail_closed_unloaded"}
+                # No policies loaded but the posture is known. Honor the project's
+                # allow-list posture exactly as the no-match branch below does: in
+                # default-deny (allow-list) mode an ungoverned request falls
+                # closed, matching the SDK enforcer and MCP gateway so the egress
+                # surface never admits traffic the other two surfaces deny for the
+                # same project state.
                 if getattr(self, "_default_action", "allow") == "block":
                     return {"action": "block", "policy_name": "_default_deny"}
                 return {"action": "allow"}

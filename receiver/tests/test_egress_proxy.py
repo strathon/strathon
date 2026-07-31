@@ -159,10 +159,13 @@ def test_all_policies_failing_to_evaluate_fails_closed(monkeypatch):
     }]
     addon._default_action = "allow"
 
-    def boom(*a, **k):
-        raise RuntimeError("CEL engine unavailable")
-
-    monkeypatch.setattr("policies._evaluate", boom)
+    # An enforcing (block) policy that cannot be evaluated makes
+    # evaluate_for_span raise PolicyEvaluationUnavailable, which lands in this
+    # surface's fail-closed branch.
+    from policies_eval import MatchResult
+    monkeypatch.setattr(
+        "policies.evaluate_tristate", lambda *a, **k: MatchResult.ERROR
+    )
 
     verdict = addon._evaluate_policies("POST", "http://upstream.test/x")
     assert verdict["action"] == "block"

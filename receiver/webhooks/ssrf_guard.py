@@ -57,18 +57,36 @@ class SSRFError(Exception):
 
 
 def validate_webhook_url(url: str) -> None:
-    """Validate a webhook URL for SSRF safety.
+    """Validate a webhook URL for SSRF safety (HTTPS only).
 
     Checks scheme, hostname, and resolved IP. Raises SSRFError if unsafe.
     This is called both at webhook registration time (early feedback) and
     at delivery time (defense against DNS rebinding).
     """
+    _validate_url(url, allowed_schemes=ALLOWED_SCHEMES)
+
+
+def validate_upstream_url(url: str) -> None:
+    """Validate an MCP-proxy upstream URL for SSRF safety.
+
+    Same IP/hostname protections as webhooks -- blocks private, loopback,
+    link-local, and cloud-metadata destinations, resolving DNS first to defeat
+    rebinding -- but permits both http and https, because an internal MCP server
+    on a trusted host is commonly plain http. The protection that matters is the
+    destination-IP check, not the scheme: the reproduced exploit reached a
+    metadata endpoint on a loopback address, which this still blocks.
+    """
+    _validate_url(url, allowed_schemes=frozenset({"http", "https"}))
+
+
+def _validate_url(url: str, *, allowed_schemes: "frozenset[str]") -> None:
     parsed = urlparse(url)
 
     # Scheme check.
-    if parsed.scheme not in ALLOWED_SCHEMES:
+    if parsed.scheme not in allowed_schemes:
         raise SSRFError(
-            f"Scheme '{parsed.scheme}' not allowed. Webhooks require HTTPS."
+            f"Scheme '{parsed.scheme}' not allowed. "
+            f"Allowed: {', '.join(sorted(allowed_schemes))}."
         )
 
     hostname = parsed.hostname

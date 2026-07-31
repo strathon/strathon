@@ -12,7 +12,8 @@ writing spans — both represent the agent's runtime activity flowing through
 Strathon.
 
 Enforcement is FAIL-CLOSED by default: if policy evaluation cannot complete,
-a tools/call is blocked. Set fail_open=true in the body to prefer availability.
+a tools/call is blocked. The gateway is always fail-closed: if policy
+# evaluation cannot complete, the call is blocked, not allowed.
 """
 
 from __future__ import annotations
@@ -50,20 +51,21 @@ class MCPProxyRequest(BaseModel):
     )
     blocked_tools: Optional[list[str]] = Field(
         default=None,
-        description="Tool names to hard-block regardless of policy.",
+        description=(
+            "Additional tool names to hard-block, on top of policy. This can "
+            "only ADD restrictions, never remove them, so it is safe to accept "
+            "from the caller."
+        ),
     )
     scan_responses: bool = Field(
         default=True,
         description="Scan upstream responses and redact leaked credentials.",
     )
-    fail_open: bool = Field(
-        default=False,
-        description=(
-            "If true, allow a tools/call when policy evaluation fails. "
-            "Default false (fail-closed): a security gateway should block, "
-            "not allow, when its policy engine is unavailable."
-        ),
-    )
+    # fail_open is intentionally NOT a request field. It governs what happens
+    # when policy evaluation cannot complete, which is a security decision that
+    # must not be chosen by the policed party -- a caller could otherwise set it
+    # to turn the evaluation-error path from block into allow. The gateway is
+    # always constructed fail-closed (fail_open=False) below.
 
 
 @router.post("/proxy")
@@ -75,6 +77,15 @@ async def mcp_proxy(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """Evaluate an MCP request against project policies, then proxy it."""
+    # SSRF guard: upstream_url is caller-supplied and gets POSTed to server-side,
+    # with the response returned to the caller. Without this, an agent holding a
+    # traces:write key -- the key every instrumented agent already has -- could
+    # point it at a cloud-metadata endpoint or internal service and exfiltrate
+    # the response. Validation of upstream_url happens inside the gateway's
+    # forward path, so it runs only when a call would actually be forwarded (a
+    # policy-blocked call is never sent) and guards every outbound request; DNS
+    # is resolved fresh at that point, which also defeats rebinding.
+
     # Load the project's enabled policies — the same call the ingest path
     # uses, so MCP tool calls are judged by the identical policy set/order.
     # default_action carries the project's allow-list posture so a default-deny
@@ -106,7 +117,7 @@ async def mcp_proxy(
         policies=active_policies,
         blocked_tools=body.blocked_tools,
         scan_responses=body.scan_responses,
-        fail_open=body.fail_open,
+        fail_open=False,  # security decision, never caller-chosen
         default_action=default_action,
     )
     return await gateway.handle_request(body.request)
