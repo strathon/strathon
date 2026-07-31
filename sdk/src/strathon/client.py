@@ -8,7 +8,7 @@ from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import SpanLimits, TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 
 from strathon.config import Config
 from strathon.exceptions import AuthenticationError
@@ -75,6 +75,11 @@ class Client:
             fail-closed mode treats it as unreachable. Default 60s leaves
             comfortable headroom over the 1s halt and 30s policy refresh
             intervals; brief receiver hiccups don't trip it.
+        span_exporter: A custom OpenTelemetry SpanExporter. Defaults to the OTLP
+            HTTP exporter targeting ``endpoint``. Provide one to send spans over
+            a different transport (e.g. OTLP gRPC), to a console exporter for
+            local debugging, or to an in-memory exporter in tests so no live
+            receiver is required.
     """
 
     def __init__(
@@ -92,6 +97,7 @@ class Client:
         halt_refresh_interval_sec: float = 1.0,
         fail_closed: bool = False,
         fail_closed_max_staleness_sec: float = 60.0,
+        span_exporter: Optional["SpanExporter"] = None,
     ):
         if not api_key:
             raise AuthenticationError("api_key is required")
@@ -119,12 +125,19 @@ class Client:
 
         resource = Resource.create(resource_attrs)
 
-        # OTLP HTTP exporter targeting the Strathon receiver
-        self._otlp_exporter = OTLPSpanExporter(
-            endpoint=f"{self.endpoint}/v1/traces",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=int(self.config.http_timeout_seconds),
-        )
+        # Span exporter. Defaults to the OTLP HTTP exporter targeting the
+        # Strathon receiver. A caller can inject a different one -- an OTLP gRPC
+        # exporter, a console exporter for local debugging, or an in-memory
+        # exporter under test -- so the transport is not fixed to HTTP and tests
+        # do not have to reach a live receiver.
+        if span_exporter is not None:
+            self._otlp_exporter = span_exporter
+        else:
+            self._otlp_exporter = OTLPSpanExporter(
+                endpoint=f"{self.endpoint}/v1/traces",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=int(self.config.http_timeout_seconds),
+            )
 
         # Batch processor wraps the exporter for async batched sending
         self._span_processor = BatchSpanProcessor(
