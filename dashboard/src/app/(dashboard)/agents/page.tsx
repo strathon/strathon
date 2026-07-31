@@ -2,13 +2,17 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icons } from "@/components/icons";
-import { Badge, Ring, Sparkline, Segmented, Empty, Splash, CopyableCode, SkeletonCards, Time } from "@/components/ui";
+import { Badge, Ring, Segmented, Empty, Splash, CopyableCode, SkeletonCards, Time } from "@/components/ui";
 import { useApi } from "@/lib/api-client";
+import { useTableSort, SortableTh } from "@/lib/table-helpers";
+import type { AgentRow } from "@/lib/types";
 
 export default function AgentsPage() {
   const router = useRouter();
   const [view, setView] = useState("cards");
-  const { data, loading, error, refetch } = useApi<{ data: any[] }>("/api/agents");
+  const { sort, toggle: toggleSort, param: sortParam } = useTableSort();
+  const { data, loading, error, refetch } = useApi<{ data: AgentRow[] }>(
+    "/api/agents", sortParam ? { sort: sortParam } : undefined, [sortParam]);
   const agents = data?.data || [];
 
   if (error) return <div className="page"><div className="card" style={{ padding: 24, textAlign: "center" }}><div style={{ color: "var(--danger)", marginBottom: 8 }}>{error}</div><button className="btn" onClick={refetch}>Retry</button></div></div>;
@@ -47,7 +51,7 @@ instrument(client, frameworks=["langgraph"])`}</CopyableCode>
         <Empty icon={<Icons.Bot size={24} />} title="No agents registered" subtitle="Agents appear automatically when they connect via the SDK." />
       ) : view === "cards" ? (
         <div className="agents-grid">
-          {agents.map((a: any) => (
+          {agents.map((a: AgentRow) => (
             <div key={a.id} className="card" style={{ cursor: "pointer" }} onClick={() => router.push(`/traces?agent=${a.name}`)}>
               <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 12 }}>
                 <Ring value={100 - (a.risk || 0)} size={56} stroke={5} color={a.risk > 70 ? "var(--danger)" : a.risk > 40 ? "var(--warning)" : "var(--success)"} label={a.risk} />
@@ -69,14 +73,14 @@ instrument(client, frameworks=["langgraph"])`}</CopyableCode>
       ) : (
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th>Name</th><th>Risk</th><th>Calls</th><th>Models</th><th>Spend</th><th>Policies</th><th>Last active</th></tr></thead>
-            <tbody>{agents.map((a: any) => (
+            <thead><tr><SortableTh label="Name" sortKey="name" sort={sort} onSort={toggleSort} /><SortableTh label="Risk" sortKey="risk" sort={sort} onSort={toggleSort} /><SortableTh label="Calls" sortKey="calls" sort={sort} onSort={toggleSort} /><th>Models</th><SortableTh label="Spend" sortKey="cost" sort={sort} onSort={toggleSort} /><th>Policies</th><SortableTh label="Last active" sortKey="last_active" sort={sort} onSort={toggleSort} /></tr></thead>
+            <tbody>{agents.map((a: AgentRow) => (
               <tr key={a.id} className="clickable" onClick={() => router.push(`/traces?agent=${a.name}`)}>
                 <td style={{ fontWeight: 500 }}>{a.name}{a.live && <span className="dot-status live" style={{ marginLeft: 8 }} />}</td>
                 <td><Badge kind={a.risk > 70 ? "danger" : a.risk > 40 ? "warning" : "success"}>{a.risk}</Badge></td>
                 <td style={{ fontVariantNumeric: "tabular-nums" }}>{a.calls?.toLocaleString()}</td><td>{a.models}</td>
                 <td style={{ fontVariantNumeric: "tabular-nums" }}>${a.spend?.toFixed(2)}</td><td>{a.policies}</td>
-                <td className="text-secondary t-sm"><Time ago={a.lastActive || a.last_active} /></td>
+                <td className="text-secondary t-sm"><Time ago={a.lastActive || a.last_active || undefined} /></td>
               </tr>
             ))}</tbody>
           </table>

@@ -76,6 +76,7 @@ async def list_spans(
     filters: Optional[dict[str, str]] = None,
     attr_contains: Optional[dict[str, Any]] = None,
     query: Optional[str] = None,
+    sort: Optional[str] = None,
 ) -> SpanListResult:
     """Search spans for a project.
 
@@ -85,9 +86,24 @@ async def list_spans(
     search string matched against the search_vector tsvector column
     using websearch_to_tsquery.
 
+    Default order is newest first with a keyset cursor. When ``sort`` is given
+    (``field:direction``) the query orders by that column and pages with an
+    offset carried in the same opaque cursor. Unknown fields fall back to the
+    default order.
+
     Returns a page of rows (as dicts) plus an opaque cursor for the
     next page, or None if no more.
     """
+    _SORT_COLUMNS = {
+        "started": "start_time_unix_nano",
+        "duration": "(end_time_unix_nano - start_time_unix_nano)",
+        "name": "name",
+        "operation": "operation_name",
+        "status": "status_code",
+    }
+    from sort_utils import parse_sort
+    sort_column, sort_desc = parse_sort(sort, _SORT_COLUMNS)
+
     limit = max(1, min(limit, 1000))
     params: dict[str, Any] = {"pid": project_id, "limit": limit + 1}
     clauses: list[str] = ["project_id = :pid"]
@@ -124,8 +140,18 @@ async def list_spans(
         )
         params["fts_query"] = query.strip()
 
-    # Cursor (keyset pagination).
-    if cursor:
+    # Cursor: offset when a sort is active, keyset otherwise.
+    offset = 0
+    if sort_column is not None:
+        if cursor:
+            try:
+                padding = "=" * (-len(cursor) % 4)
+                offset = max(0, int(json.loads(
+                    base64.urlsafe_b64decode(cursor + padding))["o"]))
+            except Exception as exc:
+                raise ValueError(f"invalid cursor: {exc}") from exc
+        params["offset"] = offset
+    elif cursor:
         try:
             cur_time, cur_trace, cur_span = _decode_cursor(cursor)
         except (ValueError, TypeError, KeyError) as exc:
@@ -139,15 +165,24 @@ async def list_spans(
         params["cur_span"] = cur_span
 
     where = " AND ".join(clauses)
-    sql = text(
-        f"SELECT * FROM spans "
-        f"WHERE {where} "
-        f"ORDER BY start_time_unix_nano DESC, trace_id DESC, span_id DESC "
-        f"LIMIT :limit"
-    )
+    if sort_column is not None:
+        direction = "DESC" if sort_desc else "ASC"
+        sql = text(
+            f"SELECT * FROM spans WHERE {where} "
+            f"ORDER BY {sort_column} {direction}, "
+            f"trace_id {direction}, span_id {direction} "
+            f"LIMIT :limit OFFSET :offset"
+        )
+    else:
+        sql = text(
+            f"SELECT * FROM spans "
+            f"WHERE {where} "
+            f"ORDER BY start_time_unix_nano DESC, trace_id DESC, span_id DESC "
+            f"LIMIT :limit"
+        )
     # Force custom plan so Postgres uses plan-time partition pruning
-    # instead of switching to a generic plan after the 6th execution.
-    # See Opus research §6: PG 16 prepared-statement interaction.
+    # instead of switching to a generic plan after the 6th execution
+    # (PG 16 prepared-statement interaction with partitioned tables).
     await session.execute(text("SET LOCAL plan_cache_mode = 'force_custom_plan'"))
     result = await session.execute(sql, params)
     rows = [dict(r) for r in result.mappings().all()]
@@ -156,12 +191,19 @@ async def list_spans(
     page = rows[:limit]
     next_cursor: Optional[str] = None
     if has_more and page:
-        last = page[-1]
-        next_cursor = _encode_cursor(
-            last["start_time_unix_nano"],
-            last["trace_id"],
-            last["span_id"],
-        )
+        if sort_column is not None:
+            payload = json.dumps({"o": offset + limit}, separators=(",", ":"))
+            next_cursor = (
+                base64.urlsafe_b64encode(payload.encode())
+                .decode().rstrip("=")
+            )
+        else:
+            last = page[-1]
+            next_cursor = _encode_cursor(
+                last["start_time_unix_nano"],
+                last["trace_id"],
+                last["span_id"],
+            )
     return SpanListResult(spans=page, next_cursor=next_cursor)
 
 

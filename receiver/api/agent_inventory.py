@@ -12,9 +12,9 @@ Scope: traces:read.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +33,13 @@ router = APIRouter(prefix="/v1/agents", tags=["agent-inventory"])
 async def list_agents(
     request: Request,
     days: int = 30,
+    sort: Optional[str] = Query(
+        default=None,
+        description=(
+            "Sort key as 'field:direction', e.g. 'risk:desc'. Fields: risk, "
+            "cost, calls, spans, name, last_active. Default: most spans first."
+        ),
+    ),
     ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_TRACES_READ)
     ),
@@ -188,6 +195,37 @@ async def list_agents(
             "risk_score": risk_score,
             "risk_factors": risk_factors,
         })
+
+    # Server-side sort over the full computed inventory (the list is already
+    # capped at 500, so this sorts the whole result set, not just a page). The
+    # sort key is allowlisted to real fields; an unknown key falls back to the
+    # default order rather than erroring.
+    _SORT_FIELDS = {
+        "risk": "risk_score",
+        "cost": "total_cost_usd",
+        "calls": "total_tool_calls",
+        "spans": "total_spans",
+        "name": "agent_name",
+        "last_active": "last_active",
+    }
+    from sort_utils import parse_sort
+    field, reverse = parse_sort(sort, _SORT_FIELDS)
+    if field is not None:
+        def _sort_key(a: dict[str, Any]) -> Any:
+            v = a.get(field)
+            if field == "total_cost_usd":
+                # Stored as a string; compare numerically.
+                if v is None:
+                    return 0.0
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return 0.0
+            if field in {"agent_name", "last_active"}:
+                return (v is None, v or "")
+            return (v is None, v if v is not None else 0)
+
+        agents.sort(key=_sort_key, reverse=reverse)
 
     return {
         "agents": agents,

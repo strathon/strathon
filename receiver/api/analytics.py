@@ -137,6 +137,13 @@ async def list_traces_endpoint(
     intervention_state: Optional[str] = Query(default=None),
     cursor: Optional[str] = Query(default=None),
     limit: int = Query(default=50, ge=1, le=1000),
+    sort: Optional[str] = Query(
+        default=None,
+        description=(
+            "Sort as 'field:direction', e.g. 'duration:desc'. Fields: started, "
+            "duration, spans, status, agent, operation. Default: newest first."
+        ),
+    ),
     ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_TRACES_READ)
     ),
@@ -160,6 +167,7 @@ async def list_traces_endpoint(
             start_before=end_ns,
             agent_name=agent_name,
             intervention_state=intervention_state,
+            sort=sort,
         )
     except ValueError as exc:
         raise HTTPException(

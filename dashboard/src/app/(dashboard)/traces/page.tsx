@@ -1,23 +1,38 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icons } from "@/components/icons";
-import { StatusBadge, Segmented, Checkbox, Empty, Splash, CopyableCode, MobileSheet, Time, SkeletonTable } from "@/components/ui";
+import { StatusBadge, Segmented, Empty, Splash, CopyableCode, Time, SkeletonTable } from "@/components/ui";
 import { useApi } from "@/lib/api-client";
+import { useTableSort, SortableTh, useColumnVisibility } from "@/lib/table-helpers";
+import type { TraceRow } from "@/lib/types";
+
+const TRACE_COLUMNS = [
+  { id: "id", label: "Trace ID" },
+  { id: "agent", label: "Agent" },
+  { id: "operation", label: "Operation" },
+  { id: "spans", label: "Spans" },
+  { id: "duration", label: "Duration" },
+  { id: "status", label: "Status" },
+  { id: "started", label: "Started" },
+];
 
 export default function TracesPage() {
   const router = useRouter();
   const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter] = useState("all");
   const [timeRange, setTimeRange] = useState("1h");
+  const { sort, toggle: toggleSort, param: sortParam } = useTableSort();
+  const col = useColumnVisibility("strathon.cols.traces", TRACE_COLUMNS, ["id"]);
 
   const params: Record<string, string> = { limit: "50" };
   if (q) params.search = q;
   if (statusFilter !== "all") params.status = statusFilter;
   if (timeRange) params.range = timeRange;
+  if (sortParam) params.sort = sortParam;
 
-  const { data, loading, error, refetch } = useApi<{ data: any[] }>("/api/traces", params, [q, statusFilter, timeRange]);
+  const { data, loading, error, refetch } = useApi<{ data: TraceRow[] }>("/api/traces", params, [q, statusFilter, timeRange, sortParam]);
   const traces = data?.data || [];
   const isFirstRun = !loading && traces.length === 0 && !q && statusFilter === "all";
 
@@ -65,22 +80,32 @@ instrument(client, frameworks=["langgraph"])
         <div className="input-wrap" style={{ width: 360 }}><Icons.Search size={14} /><input className="input search" placeholder="Search agent, operation, trace ID…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <div className="grow" />
         <span className="text-muted t-sm">{traces.length} results</span>
+        {col.menu}
       </div>
       <div className="table-wrap">
         {loading ? <SkeletonTable rows={8} columns={[2, 1, 2, 1, 1, 1]} /> : traces.length === 0 ? (
           <Empty icon={<Icons.GitBranch size={24} />} title="No traces yet" subtitle="Connect an agent with the Strathon SDK to see traces here." />
         ) : (
           <table className="table">
-            <thead><tr><th>Trace ID</th><th>Agent</th><th>Operation</th><th>Spans</th><th>Duration</th><th>Status</th><th>Started</th></tr></thead>
+            <thead><tr>
+              {col.isVisible("id") && <th>Trace ID</th>}
+              {col.isVisible("agent") && <SortableTh label="Agent" sortKey="agent" sort={sort} onSort={toggleSort} />}
+              {col.isVisible("operation") && <th>Operation</th>}
+              {col.isVisible("spans") && <SortableTh label="Spans" sortKey="spans" sort={sort} onSort={toggleSort} />}
+              {col.isVisible("duration") && <SortableTh label="Duration" sortKey="duration" sort={sort} onSort={toggleSort} />}
+              {col.isVisible("status") && <th>Status</th>}
+              {col.isVisible("started") && <SortableTh label="Started" sortKey="started" sort={sort} onSort={toggleSort} />}
+            </tr></thead>
             <tbody>
-              {traces.map((t: any) => (
+              {traces.map((t: TraceRow) => (
                 <tr key={t.id} className="clickable" onClick={() => router.push(`/traces/${t.id}`)}>
-                  <td className="mono text-secondary" style={{ fontSize: 12 }}>{(t.shortId || t.id).slice(0, 16)}</td>
-                  <td>{t.agent}</td><td className="mono text-secondary">{t.operation}</td>
-                  <td style={{ fontVariantNumeric: "tabular-nums" }}>{t.spans || t.span_count}</td>
-                  <td style={{ fontVariantNumeric: "tabular-nums" }}>{(t.durationMs ?? t.duration_ms ?? 0)}ms</td>
-                  <td>{StatusBadge[t.status as keyof typeof StatusBadge]?.() || t.status}</td>
-                  <td className="text-secondary t-sm"><Time ago={t.started || t.start_time} /></td>
+                  {col.isVisible("id") && <td className="mono text-secondary" style={{ fontSize: 12 }}>{(t.shortId || t.id).slice(0, 16)}</td>}
+                  {col.isVisible("agent") && <td>{t.agent}</td>}
+                  {col.isVisible("operation") && <td className="mono text-secondary">{t.operation}</td>}
+                  {col.isVisible("spans") && <td style={{ fontVariantNumeric: "tabular-nums" }}>{t.spans || t.span_count}</td>}
+                  {col.isVisible("duration") && <td style={{ fontVariantNumeric: "tabular-nums" }}>{(t.durationMs ?? t.duration_ms ?? 0)}ms</td>}
+                  {col.isVisible("status") && <td>{StatusBadge[t.status as keyof typeof StatusBadge]?.() || t.status}</td>}
+                  {col.isVisible("started") && <td className="text-secondary t-sm"><Time ago={t.started || t.start_time} /></td>}
                 </tr>
               ))}
             </tbody>

@@ -254,13 +254,34 @@ async def list_traces(
     start_before: Optional[int] = None,
     agent_name: Optional[str] = None,
     intervention_state: Optional[str] = None,
+    sort: Optional[str] = None,
 ) -> dict[str, Any]:
-    """List traces for a project, newest first.
+    """List traces for a project.
 
-    Returns a page of traces plus next_cursor for pagination.
+    Default order is newest first, paginated with an opaque keyset cursor. When
+    ``sort`` is given (``field:direction``, e.g. ``duration:desc``) the query
+    orders by that column instead and pages with an offset encoded into the
+    same opaque cursor, so the caller round-trips ``next_cursor`` either way.
+    An unknown sort field falls back to the default order.
     """
     import base64
     import json
+
+    from sort_utils import parse_sort
+
+    # Allowlist of sortable fields -> real columns/expressions. id is always
+    # appended as a deterministic tiebreaker so paging is stable across equal
+    # values. duration is computed from the start/end timestamps (the traces
+    # table stores no duration column); operation/status are span-level, not
+    # trace columns, so they are intentionally not sortable here.
+    _SORT_COLUMNS = {
+        "started": "start_time_unix_nano",
+        "duration": "(end_time_unix_nano - start_time_unix_nano)",
+        "spans": "span_count",
+        "cost": "total_cost_usd",
+        "agent": "agent_name",
+    }
+    sort_column, sort_desc = parse_sort(sort, _SORT_COLUMNS)
 
     limit = max(1, min(limit, 1000))
     params: dict[str, Any] = {"pid": project_id, "limit": limit + 1}
@@ -279,35 +300,58 @@ async def list_traces(
         clauses.append("intervention_state = :intervention_state")
         params["intervention_state"] = intervention_state
 
-    if cursor:
-        try:
-            raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
-            obj = json.loads(raw)
-            clauses.append(
-                "(start_time_unix_nano, id) < (:cur_time, :cur_id)"
-            )
-            params["cur_time"] = int(obj["t"])
-            params["cur_id"] = bytes.fromhex(obj["id"])
-        except Exception as exc:
-            raise ValueError(f"invalid cursor: {exc}") from exc
+    offset = 0
+    if sort_column is not None:
+        # Sorted view: offset pagination. The cursor carries the offset only.
+        if cursor:
+            try:
+                raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
+                offset = max(0, int(json.loads(raw)["o"]))
+            except Exception as exc:
+                raise ValueError(f"invalid cursor: {exc}") from exc
+        direction = "DESC" if sort_desc else "ASC"
+        order_by = f"{sort_column} {direction}, id {direction}"
+        params["offset"] = offset
+        where = " AND ".join(clauses)
+        result = await session.execute(text(
+            f"SELECT * FROM traces WHERE {where} "
+            f"ORDER BY {order_by} "
+            f"LIMIT :limit OFFSET :offset"
+        ), params)
+    else:
+        # Default view: keyset cursor on (start_time_unix_nano, id).
+        if cursor:
+            try:
+                raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
+                obj = json.loads(raw)
+                clauses.append(
+                    "(start_time_unix_nano, id) < (:cur_time, :cur_id)"
+                )
+                params["cur_time"] = int(obj["t"])
+                params["cur_id"] = bytes.fromhex(obj["id"])
+            except Exception as exc:
+                raise ValueError(f"invalid cursor: {exc}") from exc
+        where = " AND ".join(clauses)
+        result = await session.execute(text(
+            f"SELECT * FROM traces WHERE {where} "
+            f"ORDER BY start_time_unix_nano DESC, id DESC "
+            f"LIMIT :limit"
+        ), params)
 
-    where = " AND ".join(clauses)
-    result = await session.execute(text(
-        f"SELECT * FROM traces WHERE {where} "
-        f"ORDER BY start_time_unix_nano DESC, id DESC "
-        f"LIMIT :limit"
-    ), params)
     rows = [dict(r) for r in result.mappings().all()]
 
     has_more = len(rows) > limit
     page = rows[:limit]
     next_cursor = None
     if has_more and page:
-        last = page[-1]
-        payload = json.dumps({
-            "t": last["start_time_unix_nano"],
-            "id": bytes(last["id"]).hex(),
-        }, separators=(",", ":"))
+        if sort_column is not None:
+            payload = json.dumps({"o": offset + limit}, separators=(",", ":"))
+        else:
+            last = page[-1]
+            payload = json.dumps({
+                "t": last["start_time_unix_nano"],
+                "id": bytes(last["id"]).hex(),
+            }, separators=(",", ":"))
         next_cursor = (
             base64.urlsafe_b64encode(payload.encode())
             .decode().rstrip("=")

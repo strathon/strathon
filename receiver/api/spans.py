@@ -134,6 +134,13 @@ async def list_spans_endpoint(
     ),
     cursor: Optional[str] = Query(default=None),
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+    sort: Optional[str] = Query(
+        default=None,
+        description=(
+            "Sort as 'field:direction', e.g. 'duration:desc'. Fields: started, "
+            "duration, name, operation, service, status. Default: newest first."
+        ),
+    ),
     ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_TRACES_READ)
     ),
@@ -185,6 +192,7 @@ async def list_spans_endpoint(
             filters=filters or None,
             attr_contains=attr_contains,
             query=q,
+            sort=sort,
         )
     except ValueError as exc:
         raise HTTPException(

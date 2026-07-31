@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { Icons } from "@/components/icons";
 import { Badge, Empty, SkeletonTable, Time } from "@/components/ui";
 import { useApi } from "@/lib/api-client";
+import { useTableSort, SortableTh } from "@/lib/table-helpers";
 import { KIND_COLOR } from "@/lib/span-colors";
 
 // Kind palette shared with the trace detail waterfall so a kind dot here
@@ -30,9 +31,11 @@ interface SpanRow {
 export default function SpansPage() {
   const router = useRouter();
   const [q, setQ] = useState("");
+  const { sort, toggle: toggleSort, param: sortParam } = useTableSort();
   const params: Record<string, string> = { limit: "50" };
   if (q) params.search = q;
-  const { data, loading, error, refetch } = useApi<{ data: SpanRow[] }>("/api/spans", params, [q]);
+  if (sortParam) params.sort = sortParam;
+  const { data, loading, error, refetch } = useApi<{ data: SpanRow[] }>("/api/spans", params, [q, sortParam]);
   const spans = data?.data || [];
 
   // A few of the rows have token + cost data, so we show those columns when at
@@ -80,13 +83,13 @@ export default function SpansPage() {
             <thead>
               <tr>
                 <th>Span ID</th>
-                <th>Operation</th>
+                <SortableTh label="Operation" sortKey="operation" sort={sort} onSort={toggleSort} />
                 <th>Service</th>
                 {hasTokens && <th style={{ textAlign: "right" }}>Tokens</th>}
                 {hasCost && <th style={{ textAlign: "right" }}>Cost</th>}
-                <th style={{ textAlign: "right" }}>Duration</th>
-                <th>Status</th>
-                <th>Started</th>
+                <SortableTh label="Duration" sortKey="duration" sort={sort} onSort={toggleSort} align="right" />
+                <SortableTh label="Status" sortKey="status" sort={sort} onSort={toggleSort} />
+                <SortableTh label="Started" sortKey="started" sort={sort} onSort={toggleSort} />
               </tr>
             </thead>
             <tbody>
