@@ -21,6 +21,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
+from schemas.base import NulSafeStr
 from sqlalchemy import insert, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
@@ -59,7 +60,7 @@ _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9\-]{1,62}[a-z0-9]$")
 
 
 class CreateProjectRequest(BaseModel):
-    name: str = Field(..., min_length=1, max_length=200)
+    name: NulSafeStr = Field(..., min_length=1, max_length=200)
     slug: str = Field(
         ..., min_length=3, max_length=64,
         description="URL-safe identifier. Lowercase alphanumeric + hyphens.",
@@ -67,7 +68,7 @@ class CreateProjectRequest(BaseModel):
 
 
 class UpdateProjectRequest(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    name: Optional[NulSafeStr] = Field(default=None, min_length=1, max_length=200)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=ProjectResponse)

@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from schemas.base import Int32, NulSafeStr
+
 
 
 VALID_ACTIONS = {"log", "alert", "block", "steer", "throttle", "allow", "require_approval"}
@@ -92,14 +94,14 @@ class PolicyCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(min_length=1, max_length=200)
-    match_expression: str = Field(min_length=1, max_length=2000)
+    name: NulSafeStr = Field(min_length=1, max_length=200)
+    match_expression: NulSafeStr = Field(min_length=1, max_length=2000)
     action: str = Field(pattern="^(log|alert|block|steer|throttle|allow|require_approval)$")
-    description: Optional[str] = None
+    description: Optional[NulSafeStr] = None
     action_config: dict[str, Any] = Field(default_factory=dict)
     applies_to: list[str] = Field(default_factory=list)
     enabled: bool = True
-    priority: int = 0
+    priority: Int32 = 0
     shadow: bool = False
 
 
@@ -108,16 +110,16 @@ class PolicyUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
-    match_expression: Optional[str] = Field(default=None, min_length=1, max_length=2000)
+    name: Optional[NulSafeStr] = Field(default=None, min_length=1, max_length=200)
+    match_expression: Optional[NulSafeStr] = Field(default=None, min_length=1, max_length=2000)
     action: Optional[str] = Field(
         default=None, pattern="^(log|alert|block|steer|throttle|allow|require_approval)$",
     )
-    description: Optional[str] = None
+    description: Optional[NulSafeStr] = None
     action_config: Optional[dict[str, Any]] = None
     applies_to: Optional[list[str]] = None
     enabled: Optional[bool] = None
-    priority: Optional[int] = None
+    priority: Optional[Int32] = None
 
 
 class PolicyRead(BaseModel):

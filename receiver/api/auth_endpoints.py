@@ -22,6 +22,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from schemas.base import NulSafeStr
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db_session
@@ -43,13 +45,13 @@ _MAX_PASSWORD_LENGTH = 128
 # ---- Request/response schemas -------------------------------------------
 
 class RegisterRequest(BaseModel):
-    email: str = Field(..., min_length=3, max_length=255)
+    email: NulSafeStr = Field(..., min_length=3, max_length=255)
     password: str = Field(..., min_length=_MIN_PASSWORD_LENGTH, max_length=_MAX_PASSWORD_LENGTH)
-    display_name: Optional[str] = Field(default=None, max_length=200)
+    display_name: Optional[NulSafeStr] = Field(default=None, max_length=200)
 
 
 class LoginRequest(BaseModel):
-    email: str = Field(..., min_length=3, max_length=255)
+    email: NulSafeStr = Field(..., min_length=3, max_length=255)
     password: str = Field(..., min_length=1, max_length=_MAX_PASSWORD_LENGTH)
 
 

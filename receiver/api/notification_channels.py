@@ -19,6 +19,7 @@ from fastapi import (
     APIRouter, Depends, HTTPException, Request, Response, status,
 )
 from pydantic import BaseModel, Field
+from schemas.base import NulSafeStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,7 +46,7 @@ VALID_EVENTS = {
 
 class CreateChannelRequest(BaseModel):
     channel_type: str
-    name: str = Field(..., min_length=1, max_length=200)
+    name: NulSafeStr = Field(..., min_length=1, max_length=200)
     config: dict[str, Any] = Field(default_factory=dict)
     events: list[str] = Field(default_factory=list)
     enabled: bool = True
@@ -54,7 +55,7 @@ class CreateChannelRequest(BaseModel):
 
 
 class UpdateChannelRequest(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    name: Optional[NulSafeStr] = Field(default=None, min_length=1, max_length=200)
     config: Optional[dict[str, Any]] = None
     events: Optional[list[str]] = None
     enabled: Optional[bool] = None

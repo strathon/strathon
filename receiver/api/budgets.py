@@ -27,6 +27,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
+from schemas.base import Int32, NulSafeStr
 from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,8 +60,8 @@ class CreateBudgetRequest(BaseModel):
     repository validates and surfaces a 400 with a descriptive
     message on bad combinations.
     """
-    name: str = Field(min_length=1, max_length=200)
-    description: Optional[str] = Field(default=None, max_length=1024)
+    name: NulSafeStr = Field(min_length=1, max_length=200)
+    description: Optional[NulSafeStr] = Field(default=None, max_length=1024)
     scope: str
     scope_value: Optional[str] = None
 
@@ -70,7 +71,7 @@ class CreateBudgetRequest(BaseModel):
     soft_limit_ratio: Optional[str] = None
 
     # Iteration-budget fields
-    max_repeated_calls: Optional[int] = None
+    max_repeated_calls: Optional[Int32] = None
     loop_window_seconds: Optional[str] = None  # string -> Decimal
 
 
@@ -81,11 +82,11 @@ class PatchBudgetRequest(BaseModel):
     (Pydantic distinguishes unset from null; we treat null as "no
     change" for ergonomics). To deactivate a budget, set is_active=False.
     """
-    name: Optional[str] = None
-    description: Optional[str] = None
+    name: Optional[NulSafeStr] = None
+    description: Optional[NulSafeStr] = None
     max_spend_usd: Optional[str] = None
     soft_limit_ratio: Optional[str] = None
-    max_repeated_calls: Optional[int] = None
+    max_repeated_calls: Optional[Int32] = None
     loop_window_seconds: Optional[str] = None
     is_active: Optional[bool] = None
 

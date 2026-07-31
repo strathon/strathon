@@ -19,6 +19,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
+from schemas.base import NulSafeStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import auth as auth_mod
@@ -49,7 +50,7 @@ class CreateHaltRequest(BaseModel):
     """
     scope: str
     scope_value: str | None = Field(default=None)
-    reason: str = Field(min_length=1, max_length=1024)
+    reason: NulSafeStr = Field(min_length=1, max_length=1024)
     state: str = Field(default="halted")
 
 
