@@ -117,7 +117,7 @@ attrs["gen_ai.tool.name"] == "web_search"
   `config={"callbacks": [handler]}`. LangChain has no global callback
   registry, so a handler that is built but never attached does nothing: no
   spans, no enforcement.
-- Requires `langchain-core>=1.5.1` (installed by the `langgraph` extra); works with current LangGraph and LangChain 0.3+ releases.
+- Requires `langchain-core>=1.5.1` (installed by the `langgraph` extra); works with current LangGraph and LangChain releases built on that core.
 
 ## Learn More
 

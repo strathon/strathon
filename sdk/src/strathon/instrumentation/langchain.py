@@ -49,7 +49,7 @@ def instrument(client) -> Optional[object]:
         LangChain is not installed.
     """
     try:
-        import langchain  # noqa: F401
+        import langchain_core  # noqa: F401
     except ImportError:
         logger.debug("LangChain not installed; skipping instrumentation")
         return None

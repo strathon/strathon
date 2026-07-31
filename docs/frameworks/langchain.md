@@ -74,7 +74,7 @@ With action `throttle` and a rate limit, Strathon caps the call frequency.
   `config={"callbacks": [handler]}`. LangChain has no global callback
   registry, so an unattached handler does nothing: no spans, no enforcement.
 - Requires `langchain-core>=1.5.1` (installed by the `langchain` extra); works
-  with LangChain 0.3+ and LangChain Community packages.
+  with current LangChain and LangChain Community releases built on that core.
 
 ## Learn More
 
