@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -110,7 +110,7 @@ async def create_halt(
 async def list_halts(
     request: Request,
     include_cleared: bool = False,
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=1000),
     ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
         require_scope(auth_mod.SCOPE_HALTS_READ)
     ),

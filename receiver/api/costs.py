@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,7 +36,7 @@ async def get_costs(
     period: str = "day",
     start_after: Optional[int] = None,
     start_before: Optional[int] = None,
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=1000),
     ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_TRACES_READ)
     ),

@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -153,7 +153,7 @@ async def create_budget(
 async def list_budgets(
     request: Request,
     include_inactive: bool = False,
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=1000),
     ctx: auth_mod.ApiKeyContext = Depends(  # noqa: ARG001
         require_scope(auth_mod.SCOPE_BUDGETS_READ)
     ),

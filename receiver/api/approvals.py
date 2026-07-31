@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -124,7 +124,7 @@ async def create_approval(
 async def list_approvals(
     request: Request,
     status_filter: Optional[str] = None,
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=1000),
     ctx: auth_mod.ApiKeyContext = Depends(
         require_scope(auth_mod.SCOPE_POLICIES_READ)
     ),
