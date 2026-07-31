@@ -117,7 +117,7 @@ async def create_policy(
     # at the request boundary, not here.
     await session.flush()
     await session.refresh(policy)
-    _invalidate(project_id)
+    _invalidate(session, project_id)
     result = PolicyRead.model_validate(policy)
     await _capture_version(session, result, "create")
     return result
@@ -190,7 +190,7 @@ async def update_policy(
         return None
     updated = PolicyRead.model_validate(policy)
     await _capture_version(session, updated, "update")
-    _invalidate(project_id)
+    _invalidate(session, project_id)
     return updated
 
 
@@ -214,7 +214,7 @@ async def delete_policy(
         Policy.id == policy_id,
     )
     result = await session.execute(stmt)
-    _invalidate(project_id)
+    _invalidate(session, project_id)
     return bool(result.rowcount)  # type: ignore[attr-defined]
 
 
@@ -367,10 +367,42 @@ async def get_version(
     return dict(row) if row is not None else None
 
 
-def _invalidate(project_id) -> None:
-    """Drop the ingest policy cache for a project after a mutation."""
+def _invalidate(session, project_id) -> None:
+    """Drop the ingest policy cache for a project once this mutation commits.
+
+    Invalidating immediately would open a race: repositories do not commit --
+    the endpoint boundary does -- so between an in-transaction invalidate and
+    the commit, a concurrent ingest could reload the cache from the database
+    and re-cache the pre-commit state (for a delete, the row it is about to
+    remove). The stale entry would then survive until the TTL expired. Binding
+    the drop to the session's after-commit event runs it exactly when the row
+    change is durable, so any reload sees the committed state. If the
+    transaction rolls back the event never fires and the cache is untouched,
+    which is correct -- nothing changed.
+    """
+    from sqlalchemy import event
+
+    key = str(project_id)
+
+    def _drop(_session) -> None:
+        try:
+            import policy_cache
+
+            policy_cache.invalidate_project(key)
+        except Exception:
+            pass
+
     try:
-        import policy_cache
-        policy_cache.invalidate_project(project_id)
+        sync_session = session.sync_session
+        # once=True so composing several mutations in one request registers a
+        # single drop, and it is removed after firing.
+        event.listen(sync_session, "after_commit", _drop, once=True)
     except Exception:
-        pass
+        # If the event cannot be bound for any reason, fall back to an
+        # immediate invalidate rather than leaving the cache stale.
+        try:
+            import policy_cache
+
+            policy_cache.invalidate_project(key)
+        except Exception:
+            pass

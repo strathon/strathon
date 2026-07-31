@@ -607,3 +607,44 @@ async def test_record_match_never_raises_on_bad_input(session, isolated_project)
         action="log",
         action_outcome="logged",
     )
+
+
+@pytest.mark.asyncio
+async def test_delete_invalidates_policy_cache_only_after_commit(session, isolated_project):
+    """A mutation must drop the ingest cache when it commits, not before.
+
+    Repositories do not commit -- the endpoint boundary does. If the cache were
+    dropped inside the transaction, a concurrent ingest could reload it from the
+    database and re-cache the pre-commit state (for a delete, the row about to
+    be removed), and that stale entry would survive until the TTL expired. The
+    drop is bound to the session's after-commit event, so it fires only once the
+    change is durable.
+    """
+    import policy_cache
+    from repositories.policies import create_policy, delete_policy
+
+    policy_cache.invalidate_all()
+
+    created = await create_policy(
+        session, isolated_project,
+        name="cache-race-probe", description="",
+        match_expression="true", action="log",
+    )
+    await session.commit()
+
+    # Warm the cache for this project.
+    key = str(isolated_project)
+    await policy_cache.get_policies(key, lambda: _noop_loader())
+    assert key in policy_cache._cache
+
+    # Delete, but do NOT commit yet: the cache must still be warm.
+    await delete_policy(session, isolated_project, created.id)
+    assert key in policy_cache._cache, "cache dropped before commit -- reload race is open"
+
+    # Commit: the after-commit hook now drops it.
+    await session.commit()
+    assert key not in policy_cache._cache, "cache not dropped after commit"
+
+
+async def _noop_loader():
+    return []
