@@ -558,6 +558,64 @@ receiver at Postgres directly, or run with a single receiver replica
 The same caveat applies to anything else in the codebase that uses
 session-scoped state on a Postgres connection.
 
+### Backup and restore
+
+All durable state lives in Postgres -- policies, spans, the audit chain, users,
+and keys. Backing up the database backs up everything you need to recover; the
+receiver and dashboard containers are stateless and are recreated from the
+image. If you run Redis for webhook delivery (STRATHON_WEBHOOK_REDIS_URL), it
+holds only the in-flight dispatch queue, not durable state: Postgres is the
+source of truth for delivery status, and the sweeper re-enqueues any pending
+delivery whose queued message was lost, so Redis does not need backing up. A
+backup is a standard `pg_dump`.
+
+```bash
+# Docker Compose: dump from the postgres service
+docker compose exec -T postgres \
+  pg_dump -U strathon -d strathon --format=custom --file=/tmp/strathon.dump
+docker compose cp postgres:/tmp/strathon.dump ./strathon-$(date +%F).dump
+
+# Bare-metal: dump from your Postgres host
+pg_dump -U strathon -d strathon --format=custom --file=strathon-$(date +%F).dump
+```
+
+The custom format (`--format=custom`) restores with `pg_restore` and supports
+parallel restore. For a scheduled backup, run the same command from cron or a
+sidecar and ship the file off the box; the encryption key and the other
+secrets are in your `.env` (or secrets manager), not in the dump, so store
+both together or the restored database cannot decrypt TOTP secrets.
+
+Restore into an empty database:
+
+```bash
+# Docker Compose: stop the app, keep Postgres running, restore, restart
+docker compose stop receiver dashboard
+docker compose cp ./strathon-2026-01-01.dump postgres:/tmp/restore.dump
+docker compose exec -T postgres \
+  pg_restore -U strathon -d strathon --clean --if-exists /tmp/restore.dump
+docker compose start receiver dashboard
+
+# Bare-metal
+pg_restore -U strathon -d strathon --clean --if-exists strathon-2026-01-01.dump
+```
+
+Two things specific to Strathon:
+
+- **Match the schema version.** Restore into a receiver running the same or a
+  newer release than the dump was taken from. A newer receiver runs any pending
+  migrations on start (`STRATHON_AUTO_MIGRATE=true`); an older receiver against
+  a newer dump is unsupported. Check the dump's version before a cross-release
+  restore.
+- **The audit hash chain stays intact** across a full-database dump and restore,
+  because the dump captures every row including the chain links and anchors.
+  Restoring a partial or row-filtered subset of `audit.events` breaks the
+  chain's continuity and the tamper-evidence verification will report a gap --
+  back up and restore the whole database, not selected tables.
+
+For point-in-time recovery beyond nightly dumps, use Postgres WAL archiving or a
+managed Postgres with continuous backup; nothing in Strathon precludes it, and
+the partitioned `spans` tables restore like any other.
+
 ## Related
 
 - [Getting started](getting-started.md): from running stack to first blocked call
