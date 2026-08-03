@@ -5,4 +5,4 @@
 # invisible to it and would rot with nothing to say so. The pip entry for
 # "/" in .github/dependabot.yml watches this file.
 bandit==1.9.4
-ruff==0.16.0
+ruff==0.16.1
