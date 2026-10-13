@@ -62,7 +62,7 @@ dev = [
     # green against the low end of every range below.
     "pytest>=9.1,<10",
     "pytest-asyncio>=1.4,<2",
-    "ruff>=0.16,<0.17",
+    "ruff>=0.16,<0.18",
     "mypy>=2.3,<2.4",
 ]
 
