@@ -70,7 +70,7 @@ dev = [
     # the two are kept identical so a contributor gets one answer.
     "pytest>=9.1,<10",
     "pytest-asyncio>=1.4,<2",
-    "ruff>=0.16,<0.17",
+    "ruff>=0.16,<0.18",
     "mypy>=2.3,<2.4",
 ]
 
